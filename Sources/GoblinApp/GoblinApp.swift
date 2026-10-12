@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct GoblinApp: App {
     @StateObject private var model = AppModel()
+    @NSApplicationDelegateAdaptor(GoblinApplicationDelegate.self) private var lifecycle
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -12,6 +13,7 @@ struct GoblinApp: App {
     }
 
     var body: some Scene {
+        let _ = attachLifecycle()
         MenuBarExtra {
             GoblinMenu(model: model)
         } label: {
@@ -30,6 +32,8 @@ struct GoblinApp: App {
         .defaultSize(width: 820, height: 620)
 
     }
+
+    private func attachLifecycle() { lifecycle.model = model }
 }
 
 private struct GoblinMenu: View {
@@ -41,6 +45,11 @@ private struct GoblinMenu: View {
             .keyboardShortcut(",")
         Button("History") { show("history") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
+        if let warning = model.diagnostics.warningMessage {
+            Text(warning)
+        }
+        Button("Diagnostics…") { model.settingsSelection = .diagnostics; show("settings") }
+        Button("Copy diagnostics") { model.diagnostics.copyDiagnostics() }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)

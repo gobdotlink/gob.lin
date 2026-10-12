@@ -98,6 +98,9 @@ struct HistoryView: View {
                 LabeledContent("Words", value: "\(entry.wordCount)")
                 LabeledContent("Audio", value: String(format: "%.1f seconds", entry.audioDuration))
                 LabeledContent("Model", value: entry.model.isEmpty ? "Not recorded" : entry.model)
+                if let warning = entry.processingWarning {
+                    Label(warning, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
                 Divider()
                 transcript("Final text", text: entry.finalText)
                 transcript("Raw text", text: entry.rawText)

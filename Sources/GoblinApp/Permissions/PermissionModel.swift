@@ -23,9 +23,12 @@ final class PermissionModel: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var onboarding: NSWindowController?
     private var awaitingSettingsReturn = false
+    private let monitorSystem: Bool
 
-    init() {
-        snapshot = Self.readSnapshot()
+    init(snapshot: Snapshot? = nil, monitorSystem: Bool = true) {
+        self.monitorSystem = monitorSystem
+        self.snapshot = snapshot ?? Self.readSnapshot()
+        guard monitorSystem else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -42,6 +45,7 @@ final class PermissionModel: ObservableObject {
     }
 
     func refresh() {
+        guard monitorSystem else { return }
         let old = snapshot
         let new = Self.readSnapshot()
         snapshot = new
@@ -63,6 +67,7 @@ final class PermissionModel: ObservableObject {
     func reportTapWorking() { staleAccessibility = false }
 
     func request(_ permission: Permission) {
+        guard monitorSystem else { return }
         switch permission {
         case .microphone:
             guard snapshot.microphone == .notDetermined else { openSettings(permission); return }
@@ -80,6 +85,7 @@ final class PermissionModel: ObservableObject {
     }
 
     func openSettings(_ permission: Permission) {
+        guard monitorSystem else { return }
         let pane: String
         switch permission {
         case .microphone: pane = "Privacy_Microphone"
@@ -92,6 +98,7 @@ final class PermissionModel: ObservableObject {
     }
 
     func showOnboarding() {
+        guard monitorSystem else { return }
         if onboarding == nil {
             let window = NSWindow(contentViewController: NSHostingController(rootView: OnboardingView(permissions: self)))
             window.title = "Welcome to gob.lin"

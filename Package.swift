@@ -18,5 +18,7 @@ let package = Package(
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),
         .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
         .executableTarget(name: "HistorySmoke", dependencies: ["GoblinCore", "CSQLite"], path: "Tests/HistorySmoke"),
+        .executableTarget(name: "DiagnosticsSmoke", dependencies: ["GoblinCore"], path: "Tests/DiagnosticsSmoke"),
+        .executableTarget(name: "EvaluationSmoke", dependencies: ["GoblinCore", "GoblinEngines"], path: "Tests/EvaluationSmoke", exclude: ["fixtures"]),
     ]
 )
