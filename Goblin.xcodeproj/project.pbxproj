@@ -1,0 +1,352 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 70;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
+		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
+		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
+		CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7BE4BFC2CC19C75E54AB9178 /* GoblinCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		968861AE69753BEE7B5E3F32 /* gob-5-signing-fixes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-5-signing-fixes"; path = .; sourceTree = SOURCE_ROOT; };
+		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7066797A92BA7CB67DF8AC45 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */,
+				388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0B79B8288F3B62DD712A2F97 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				968861AE69753BEE7B5E3F32 /* gob-5-signing-fixes */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		1D3517BA5AC6FD05E7E4C3EE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				451CAE065F64DB5E635BF53C /* Goblin.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E25ED717AB1306A299993066 /* GoblinApp */ = {
+			isa = PBXGroup;
+			children = (
+				975C736F378D2F622BC649E2 /* AppModel.swift */,
+				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
+			);
+			name = GoblinApp;
+			path = Sources/GoblinApp;
+			sourceTree = "<group>";
+		};
+		FF1388BE8154CBC9382C0E0E = {
+			isa = PBXGroup;
+			children = (
+				E25ED717AB1306A299993066 /* GoblinApp */,
+				0B79B8288F3B62DD712A2F97 /* Packages */,
+				1D3517BA5AC6FD05E7E4C3EE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6007B23C33CC4E4CE040C43F /* Goblin */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37EAD0CDA14835376034EB6E /* Build configuration list for PBXNativeTarget "Goblin" */;
+			buildPhases = (
+				313FF6E39B13762AED8D5D47 /* Sources */,
+				7066797A92BA7CB67DF8AC45 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Goblin;
+			packageProductDependencies = (
+				7BE4BFC2CC19C75E54AB9178 /* GoblinCore */,
+				278BF3C3B3724FBDBA6982BB /* GoblinEngines */,
+			);
+			productName = Goblin;
+			productReference = 451CAE065F64DB5E635BF53C /* Goblin.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		13D9E5AAD56A864FF4D0945F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					6007B23C33CC4E4CE040C43F = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 03AC47091E6CC9A5DF34B845 /* Build configuration list for PBXProject "Goblin" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = FF1388BE8154CBC9382C0E0E;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C711856069F2B73CAC1B9E60 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 70;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6007B23C33CC4E4CE040C43F /* Goblin */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		313FF6E39B13762AED8D5D47 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
+				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2A9D0656ED8DF96A3904B598 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		7CCF8E5575C8AD9F445D1FC8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C98D42A3352B9D30393E2DFC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_REQUIRED = YES;
+				CODE_SIGN_ENTITLEMENTS = Resources/Goblin.entitlements;
+				CODE_SIGN_IDENTITY = "gob.lin Local Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = GoblinApp;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.goblin.dictation;
+				PRODUCT_NAME = gob.lin;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		E29F5B5C31354302BA4A88BB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_REQUIRED = YES;
+				CODE_SIGN_ENTITLEMENTS = Resources/Goblin.entitlements;
+				CODE_SIGN_IDENTITY = "gob.lin Local Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = GoblinApp;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.goblin.dictation;
+				PRODUCT_NAME = gob.lin;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		03AC47091E6CC9A5DF34B845 /* Build configuration list for PBXProject "Goblin" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7CCF8E5575C8AD9F445D1FC8 /* Debug */,
+				2A9D0656ED8DF96A3904B598 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		37EAD0CDA14835376034EB6E /* Build configuration list for PBXNativeTarget "Goblin" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E29F5B5C31354302BA4A88BB /* Debug */,
+				C98D42A3352B9D30393E2DFC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C711856069F2B73CAC1B9E60 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		278BF3C3B3724FBDBA6982BB /* GoblinEngines */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GoblinEngines;
+		};
+		7BE4BFC2CC19C75E54AB9178 /* GoblinCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GoblinCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 13D9E5AAD56A864FF4D0945F /* Project object */;
+}

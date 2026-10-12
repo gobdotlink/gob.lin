@@ -1,0 +1,15 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and smoke-check package
+        run: scripts/smoke.sh
+      - name: Build Xcode app without local signing credentials
+        run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build

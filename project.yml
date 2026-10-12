@@ -1,0 +1,41 @@
+name: Goblin
+options:
+  deploymentTarget:
+    macOS: '26.0'
+packages:
+  GoblinPackages:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    MACOSX_DEPLOYMENT_TARGET: '26.0'
+targets:
+  Goblin:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/GoblinApp
+    dependencies:
+      - package: GoblinPackages
+        product: GoblinCore
+      - package: GoblinPackages
+        product: GoblinEngines
+    settings:
+      base:
+        PRODUCT_NAME: gob.lin
+        EXECUTABLE_NAME: GoblinApp
+        PRODUCT_BUNDLE_IDENTIFIER: app.goblin.dictation
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/Goblin.entitlements
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: gob.lin Local Development
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+        CODE_SIGNING_REQUIRED: YES
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: YES
+    scheme:
+      testTargets: []
