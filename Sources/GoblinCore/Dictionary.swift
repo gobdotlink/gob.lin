@@ -112,7 +112,7 @@ public enum DictionaryCorrector {
     public static func correct(_ text: String, entries: [DictionaryEntry], allowFuzzy: Bool = false) -> DictionaryCorrectionResult {
         let tokens = tokenize(text)
         let phrases = entries.flatMap { entry in
-            entry.aliases.map { (words: dictionaryKey($0).split(separator: " ").map(String.init), entry: entry) }
+            ([entry.spelling] + entry.aliases).map { (words: dictionaryKey($0).split(separator: " ").map(String.init), entry: entry) }
         }.sorted { $0.words.count > $1.words.count }
         var edits: [(Range<String.Index>, DictionaryCorrection)] = []
         var index = 0

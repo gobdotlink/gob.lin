@@ -7,6 +7,7 @@ import Testing
     #expect(DictionaryCorrector.correct("day review, then DAY REVIEW.", entries: entries).text == "Dev review, then DEV REVIEW.")
     #expect(DictionaryCorrector.correct("day, review; someday review", entries: entries).text == "day, review; someday review")
     #expect(DictionaryCorrector.correct("day\nreview", entries: entries).text == "Dev review")
+    #expect(DictionaryCorrector.correct("postgres and POSTGRES", entries: [DictionaryEntry(spelling: "Postgres")]).text == "Postgres and POSTGRES")
 }
 
 @Test func fuzzyNeverChangesCommonOrShortWordsAndIsOffByDefault() {
