@@ -1,9 +1,28 @@
-# GOB-22 integrated native Settings capture
+# Final integrated native UI capture
 
-Captured the actual SettingsView in a 960×840 NSWindow using `scripts/capture-settings.sh`. AppModel uses temporary history/dictionary storage, an isolated UserDefaults suite, a private pasteboard, synthetic device/diagnostic state, and disabled system services. AI cleanup stays disabled and Keychain inspection is disabled. No microphone capture, credential request, or permission change occurs.
+These images capture feature source `89b7e5fa51e8ccc0df200460ce9e7158c7441fa0`, including the reviewed Settings layout and wordmark fixes. Run `scripts/capture-settings.sh` from the repository to reproduce them on arm64 macOS 26.
 
-Seven window-only screenshots cover General, Audio, Dictionary, Tone, Post-processing, Overlay, and Diagnostics. The diagnostics timing and pending-engine warning are synthetic, explicitly supplied by the fixture. The capture never screenshots the desktop or another application.
+The fixture hosts the actual SettingsView in a 960×840 NSWindow. It uses temporary history/dictionary storage, an isolated UserDefaults suite, a private pasteboard, synthetic device/permission/diagnostic state, and disabled system services. Hit testing is disabled so capture cannot invoke settings actions, open files, copy diagnostics, or paste text. Keychain inspection and cleanup requests stay disabled. The configured example endpoint uses the reserved `.invalid` domain. No live recording or permission change occurs.
 
-The initial Dictionary screenshot confirms its List collapses inside the settings ScrollView even with three saved terms. This evidence triggered the separately reviewed GOB-18 layout fix; it must be recaptured after integration. Post-processing and Overlay grouped Forms show all controls at this window size. The sidebar tagline in this capture predates the GOB-19 sizing fix.
+All ten Settings sections were visually inspected. Source bindings were checked against AppModel's shared child models and the fixture's isolated preferences:
 
-Shutdown calls the real GoblinApplicationDelegate. Quit is delivered through a run-loop timer: calling AppKit terminate from a Swift MainActor task or a main-dispatch block can starve the delegate's asynchronous reply inside AppKit's nested loop. The final capture run exited normally (owned PID85102); the two earlier hung fixture PIDs were sampled and terminated individually. A common-mode timeout exits the fixture if any capture or termination stalls. No preview remains after the successful run.
+| Section | Capture and visible checks | Bound source |
+| --- | --- | --- |
+| General | [Shortcuts, feedback sounds, trailing space, permission button](gob-22-settings-general.png) | Shared HotkeyService/TextInsertionService; isolated defaultAppStorage |
+| Audio | [System-default picker, level meter, preview disabled pending permission](gob-22-settings-audio.png) | Shared AudioPreviewModel and PermissionModel; `audio.inputDeviceUID` |
+| Model | [Candidate visible and picker disabled while benchmark is pending](gob-22-settings-model.png) | Production benchmark placeholder; no adapter supplied |
+| Dictionary | [Three rows, aliases, Edit/Delete, Add/Import, footer](gob-22-settings-dictionary.png) | Shared DictionaryModel loaded from temporary versioned JSON |
+| Post-processing | [Disabled cleanup, example endpoint/model, empty key, Light, Save](gob-22-settings-rewrite.png) | RewriteSettingsStore using injected defaults; inspectKeychain=false |
+| Tone | [Three choices and previews, Formal selected](gob-22-settings-tone.png) | DictationTone.preferenceKey in isolated defaultAppStorage |
+| History | [Keep latest 500, 30 days, deletion explanation, Apply](gob-22-settings-history.png) | Shared HistoryModel.retention initialized from isolated JSON preferences |
+| Overlay | [Bottom position, complete explanation and Preview control](gob-22-settings-overlay.png) | `overlayPosition` in isolated defaultAppStorage; shared controller |
+| Diagnostics | [Pending-model warning, environment, stage timings, recent error, Copy](gob-22-settings-diagnostics.png) | Same shared DiagnosticsModel used by the menu; synthetic 180 ms ASR / 12 ms rewrite |
+| About | [Full wordmark/tagline, version, data/log buttons and bundled licences](gob-22-settings-about.png) | GoblinMetadata and GoblinBrand's actual bundled assets |
+
+The full `$ sudo autism --unmuted` tagline is visible throughout. The original collapsed Dictionary capture is preserved as [before](gob-22-settings-dictionary-before.png); the default Dictionary image now shows the fixed list. The fixture asserts that all SettingsSection cases are covered and the three dictionary terms loaded successfully.
+
+[Branding and menu](gob-19-brand-menu-final.png) shows the production GoblinWordmark, the four actual GoblinBrand.menuImage states, and the exact production GoblinMenu view. The build script extracts the menu into the ignored build directory with only its type visibility changed; its content and bindings stay unchanged. The menu is hosted in an inspection window, so this image does not claim to test macOS's MenuBarExtra popup or menu actions.
+
+Five images host the production DictationOverlay with explicit synthetic state: [arming](gob-12-overlay-arming-final.png), [listening](gob-12-overlay-listening-final.png), [transcribing](gob-12-overlay-transcribing-final.png), [polishing](gob-12-overlay-polishing-final.png), and [error](gob-12-overlay-error-final.png). Each state uses a fresh native host; transitions are not exercised by these captures. The waveform and text are supplied by the fixture. These show the native view, goblin/hands assets, captions, and cancel control; they do not demonstrate real capture, recognition, physical display placement, Spaces, or focus behavior.
+
+Every image captures only the owned native window. The desktop and private application windows are excluded. The fixture cleans up its suite/data, stops its AppModel, and requests quit through a run-loop timer using the real GoblinApplicationDelegate. A common-mode timeout prevents a stalled capture from leaving an instance open. The final capture process (owned PID14484) exited normally with status zero and was verified absent afterward.
