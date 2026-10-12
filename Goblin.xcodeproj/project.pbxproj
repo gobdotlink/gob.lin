@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
 		17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */; };
 		328878B095DD6E130364C893 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = DDB1197B94259F10AEFE3EFC /* Assets */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
@@ -20,13 +21,14 @@
 
 /* Begin PBXFileReference section */
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySettingsView.swift; sourceTree = "<group>"; };
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		8C7DC821C59D20E3BD8E9846 /* Goblin.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Goblin.icns; sourceTree = "<group>"; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
-		C2A1CCB2F4CA682F4B315EF4 /* gob-3-merge-resolution */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-3-merge-resolution"; path = .; sourceTree = SOURCE_ROOT; };
+		B2C84042CF16ED83D68D625D /* gob-4-merge-resolution */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-4-merge-resolution"; path = .; sourceTree = SOURCE_ROOT; };
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -46,7 +48,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				C2A1CCB2F4CA682F4B315EF4 /* gob-3-merge-resolution */,
+				B2C84042CF16ED83D68D625D /* gob-4-merge-resolution */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -80,6 +82,7 @@
 			isa = PBXGroup;
 			children = (
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
+				5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
@@ -177,6 +180,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
+				04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
