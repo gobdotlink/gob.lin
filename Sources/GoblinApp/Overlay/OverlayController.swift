@@ -42,6 +42,7 @@ final class OverlayController {
     private var sessionID = UUID()
     private var hideTask: Task<Void, Never>?
     private var screen: NSScreen?
+    private var displayObserver: NSObjectProtocol?
     var position: OverlayPosition = .bottom { didSet { reposition() } }
 
     init() {
@@ -62,6 +63,10 @@ final class OverlayController {
             self.panel.setContentSize(CGSize(width: min(size.width, max(240, available.width - 32)),
                 height: min(size.height, max(100, available.height - 32))))
             self.reposition()
+        }
+        displayObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reposition() }
         }
     }
 
@@ -96,10 +101,12 @@ final class OverlayController {
         if let session, session != sessionID { return }
         hideTask?.cancel()
         model.phase = .hidden
+        sessionID = UUID()
         panel.orderOut(nil)
     }
 
     func hide(after seconds: Double, session: UUID) {
+        guard session == sessionID else { return }
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(max(0, seconds))) } catch { return }
@@ -108,8 +115,18 @@ final class OverlayController {
         }
     }
 
+    func shutdown() {
+        hide()
+        if let displayObserver { NotificationCenter.default.removeObserver(displayObserver) }
+        displayObserver = nil
+    }
+
     private func reposition() {
-        guard let screen = screen ?? NSScreen.main else { return }
+        let number = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        guard let screen = NSScreen.screens.first(where: {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber) == number
+        }) ?? NSScreen.main else { return }
+        self.screen = screen
         let visible = screen.visibleFrame
         let x = visible.midX - panel.frame.width / 2
         let y = position == .bottom ? visible.minY + 18 : visible.maxY - panel.frame.height - 18
