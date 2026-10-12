@@ -14,8 +14,9 @@ let package = Package(
         .systemLibrary(name: "CSQLite", providers: [.apt(["libsqlite3-dev"])]),
         .target(name: "GoblinCore", dependencies: ["CSQLite"]),
         .target(name: "GoblinEngines", dependencies: ["GoblinCore"]),
-        .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"]),
+        .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),
+        .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
         .executableTarget(name: "HistorySmoke", dependencies: ["GoblinCore", "CSQLite"], path: "Tests/HistorySmoke"),
         .executableTarget(name: "EvaluationSmoke", dependencies: ["GoblinCore", "GoblinEngines"], path: "Tests/EvaluationSmoke", exclude: ["fixtures"]),
     ]

@@ -40,6 +40,8 @@ app='.build/app/gob.lin.app'
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary_directory/GoblinApp" "$app/Contents/MacOS/GoblinApp"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+cp -R Sources/GoblinApp/Assets "$app/Contents/Resources/"
+cp Resources/Goblin.icns "$app/Contents/Resources/"
 
 # Pin to the certificate public identity, not the changing executable hash.
 requirement="designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\""

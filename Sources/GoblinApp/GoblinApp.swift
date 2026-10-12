@@ -8,11 +8,15 @@ struct GoblinApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
+        GoblinBrand.registerFonts()
     }
 
     var body: some Scene {
-        MenuBarExtra(GoblinMetadata.name, systemImage: "waveform") {
+        MenuBarExtra {
             GoblinMenu(model: model)
+        } label: {
+            Image(nsImage: GoblinBrand.menuImage(model.mascotState)).renderingMode(.original)
+                .accessibilityLabel("gob.lin " + model.mascotState.rawValue)
         }
 
         Window("gob.lin Settings", id: "settings") {
@@ -20,10 +24,37 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 640, height: 440)
 
+        Window("gob.lin Dictionary", id: "dictionary") {
+            DictionarySettingsView()
+        }
+        .defaultSize(width: 720, height: 460)
+
+        Window("gob.lin Tone", id: "tone") {
+            ToneSettingsView()
+        }
+        .defaultSize(width: 600, height: 480)
+
+        Window("gob.lin AI Cleanup", id: "rewrite") {
+            RewriteSettingsView()
+        }
+        .defaultSize(width: 640, height: 620)
+
         Window("gob.lin History", id: "history") {
             HistoryView(model: model.history)
         }
         .defaultSize(width: 720, height: 480)
+
+        Window("gob.lin Shortcuts", id: "shortcuts") {
+            ShortcutSettingsView(service: model.hotkeys)
+        }
+        .defaultSize(width: 620, height: 520)
+        .windowResizability(.contentSize)
+
+        Window("gob.lin Text insertion", id: "insertion") {
+            InsertionSettingsView(service: model.insertion)
+        }
+        .defaultSize(width: 620, height: 450)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -35,9 +66,16 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
+        Button("Dictionary…") { show("dictionary") }
+        Button("Tone…") { show("tone") }
+        Button("AI cleanup…") { show("rewrite") }
+        Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
+        Button("Shortcuts…") { show("shortcuts") }
+        Button("Text insertion…") { show("insertion") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
+        ClipboardRecoveryMenu(service: model.insertion)
         Divider()
         Button("Quit gob.lin") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
@@ -49,10 +87,19 @@ private struct GoblinMenu: View {
     }
 }
 
+private struct ClipboardRecoveryMenu: View {
+    @ObservedObject var service: TextInsertionService
+    var body: some View {
+        if service.hasRecoveryClipboard {
+            Button("Restore previous clipboard") { service.restorePreviousClipboard() }.disabled(service.busy)
+        }
+    }
+}
+
 private struct SettingsShell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(GoblinMetadata.name).font(.largeTitle.bold())
+            GoblinWordmark()
             Text("Native dictation for your Mac.").foregroundStyle(.secondary)
             Divider()
             LabeledContent("Version", value: GoblinMetadata.version)
@@ -62,5 +109,8 @@ private struct SettingsShell: View {
             Spacer()
         }
         .padding(28)
+        .background(GoblinBrand.background)
+        .tint(GoblinBrand.accent)
+        .preferredColorScheme(.dark)
     }
 }
