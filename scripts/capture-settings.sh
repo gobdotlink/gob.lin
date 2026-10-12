@@ -33,4 +33,4 @@ cat > "$preview/Contents/Info.plist" <<'PLIST'
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
 PLIST
-"$preview/Contents/MacOS/SettingsCapture" "${1:-docs/screenshots}"
+"$preview/Contents/MacOS/SettingsCapture" "${1:-docs/screenshots}" "${@:2}"
