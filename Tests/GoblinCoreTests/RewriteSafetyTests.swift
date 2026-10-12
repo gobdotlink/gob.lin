@@ -102,6 +102,9 @@ struct RewriteSafetyTests {
         #expect(RewriteStubState.shared.received().count == 1)
         RewriteStubState.shared.prepare([StubReply(status: 200, body: #"{"choices":[]}"#)])
         #expect(await client().rewrite("Raw dictation", settings: settings, apiKey: "fixture-key").failure == .invalidResponse)
+        RewriteStubState.shared.prepare([StubReply(status: 200, body: #"{"choices":[{"finish_reason":"length","message":{"content":"Cut off"}}]}"#)])
+        let truncated = await client().rewrite("Raw dictation", settings: settings, apiKey: "fixture-key")
+        #expect(truncated.failure == .invalidResponse && truncated.outputText == "Raw dictation" && truncated.warning == "polish failed — pasted raw" && !truncated.wasRewritten)
         var disabled = settings
         disabled.cleanup = .none
         RewriteStubState.shared.prepare([])
