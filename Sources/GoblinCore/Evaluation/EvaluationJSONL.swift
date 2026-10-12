@@ -12,7 +12,7 @@ public enum EvaluationJSONL {
         guard var text = String(data: data, encoding: .utf8) else { throw EvaluationError.invalidRecord("JSONL must be UTF-8") }
         if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
         var records: [EvaluationRecord] = []
-        for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+        for (index, line) in text.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" }).enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { continue }
             do { records.append(try JSONDecoder().decode(EvaluationRecord.self, from: Data(trimmed.utf8))) }

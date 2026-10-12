@@ -88,7 +88,7 @@ private struct GoblinCommands {
                         }
                         record = try await transcribedRecord(file, id: entry.id.uuidString)
                     }
-                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(record))
+                    try FileHandle.standardOutput.write(contentsOf: try EvaluationJSONL.encode(record))
                 }
                 if entries.count < 200 { break }
                 offset += entries.count
@@ -104,14 +104,14 @@ private struct GoblinCommands {
                 for record in records {
                     var exported = record
                     exported.source = "recorded_transcript"
-                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(exported))
+                    try FileHandle.standardOutput.write(contentsOf: try EvaluationJSONL.encode(exported))
                 }
             } else {
                 let extensions = Set(["wav", "aiff", "aif", "m4a", "mp3", "caf", "flac"])
                 let audioFiles = files.filter { extensions.contains($0.pathExtension.lowercased()) }
                 guard !audioFiles.isEmpty else { throw CommandError.usage("No audio recordings found in this directory.") }
                 for file in audioFiles {
-                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(await transcribedRecord(file, id: file.lastPathComponent)))
+                    try FileHandle.standardOutput.write(contentsOf: try EvaluationJSONL.encode(await transcribedRecord(file, id: file.lastPathComponent)))
                 }
             }
         }
@@ -155,7 +155,7 @@ private struct GoblinCommands {
     private func writeJSON<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        FileHandle.standardOutput.write(try encoder.encode(value) + Data([0x0A]))
+        try FileHandle.standardOutput.write(contentsOf: try encoder.encode(value) + Data([0x0A]))
     }
 
     private static let help = """
