@@ -6,6 +6,7 @@
     <key>CFBundleDisplayName</key><string>gob.lin</string>
     <key>CFBundleExecutable</key><string>GoblinApp</string>
     <key>CFBundleIdentifier</key><string>app.goblin.dictation</string>
+    <key>CFBundleIconFile</key><string>Goblin</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>gob.lin</string>
     <key>CFBundlePackageType</key><string>APPL</string>
