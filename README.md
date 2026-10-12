@@ -6,7 +6,62 @@ An independently implemented native macOS dictation app.
 
 The roadmap and acceptance criteria live in [gob.lin v0.1 — minimal app on Linear](https://linear.app/goblink/project/goblin-v01-minimal-app-5d9bf4e3bece).
 
-This repository currently contains the project overview. Application code, build tooling, and tests are still to be implemented.
+The foundation includes the native menu bar app, Swift packages, command-line
+companion, Xcode project, stable local signing, and a macOS build workflow.
+
+## Build and run
+
+Requires macOS 26+ and Xcode 26.3+ (Swift 6.2). No third-party dependencies.
+The signing scripts use the tools included with macOS; Homebrew is not required.
+
+```sh
+scripts/build.sh
+open .build/app/gob.lin.app
+```
+
+The first build creates a dedicated `gob.lin Local Development` signing
+certificate in your login keychain. macOS may ask you to approve its trust and
+codesign access. Keep that certificate and private key across builds: the bundle
+identifier and certificate-based designated requirement stay stable, so macOS
+can preserve microphone and Accessibility grants. The app runs without a Dock
+icon; its menu contains Settings, History, Paste last transcript, and Quit.
+
+If an Accessibility grant becomes stale, quit gob.lin, run
+`tccutil reset Accessibility app.goblin.dictation`, then grant it again in
+System Settings → Privacy & Security → Accessibility. This resets only gob.lin's
+grant. Build scripts never reset or request privacy permissions.
+
+For an existing local or Developer ID certificate:
+
+```sh
+GOBLIN_SIGNING_IDENTITY='Your certificate name' scripts/build.sh
+```
+
+Ad-hoc signing is deliberately rejected. Local certificates are for development;
+public distribution requires Developer ID signing and notarization. The app is
+not sandboxed because dictation must interact with other applications through
+Accessibility. Hardened runtime and the microphone entitlement are enabled.
+
+To inspect or work in Xcode, open `Goblin.xcodeproj`; run
+`scripts/setup-signing.sh` first. The committed project builds without generators.
+If its structure changes, `project.yml` is the XcodeGen source of truth.
+
+```sh
+swift build                       # unsigned binaries for development and CI
+swift run goblin --help
+scripts/smoke.sh                   # package, CLI, and bundle metadata checks
+```
+
+## Source layout
+
+- `Sources/GoblinCore`: portable Swift domain and pipeline code; no AppKit.
+- `Sources/GoblinEngines`: shared `SpeechEngine` protocol and engine adapters.
+- `Sources/GoblinApp`: SwiftUI/AppKit menu bar app and windows.
+- `Sources/GoblinCLI`: `goblin` command-line companion.
+- `Resources`: app metadata and hardened-runtime entitlements.
+
+The engine protocol accepts a local audio file and returns recognized text.
+No engine or live dictation is bundled until the speech benchmark selects one.
 
 ## Planned architecture
 
@@ -42,3 +97,8 @@ The starting tickets are [GOB-5: project skeleton](https://linear.app/goblink/is
 - `reference/wispr flow/screenshots/`: dictation history, insights, dictionary, snippets, tone, and cleanup controls.
 
 These screenshots are local research material and are excluded from version control.
+
+## License
+
+Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). No third-party source,
+fonts, or model weights are bundled in this foundation.
