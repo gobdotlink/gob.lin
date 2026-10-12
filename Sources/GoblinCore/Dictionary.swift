@@ -111,12 +111,19 @@ public enum DictionaryCorrector {
     // Fuzzy correction stays opt-in until the real replay establishes zero ordinary-word regressions.
     public static func correct(_ text: String, entries: [DictionaryEntry], allowFuzzy: Bool = false) -> DictionaryCorrectionResult {
         let tokens = tokenize(text)
+        let protected = DictationTextProtection.ranges(in: text)
         let phrases = entries.flatMap { entry in
-            ([entry.spelling] + entry.aliases).map { (words: dictionaryKey($0).split(separator: " ").map(String.init), entry: entry) }
+            entry.aliases.map { (words: dictionaryKey($0).split(separator: " ").map(String.init), entry: entry) }
         }.sorted { $0.words.count > $1.words.count }
+        let canonicalPhrases = entries.map { dictionaryKey($0.spelling).split(separator: " ").map(String.init) }
+            .sorted { $0.count > $1.count }
         var edits: [(Range<String.Index>, DictionaryCorrection)] = []
         var index = 0
         while index < tokens.count {
+            if DictationTextProtection.contains(tokens[index].range, in: text, ranges: protected) {
+                index += 1
+                continue
+            }
             var matched = false
             for phrase in phrases where !phrase.words.isEmpty && index + phrase.words.count <= tokens.count {
                 let slice = Array(tokens[index..<(index + phrase.words.count)])
@@ -125,6 +132,7 @@ public enum DictionaryCorrector {
                     text[left.range.upperBound..<right.range.lowerBound].allSatisfy(\.isWhitespace)
                 }) else { continue }
                 let range = slice[0].range.lowerBound..<slice[slice.count - 1].range.upperBound
+                guard !DictationTextProtection.contains(range, in: text, ranges: protected) else { continue }
                 let original = String(text[range])
                 let replacement = aliasCapitalization(original, preferred: phrase.entry.spelling)
                 if original != replacement {
@@ -135,11 +143,25 @@ public enum DictionaryCorrector {
                 break
             }
             if matched { continue }
+            // An existing preferred spelling is a no-change lockout, never an implicit alias or fuzzy target.
+            for words in canonicalPhrases where !words.isEmpty && index + words.count <= tokens.count {
+                let slice = Array(tokens[index..<(index + words.count)])
+                guard slice.map(\.key) == words,
+                      zip(slice, slice.dropFirst()).allSatisfy({ left, right in
+                          text[left.range.upperBound..<right.range.lowerBound].allSatisfy(\.isWhitespace)
+                      }) else { continue }
+                let range = slice[0].range.lowerBound..<slice[slice.count - 1].range.upperBound
+                guard !DictationTextProtection.contains(range, in: text, ranges: protected) else { continue }
+                index += slice.count
+                matched = true
+                break
+            }
+            if matched { continue }
             let token = tokens[index]
-            if allowFuzzy, token.key.count >= 5, token.key.allSatisfy(\.isLetter), !commonEnglish.contains(token.key) {
+            if allowFuzzy, text[token.range].count >= 5, token.key.allSatisfy(\.isLetter), !commonEnglish.contains(token.key) {
                 let candidates = entries.filter {
                     let key = dictionaryKey($0.spelling)
-                    return key.count >= 5 && key.allSatisfy(\.isLetter) && key != token.key && oneEditApart(token.key, key)
+                    return $0.spelling.count >= 5 && key.allSatisfy(\.isLetter) && key != token.key && oneEditApart(token.key, key)
                 }
                 if candidates.count == 1, let entry = candidates.first {
                     let original = String(text[token.range])
@@ -181,16 +203,17 @@ public enum DictionaryCorrector {
 
     private static func aliasCapitalization(_ original: String, preferred: String) -> String {
         let letters = original.filter(\.isLetter)
-        if !letters.isEmpty, letters == letters.uppercased() { return preferred.uppercased() }
-        if original.first?.isUppercase == true { return uppercasingFirst(preferred) }
+        if letters.contains(where: \.isUppercase), letters == letters.uppercased() { return preferred.uppercased() }
+        if original.first?.isUppercase == true, preferred == preferred.lowercased() { return uppercasingFirst(preferred) }
         return preferred
     }
 
     private static func fuzzyCapitalization(_ original: String, preferred: String) -> String {
-        if original == original.uppercased() { return preferred.uppercased() }
+        if original.contains(where: \.isUppercase), original == original.uppercased() { return preferred.uppercased() }
+        if preferred.contains(where: \.isLowercase), preferred.dropFirst().contains(where: \.isUppercase) { return preferred }
         if original == original.lowercased() { return preferred.lowercased() }
         if original.first?.isUppercase == true, original.dropFirst() == original.dropFirst().lowercased() {
-            return uppercasingFirst(preferred.lowercased())
+            return preferred == preferred.lowercased() ? uppercasingFirst(preferred) : preferred
         }
         return original // Mixed case carries information that a guess must not erase.
     }
