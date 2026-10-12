@@ -34,7 +34,7 @@ struct ShortcutSettingsView: View {
     }
 }
 
-private struct ShortcutRecorder: View {
+struct ShortcutRecorder: View {
     @ObservedObject var service: HotkeyService
     @State private var monitor: Any?
     @State private var candidate: HotkeyShortcut?
