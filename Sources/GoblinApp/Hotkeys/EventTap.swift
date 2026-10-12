@@ -30,7 +30,7 @@ final class HotkeyEventTap: @unchecked Sendable {
 
     func configure(recording: Bool, suspended: Bool, keyedFallback: Bool) {
         lock.lock()
-        if suspended || suspended != self.suspended { held = false }
+        if suspended || suspended != self.suspended || keyedFallback != self.keyedFallback { held = false }
         self.recording = recording
         self.suspended = suspended
         self.keyedFallback = keyedFallback

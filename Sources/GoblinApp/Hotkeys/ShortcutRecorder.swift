@@ -52,22 +52,31 @@ struct ShortcutRecorder: View {
             if !hint.isEmpty { Text(hint).font(.caption).foregroundStyle(.orange) }
         }
         .padding(16).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        .onChange(of: service.recorderActive) { _, active in
+            if !active { removeMonitor() }
+        }
         .onDisappear { end() }
     }
 
     private func begin() {
+        removeMonitor()
         candidate = nil
         hint = ""
         service.setRecorderActive(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            guard MainActor.assumeIsolated({ service.recorderActive }) else { return event }
             MainActor.assumeIsolated { receive(event) }
             return nil
         }
     }
 
     private func end() {
-        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        removeMonitor()
         service.setRecorderActive(false)
+    }
+
+    private func removeMonitor() {
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
         candidate = nil
     }
 
@@ -94,6 +103,9 @@ struct ShortcutRecorder: View {
         case .maskControl: candidate = HotkeyShortcut(keyCode: nil, modifiers: flags.rawValue, modifier: .control, keyLabel: "Control")
         case .maskShift: candidate = HotkeyShortcut(keyCode: nil, modifiers: flags.rawValue, modifier: .shift, keyLabel: "Shift")
         default: candidate = nil
+        }
+        if let candidate, !(candidate.isPrimaryModifierKey(event.keyCode) && candidate.modifierIsDown(flags: flags)) {
+            self.candidate = nil
         }
     }
 }
