@@ -115,6 +115,7 @@ final class AppModel: ObservableObject {
 
     func refreshConfiguration() {
         guard !shuttingDown else { return }
+        overlay.position = OverlayPosition(rawValue: defaults.string(forKey: "overlayPosition") ?? "") ?? .bottom
         let settings = RewriteSettingsStore.load(defaults: defaults)
         if settings.enabled && settings.cleanup != .none {
             history.rewriteAction = { [weak self] entry, _ in
