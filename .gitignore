@@ -1,0 +1,17 @@
+.DS_Store
+
+# Local product research
+reference/
+
+# Swift and Xcode local build state
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Local credentials
+.env
+.env.*
+!.env.example
+*.p12
