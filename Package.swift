@@ -11,9 +11,12 @@ let package = Package(
         .executable(name: "goblin", targets: ["GoblinCLI"]),
     ],
     targets: [
-        .target(name: "GoblinCore"),
+        .systemLibrary(name: "CSQLite", providers: [.apt(["libsqlite3-dev"])]),
+        .target(name: "GoblinCore", dependencies: ["CSQLite"]),
         .target(name: "GoblinEngines", dependencies: ["GoblinCore"]),
-        .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"]),
+        .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),
+        .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
+        .executableTarget(name: "HistorySmoke", dependencies: ["GoblinCore", "CSQLite"], path: "Tests/HistorySmoke"),
     ]
 )

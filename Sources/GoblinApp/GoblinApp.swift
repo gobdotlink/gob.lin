@@ -8,11 +8,15 @@ struct GoblinApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
+        GoblinBrand.registerFonts()
     }
 
     var body: some Scene {
-        MenuBarExtra(GoblinMetadata.name, systemImage: "waveform") {
+        MenuBarExtra {
             GoblinMenu(model: model)
+        } label: {
+            Image(nsImage: GoblinBrand.menuImage(model.mascotState)).renderingMode(.original)
+                .accessibilityLabel("gob.lin " + model.mascotState.rawValue)
         }
 
         Window("gob.lin Settings", id: "settings") {
@@ -20,8 +24,23 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 640, height: 440)
 
+        Window("gob.lin Dictionary", id: "dictionary") {
+            DictionarySettingsView()
+        }
+        .defaultSize(width: 720, height: 460)
+
+        Window("gob.lin Tone", id: "tone") {
+            ToneSettingsView()
+        }
+        .defaultSize(width: 600, height: 480)
+
+        Window("gob.lin AI Cleanup", id: "rewrite") {
+            RewriteSettingsView()
+        }
+        .defaultSize(width: 640, height: 620)
+
         Window("gob.lin History", id: "history") {
-            HistoryShell()
+            HistoryView(model: model.history)
         }
         .defaultSize(width: 720, height: 480)
 
@@ -47,6 +66,9 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
+        Button("Dictionary…") { show("dictionary") }
+        Button("Tone…") { show("tone") }
+        Button("AI cleanup…") { show("rewrite") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         Button("Shortcuts…") { show("shortcuts") }
         Button("Text insertion…") { show("insertion") }
@@ -77,7 +99,7 @@ private struct ClipboardRecoveryMenu: View {
 private struct SettingsShell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(GoblinMetadata.name).font(.largeTitle.bold())
+            GoblinWordmark()
             Text("Native dictation for your Mac.").foregroundStyle(.secondary)
             Divider()
             LabeledContent("Version", value: GoblinMetadata.version)
@@ -87,12 +109,8 @@ private struct SettingsShell: View {
             Spacer()
         }
         .padding(28)
-    }
-}
-
-private struct HistoryShell: View {
-    var body: some View {
-        ContentUnavailableView("No dictations yet", systemImage: "text.bubble", description: Text("Your completed dictations will appear here."))
-            .padding(28)
+        .background(GoblinBrand.background)
+        .tint(GoblinBrand.accent)
+        .preferredColorScheme(.dark)
     }
 }

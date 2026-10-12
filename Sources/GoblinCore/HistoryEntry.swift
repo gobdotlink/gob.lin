@@ -1,0 +1,93 @@
+import Foundation
+
+public struct DictationTimings: Codable, Sendable, Equatable {
+    public var captureMilliseconds: Double
+    public var trimMilliseconds: Double
+    public var asrMilliseconds: Double
+    public var rewriteMilliseconds: Double
+    public var insertionMilliseconds: Double
+
+    public init(captureMilliseconds: Double = 0, trimMilliseconds: Double = 0,
+                asrMilliseconds: Double = 0, rewriteMilliseconds: Double = 0,
+                insertionMilliseconds: Double = 0) {
+        self.captureMilliseconds = captureMilliseconds
+        self.trimMilliseconds = trimMilliseconds
+        self.asrMilliseconds = asrMilliseconds
+        self.rewriteMilliseconds = rewriteMilliseconds
+        self.insertionMilliseconds = insertionMilliseconds
+    }
+
+    public var processingMilliseconds: Double {
+        trimMilliseconds + asrMilliseconds + rewriteMilliseconds + insertionMilliseconds
+    }
+}
+
+public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
+    public var id: UUID
+    public var rawText: String
+    public var finalText: String
+    public var tone: String
+    public var polished: Bool
+    public var targetBundleIdentifier: String?
+    public var targetApplicationName: String?
+    public var createdAt: Date
+    public var completedAt: Date
+    public var audioDuration: Double
+    public var wordCount: Int
+    public var model: String
+    public var latencies: DictationTimings
+    public var starred: Bool
+    public internal(set) var audioFilename: String?
+
+    public init(id: UUID = UUID(), rawText: String, finalText: String, tone: String = "formal",
+                polished: Bool = false, targetBundleIdentifier: String? = nil,
+                targetApplicationName: String? = nil, createdAt: Date = Date(),
+                completedAt: Date = Date(), audioDuration: Double = 0, model: String = "",
+                latencies: DictationTimings = DictationTimings(), starred: Bool = false) {
+        self.id = id
+        self.rawText = rawText
+        self.finalText = finalText
+        self.tone = tone
+        self.polished = polished
+        self.targetBundleIdentifier = targetBundleIdentifier
+        self.targetApplicationName = targetApplicationName
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.audioDuration = audioDuration
+        self.wordCount = finalText.split(whereSeparator: { $0.isWhitespace }).count
+        self.model = model
+        self.latencies = latencies
+        self.starred = starred
+        self.audioFilename = nil
+    }
+}
+
+public struct HistoryRetention: Codable, Sendable, Equatable {
+    public var maximumUnstarredCount: Int?
+    public var maximumAgeDays: Int?
+
+    public init(maximumUnstarredCount: Int? = nil, maximumAgeDays: Int? = nil) {
+        self.maximumUnstarredCount = maximumUnstarredCount
+        self.maximumAgeDays = maximumAgeDays
+    }
+}
+
+public enum HistoryError: Error, LocalizedError, Sendable {
+    case database(String)
+    case unsupportedSchema(Int)
+    case unsafeAudioPath
+    case invalidRetention
+    case entryNotFound
+    case invalidAudioFile
+
+    public var errorDescription: String? {
+        switch self {
+        case .database(let message): "History database: \(message)"
+        case .unsupportedSchema(let version): "History was created by a newer gob.lin (schema \(version)). Update the app; your history has been left untouched."
+        case .unsafeAudioPath: "History refused an audio path outside its data folder."
+        case .invalidRetention: "Retention count must be zero or greater, and age must be at least one day."
+        case .entryNotFound: "This dictation is no longer in History."
+        case .invalidAudioFile: "The original capture must be a regular local file."
+        }
+    }
+}
