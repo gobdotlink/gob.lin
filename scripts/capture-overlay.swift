@@ -8,7 +8,6 @@ struct OverlayCapture {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         GoblinBrand.registerFonts()
-        let previous = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let overlay = OverlayController()
         let session = overlay.begin { overlay.hide() }
         overlay.update(.listening, committed: "Ship the small things. Keep your hands on the keyboard.",
@@ -16,7 +15,7 @@ struct OverlayCapture {
         Task { @MainActor in
             do {
                 try await Task.sleep(for: .milliseconds(800))
-                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == previous else {
+                guard app.windows.allSatisfy({ !$0.canBecomeKey }) else {
                     throw CaptureError.focusChanged
                 }
                 guard let view = app.windows.first(where: { $0.title == "gob.lin Dictation" })?.contentView,
@@ -31,7 +30,7 @@ struct OverlayCapture {
                 overlay.update(.listening, level: .nan, session: next)
                 assert(overlay.model.audioLevel == 0)
                 overlay.hide(session: next)
-                print("Native overlay captured; focus unchanged, stale hide and non-finite input checks passed.")
+                print("Native overlay captured; non-key panel, stale hide and non-finite input checks passed.")
             } catch {
                 fputs("Overlay capture failed: \(error)\n", stderr)
                 exit(1)
