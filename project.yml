@@ -14,7 +14,13 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Sources/GoblinApp
+      - path: Sources/GoblinApp
+        excludes: [Assets]
+      - path: Sources/GoblinApp/Assets
+        type: folder
+        buildPhase: resources
+      - path: Resources/Goblin.icns
+        buildPhase: resources
     dependencies:
       - package: GoblinPackages
         product: GoblinCore

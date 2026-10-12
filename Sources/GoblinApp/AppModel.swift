@@ -2,6 +2,8 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
+    let overlay = OverlayController()
+    @Published var mascotState: MascotState = .idle
     @Published var lastTranscript: String?
     var pasteTranscript: ((String) -> Void)?
 
