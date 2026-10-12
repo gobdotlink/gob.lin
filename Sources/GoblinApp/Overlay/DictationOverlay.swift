@@ -49,7 +49,7 @@ struct DictationOverlay: View {
                     .frame(width: 44, height: 59).offset(y: -26).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
-        .padding(8).frame(maxWidth: 456)
+        .padding(8).frame(width: 456).fixedSize(horizontal: false, vertical: true)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.audioLevel)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { model.sizeChanged($0) }
         .preferredColorScheme(.dark)
