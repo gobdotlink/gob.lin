@@ -37,13 +37,14 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
     public var model: String
     public var latencies: DictationTimings
     public var starred: Bool
+    public var processingWarning: String?
     public internal(set) var audioFilename: String?
 
     public init(id: UUID = UUID(), rawText: String, finalText: String, tone: String = "formal",
                 polished: Bool = false, targetBundleIdentifier: String? = nil,
                 targetApplicationName: String? = nil, createdAt: Date = Date(),
                 completedAt: Date = Date(), audioDuration: Double = 0, model: String = "",
-                latencies: DictationTimings = DictationTimings(), starred: Bool = false) {
+                latencies: DictationTimings = DictationTimings(), starred: Bool = false, processingWarning: String? = nil) {
         self.id = id
         self.rawText = rawText
         self.finalText = finalText
@@ -58,6 +59,7 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
         self.model = model
         self.latencies = latencies
         self.starred = starred
+        self.processingWarning = processingWarning
         self.audioFilename = nil
     }
 }

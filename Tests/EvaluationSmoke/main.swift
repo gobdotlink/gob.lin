@@ -61,6 +61,21 @@ struct EvaluationSmoke {
         let run = try await pipeline.transcribe(file)
         check(run.rawText == run.finalText && run.postprocessingError != nil, "Rewrite failure must preserve raw text and report its error")
         check(run.timings.asrMilliseconds >= 0 && run.timings.rewriteMilliseconds >= 0)
+        let processor = TranscriptPostprocessor()
+        let terms = [DictionaryEntry(spelling: "Dev review", aliases: ["day review"]), DictionaryEntry(spelling: "Lisa")]
+        let raw = "run day review. i like it at home"
+        let processed = await processor.process(raw, dictionaryEntries: terms, tone: .formal, rewriteSettings: RewriteSettings())
+        check(processed.rawText == raw && processed.finalText == "Run Dev review. I like it at home.")
+        check(!processed.polished && processed.warning == nil, "Local dictionary and tone processing must not claim cloud polish")
+        let invalidRewrite = RewriteSettings(enabled: true, model: "")
+        let fallback = await processor.process(raw, dictionaryEntries: terms, tone: .formal, rewriteSettings: invalidRewrite)
+        check(fallback.finalText == raw && fallback.rawText == raw && fallback.warning == .rewriteConfiguration,
+              "Rewrite preflight failure must undo dictionary and tone edits without sending a request")
+        let sharedPipeline = RecordedAudioPipeline(engine: FixtureEngine(), processor: processor, dictionaryEntries: [],
+                                                  tone: .casual, rewriteSettings: invalidRewrite)
+        let sharedRun = try await sharedPipeline.transcribe(file)
+        check(sharedRun.rawText == sharedRun.finalText && sharedRun.postprocessingError == DiagnosticFailure.rewriteConfiguration.message)
+        check(sharedRun.timings.rewriteMilliseconds >= 0)
         if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--history-fixture" {
             let store = try HistoryStore(directory: URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true))
             for record in a {

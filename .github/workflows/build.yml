@@ -11,5 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and smoke-check package
         run: scripts/smoke.sh
+      - name: Check dictionary and text-processing guardrails
+        run: swift test
       - name: Build Xcode app without local signing credentials
         run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
