@@ -85,11 +85,11 @@ public actor HistoryStore {
     }
 
     public func delete(id: UUID) throws {
-        let saved = try entry(id: id)
-        let audio = try saved.audioFilename.map { try audioURL(filename: $0) }
-        try database.run("DELETE FROM entries WHERE id = ?", [.text(id.uuidString)])
-        if let audio, FileManager.default.fileExists(atPath: audio.path) {
-            try FileManager.default.removeItem(at: audio)
+        try database.transaction {
+            let saved = try entry(id: id)
+            let audio = try saved.audioFilename.map { try audioURL(filename: $0) }
+            if let audio { try removeAudioIfPresent(audio) }
+            try database.run("DELETE FROM entries WHERE id = ?", [.text(id.uuidString)])
         }
     }
 
@@ -100,27 +100,25 @@ public actor HistoryStore {
         if let days = policy.maximumAgeDays, days < 1 { throw HistoryError.invalidRetention }
         guard policy.maximumUnstarredCount != nil || policy.maximumAgeDays != nil else { return 0 }
         let cutoff = policy.maximumAgeDays.map { now.addingTimeInterval(-Double($0) * 86400) }
-        let rows = try database.query("SELECT id, created_at, audio_filename FROM entries WHERE starred = 0 ORDER BY created_at DESC, id DESC")
-        var candidates: [(id: String, audio: URL?)] = []
-        for (index, row) in rows.enumerated() {
-            let tooMany = policy.maximumUnstarredCount.map { index >= $0 } ?? false
-            let tooOld = cutoff.map { (Double(row[1] ?? "") ?? .infinity) < $0.timeIntervalSince1970 } ?? false
-            if tooMany || tooOld {
-                let audio = try row[2].map { try audioURL(filename: $0) }
-                candidates.append((row[0]!, audio))
-            }
-        }
+        var removed = 0
         try database.transaction {
-            for candidate in candidates {
-                try database.run("DELETE FROM entries WHERE id = ? AND starred = 0", [.text(candidate.id)])
+            let rows = try database.query("SELECT id, created_at, audio_filename FROM entries WHERE starred = 0 ORDER BY created_at DESC, id DESC")
+            for (index, row) in rows.enumerated() {
+                let tooMany = policy.maximumUnstarredCount.map { index >= $0 } ?? false
+                let tooOld = cutoff.map { (Double(row[1] ?? "") ?? .infinity) < $0.timeIntervalSince1970 } ?? false
+                guard tooMany || tooOld else { continue }
+                let audio = try row[2].map { try audioURL(filename: $0) }
+                if let audio { try removeAudioIfPresent(audio) }
+                try database.run("DELETE FROM entries WHERE id = ? AND starred = 0", [.text(row[0]!)])
+                removed += 1
             }
         }
-        for candidate in candidates {
-            if let audio = candidate.audio, FileManager.default.fileExists(atPath: audio.path) {
-                try FileManager.default.removeItem(at: audio)
-            }
-        }
-        return candidates.count
+        return removed
+    }
+
+    private func removeAudioIfPresent(_ audio: URL) throws {
+        do { try FileManager.default.removeItem(at: audio) }
+        catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile { }
     }
 
     private func audioURL(filename: String) throws -> URL {
