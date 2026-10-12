@@ -19,11 +19,13 @@ struct SettingsCapture {
             DictionaryEntry(spelling: "Postgres", aliases: ["post grass"]),
         ])
         defaults.set(try JSONEncoder().encode(HistoryRetention(maximumUnstarredCount: 500, maximumAgeDays: 30)), forKey: "history.retention")
+        defaults.set(OverlayPosition.top.rawValue, forKey: "overlayPosition")
         try RewriteSettingsStore.save(RewriteSettings(enabled: false, baseURL: "https://provider.invalid/v1", model: "example-model", cleanup: .light), defaults: defaults)
         let model = AppModel(dataDirectory: directory, defaults: defaults, servicesEnabled: false,
             diagnosticEnvironment: DiagnosticEnvironment(microphonePermission: .notRequested,
                 accessibilityPermission: .denied, inputMonitoringPermission: .denied,
                 microphoneNames: ["Preview microphone"], defaultMicrophoneName: "Preview microphone"))
+        precondition(model.overlay.position == .top, "Saved overlay position must apply before Settings or Preview opens")
         let lifecycle = GoblinApplicationDelegate()
         lifecycle.model = model
         app.delegate = lifecycle
