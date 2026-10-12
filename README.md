@@ -69,6 +69,29 @@ scripts/smoke.sh                   # package, CLI, and bundle metadata checks
 The engine protocol accepts a local audio file and returns recognized text.
 No engine or live dictation is bundled until the speech benchmark selects one.
 
+## History
+
+History uses the system SQLite library in `~/Library/Application Support/gob.lin/`.
+The database and its migration version persist across app updates. Each dictation
+keeps raw and final text, tone, target app, timestamps, duration, word count,
+model, and stage timings. Original, untrimmed captures are copied into `audio/`
+under unique UUID filenames before their metadata is saved.
+
+The History window supports transcript/app search, copying either text, audio
+playback, stars, deletion, and optional count/age retention. Both limits start
+unset, so history is kept by default; starred entries survive retention cleanup.
+Re-transcription and rewrite actions create a new entry and keep the original.
+Re-transcription stays visibly unavailable until a speech engine is configured.
+Rewrite becomes available when the shell supplies its configured rewrite callback.
+
+Failed saves retain the raw text and capture URL in memory and show copy/retry
+actions. Copy or retry unsaved entries before quitting. The pipeline must keep
+its original capture until `HistoryModel.record` returns success.
+
+`scripts/smoke.sh` includes narrowly scoped history safety assertions for schema
+migrations, retention, audio boundaries, and paged access to 1,000 synthetic
+entries. It never uses your recordings or history folder.
+
 ## Planned architecture
 
 Native Swift, macOS 26+, distributed as a direct download.
@@ -106,5 +129,6 @@ These screenshots are local research material and are excluded from version cont
 
 ## License
 
-Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). No third-party source,
-fonts, or model weights are bundled in this foundation.
+Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). No third-party engine source or model weights are bundled.
+
+Workbench and VT323 are bundled under SIL OFL 1.1; their licence texts ship with the fonts in `Sources/GoblinApp/Assets/Workbench-OFL.txt` and `VT323-OFL.txt`.
