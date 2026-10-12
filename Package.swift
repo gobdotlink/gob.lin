@@ -15,5 +15,6 @@ let package = Package(
         .target(name: "GoblinEngines", dependencies: ["GoblinCore"]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),
+        .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
     ]
 )

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
 		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
@@ -14,8 +15,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		3AE1A5AAA83BD2FA6D9E6BC8 /* gob-14-dictionary */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-14-dictionary"; path = .; sourceTree = SOURCE_ROOT; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		576B5126560CD2CC1CDAD24A /* gob-5-skeleton */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-5-skeleton"; path = .; sourceTree = SOURCE_ROOT; };
+		5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySettingsView.swift; sourceTree = "<group>"; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -36,7 +38,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				576B5126560CD2CC1CDAD24A /* gob-5-skeleton */,
+				3AE1A5AAA83BD2FA6D9E6BC8 /* gob-14-dictionary */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -53,6 +55,7 @@
 			isa = PBXGroup;
 			children = (
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
+				5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 			);
 			name = GoblinApp;
@@ -133,6 +136,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
+				04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
