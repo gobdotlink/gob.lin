@@ -102,3 +102,5 @@ These screenshots are local research material and are excluded from version cont
 
 Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). No third-party source,
 fonts, or model weights are bundled in this foundation.
+
+Workbench and VT323 are bundled under SIL OFL 1.1; their licence texts ship with the fonts in `Sources/GoblinApp/Assets/Workbench-OFL.txt` and `VT323-OFL.txt`.

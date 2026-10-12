@@ -6,7 +6,6 @@ enum MascotState: String, CaseIterable {
     case idle, recording, transcribing, warning
 }
 
-@MainActor
 enum GoblinBrand {
     static let accent = Color(red: 87 / 255, green: 230 / 255, blue: 143 / 255)
     static let background = Color(red: 11 / 255, green: 13 / 255, blue: 16 / 255)
