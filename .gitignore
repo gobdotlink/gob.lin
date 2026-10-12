@@ -15,3 +15,17 @@ xcuserdata/
 .env.*
 !.env.example
 *.p12
+
+# Private local work and model/signing material
+.context/
+recordings/
+*.key
+*.p8
+*.mobileprovision
+*.gguf
+*.onnx
+*.safetensors
+*.nemo
+*.mlmodel
+*.mlmodelc/
+*.mlpackage/
