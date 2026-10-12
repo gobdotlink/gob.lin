@@ -24,13 +24,14 @@ struct GoblinCLI {
     }
 }
 
-private enum CommandError: Error, LocalizedError {
+enum CommandError: Error, LocalizedError {
     case usage(String)
     var errorDescription: String? { switch self { case .usage(let message): message } }
 }
 
 private struct GoblinCommands {
     let pipeline: RecordedAudioPipeline?
+    private let processor = TranscriptPostprocessor()
 
     func run(_ arguments: [String]) async throws {
         switch arguments {
@@ -38,12 +39,26 @@ private struct GoblinCommands {
         case ["--self-check"]: print("GoblinCore, GoblinEngines, and system SQLite loaded successfully.")
         case [], ["--help"], ["-h"]: print(Self.help)
         case let values where values.first == "transcribe":
-            guard values.count == 2 else { throw CommandError.usage("Usage: goblin transcribe <audio-file>") }
+            guard values.count >= 2, !values[1].hasPrefix("--") else { throw CommandError.usage("Usage: goblin transcribe <audio-file> [--process] [--rewrite] [--tone <tone>] [--dictionary <path>]") }
+            var options = CLIProcessingOptions(enabled: true)
+            var index = 2
+            while index < values.count {
+                guard try options.consume(values, index: &index) else { throw CommandError.usage("Unknown transcribe option: \(values[index])") }
+            }
             let file = URL(fileURLWithPath: values[1])
             guard FileManager.default.isReadableFile(atPath: file.path),
                   try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { throw RecordedAudioError.invalidFile }
             guard let pipeline else { throw RecordedAudioError.engineNotConfigured }
-            let result = try await pipeline.transcribe(file)
+            var result = try await pipeline.transcribe(file)
+            if options.enabled {
+                let configuration = try CLIProcessingConfiguration(options: options)
+                let processed = await configuration.process(result.rawText, using: processor)
+                result.finalText = processed.finalText
+                result.tone = processed.tone.rawValue
+                result.polished = processed.polished
+                result.postprocessingError = processed.warning?.message
+                result.timings.rewriteMilliseconds = processed.timings.rewriteMilliseconds
+            }
             try writeJSON(result)
         case let values where values.first == "replay": try await replay(Array(values.dropFirst()))
         case let values where values.first == "eval": try evaluate(Array(values.dropFirst()))
@@ -57,6 +72,7 @@ private struct GoblinCommands {
         }
         var recorded = false
         var historyDirectory: URL?
+        var options = CLIProcessingOptions()
         var index = 1
         while index < arguments.count {
             switch arguments[index] {
@@ -68,10 +84,13 @@ private struct GoblinCommands {
                     throw CommandError.usage("--history-dir requires history and a directory path")
                 }
                 historyDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true); index += 2
-            default: throw CommandError.usage("Unknown replay option: \(arguments[index])")
+            default:
+                guard try options.consume(arguments, index: &index) else { throw CommandError.usage("Unknown replay option: \(arguments[index])") }
             }
         }
         if !recorded, pipeline == nil { throw RecordedAudioError.engineNotConfigured }
+        if !recorded { options.enabled = true }
+        let configuration = try options.enabled ? CLIProcessingConfiguration(options: options) : nil
         if source == "history" {
             let store = try HistoryStore(directory: historyDirectory)
             var offset = 0
@@ -88,7 +107,7 @@ private struct GoblinCommands {
                         }
                         record = try await transcribedRecord(file, id: entry.id.uuidString)
                     }
-                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(record))
+                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(await processedRecord(record, configuration: configuration)))
                 }
                 if entries.count < 200 { break }
                 offset += entries.count
@@ -104,17 +123,31 @@ private struct GoblinCommands {
                 for record in records {
                     var exported = record
                     exported.source = "recorded_transcript"
-                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(exported))
+                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(await processedRecord(exported, configuration: configuration)))
                 }
             } else {
                 let extensions = Set(["wav", "aiff", "aif", "m4a", "mp3", "caf", "flac"])
                 let audioFiles = files.filter { extensions.contains($0.pathExtension.lowercased()) }
                 guard !audioFiles.isEmpty else { throw CommandError.usage("No audio recordings found in this directory.") }
                 for file in audioFiles {
-                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(await transcribedRecord(file, id: file.lastPathComponent)))
+                    let record = try await transcribedRecord(file, id: file.lastPathComponent)
+                    FileHandle.standardOutput.write(try EvaluationJSONL.encode(await processedRecord(record, configuration: configuration)))
                 }
             }
         }
+    }
+
+    private func processedRecord(_ record: EvaluationRecord, configuration: CLIProcessingConfiguration?) async -> EvaluationRecord {
+        guard let configuration else { return record }
+        let result = await configuration.process(record.rawText, using: processor)
+        var processed = record
+        processed.finalText = result.finalText
+        processed.postprocessingError = result.warning?.message
+        var timings = record.source == "recorded_transcript" ? DictationTimings() : record.timings ?? DictationTimings()
+        timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
+        processed.timings = timings
+        if record.source == "recorded_transcript" { processed.source = "recorded_postprocessing" }
+        return processed
     }
 
     private func transcribedRecord(_ file: URL, id: String) async throws -> EvaluationRecord {
@@ -170,6 +203,8 @@ private struct GoblinCommands {
       goblin --version | --self-check | --help
 
     Engine selection follows the benchmark. Recorded replay and eval work now.
+    Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>.
+    --rewrite additionally opts into your enabled provider and reads its Keychain key.
     Ground truth, jargon, and ordinary-word annotations are needed for accuracy metrics.
     """
 }

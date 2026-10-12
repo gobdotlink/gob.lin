@@ -34,6 +34,15 @@ with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
     assert {record["id"] for record in replay} == {"ordinary", "jargon"}
     assert all(record["source"] == "recorded_transcript" for record in replay)
     assert replay[0]["rawText"] == "run day review after commit"
+    dictionary = scratch / "dictionary.json"
+    dictionary.write_text(json.dumps({"version": 1, "entries": [{"id": "00000000-0000-0000-0000-000000000001", "spelling": "Dev review", "aliases": ["day review"]}]}))
+    processed = [json.loads(line) for line in run("replay", records_directory, "--recorded", "--process", "--dictionary", dictionary, "--tone", "formal").stdout.splitlines()]
+    assert all(record["source"] == "recorded_postprocessing" for record in processed)
+    by_id = {record["id"]: record for record in processed}
+    assert by_id["jargon"]["rawText"] == "run day review after commit"
+    assert by_id["jargon"]["finalText"] == "Run Dev review after commit."
+    assert by_id["ordinary"]["finalText"] == "I like it at home."
+    assert all(record["timings"]["asrMilliseconds"] == 0 for record in processed)
     (records_directory / "duplicate.jsonl").write_bytes((fixtures / "A.jsonl").read_bytes())
     assert run("replay", records_directory, "--recorded", status=1).stdout == ""
 

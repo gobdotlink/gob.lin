@@ -9,6 +9,7 @@ struct HistoryReprocessResult {
     var polished: Bool
     var model: String
     var latencies: DictationTimings
+    var warning: String? = nil
 }
 
 struct PendingHistoryEntry: Identifiable {
@@ -31,19 +32,22 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var rewriteAction: ReprocessAction?
     @Published var retention: HistoryRetention
     @Published private(set) var playingEntryID: UUID?
+    @Published private(set) var lastFailure: DiagnosticFailure?
     var onRecorded: ((HistoryEntry) -> Void)?
     private(set) var store: HistoryStore?
     private let directory: URL?
+    private let defaults: UserDefaults
     private var requestID = UUID()
     private var player: AVAudioPlayer?
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, defaults: UserDefaults = .standard) {
         self.directory = directory
-        self.retention = UserDefaults.standard.data(forKey: "history.retention")
+        self.defaults = defaults
+        self.retention = defaults.data(forKey: "history.retention")
             .flatMap { try? JSONDecoder().decode(HistoryRetention.self, from: $0) } ?? HistoryRetention()
         super.init()
         do { store = try HistoryStore(directory: directory) }
-        catch { errorMessage = error.localizedDescription }
+        catch { lastFailure = .historyUnavailable; errorMessage = error.localizedDescription }
     }
 
     /// A failed save keeps its text and original capture available for copy/retry.
@@ -54,9 +58,11 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             guard let store else { return false }
             let saved = try await store.insert(entry, untrimmedAudioURL: untrimmedAudioURL)
             pending.removeAll { $0.id == entry.id }
+            lastFailure = nil
+            errorMessage = nil
             onRecorded?(saved)
             do { _ = try await store.applyRetention(retention) }
-            catch { errorMessage = "Dictation saved, but retention cleanup failed: \(error.localizedDescription)" }
+            catch { lastFailure = .historyOperationFailed; errorMessage = "Dictation saved, but retention cleanup failed: \(error.localizedDescription)" }
             await reload()
             return true
         } catch {
@@ -64,6 +70,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 pending.append(PendingHistoryEntry(entry: entry, audioURL: untrimmedAudioURL))
             }
             errorMessage = "History could not save this dictation. Your raw text is still available below. \(error.localizedDescription)"
+            lastFailure = .historySaveFailed
             return false
         }
     }
@@ -85,6 +92,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         } catch {
             guard id == requestID else { return }
             errorMessage = error.localizedDescription
+            lastFailure = .historyOperationFailed
         }
         if id == requestID { isLoading = false }
     }
@@ -102,6 +110,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         } catch {
             guard id == requestID else { return }
             errorMessage = error.localizedDescription
+            lastFailure = .historyOperationFailed
         }
         if id == requestID { isLoading = false }
     }
@@ -110,7 +119,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             try await store?.setStarred(starred, id: entry.id)
             await reload()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
     func delete(_ entry: HistoryEntry) async {
@@ -118,17 +127,17 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             try await store?.delete(id: entry.id)
             await reload()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
     func saveRetention(_ policy: HistoryRetention) async {
         do {
             guard let store else { throw HistoryError.database("History is unavailable") }
             _ = try await store.applyRetention(policy)
-            UserDefaults.standard.set(try JSONEncoder().encode(policy), forKey: "history.retention")
+            defaults.set(try JSONEncoder().encode(policy), forKey: "history.retention")
             retention = policy
             await reload()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
     func play(_ entry: HistoryEntry) async {
@@ -136,6 +145,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             guard let audio = try await store?.audioFileURL(for: entry.id) else {
                 errorMessage = "This dictation has no saved audio."
+                lastFailure = .historyOperationFailed
                 return
             }
             stopAudio()
@@ -143,10 +153,11 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             player?.delegate = self
             guard player?.play() == true else {
                 errorMessage = "The saved audio could not be played."
+                lastFailure = .historyOperationFailed
                 return
             }
             playingEntryID = entry.id
-        } catch { errorMessage = error.localizedDescription }
+        } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
     func stopAudio() {
@@ -160,7 +171,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         Task { @MainActor [weak self] in
             guard self?.player.map(ObjectIdentifier.init) == playerID else { return }
             self?.stopAudio()
-            if !flag { self?.errorMessage = "Playback of the saved audio failed." }
+            if !flag { self?.lastFailure = .historyOperationFailed; self?.errorMessage = "Playback of the saved audio failed." }
         }
     }
 
@@ -177,8 +188,9 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                                        targetBundleIdentifier: entry.targetBundleIdentifier,
                                        targetApplicationName: entry.targetApplicationName,
                                        audioDuration: entry.audioDuration, model: result.model,
-                                       latencies: result.latencies)
-            _ = await record(revised, untrimmedAudioURL: audioURL)
-        } catch { errorMessage = "History reprocessing failed: \(error.localizedDescription)" }
+                                       latencies: result.latencies, processingWarning: result.warning)
+            let saved = await record(revised, untrimmedAudioURL: audioURL)
+            if saved, let warning = result.warning { errorMessage = warning }
+        } catch { lastFailure = .historyOperationFailed; errorMessage = "History reprocessing failed: \(error.localizedDescription)" }
     }
 }

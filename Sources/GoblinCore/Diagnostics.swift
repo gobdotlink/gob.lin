@@ -16,8 +16,8 @@ public enum DiagnosticFailure: Equatable, Sendable {
     case requiredPermissionsMissing, hotkeyUnavailable, secureInputEnabled
     case modelUnavailable, modelLoadFailed, transcriptionFailed, silenceTrimmingFailed
     case rewriteConfiguration, rewriteTimeout, rewriteTransport, rewriteHTTPStatus(Int), rewriteInvalidResponse
-    case insertionPermissionMissing, insertionTargetChanged, insertionClipboardBusy, insertionNotAcknowledged, insertionFailed
-    case historyUnavailable, historySaveFailed, dictionaryUnavailable, settingsSaveFailed, applicationFailed
+    case insertionPermissionMissing, insertionTargetChanged, insertionClipboardBusy, insertionNotAcknowledged, insertionFailed, noTranscriptAvailable
+    case historyUnavailable, historySaveFailed, historyOperationFailed, dictionaryUnavailable, settingsSaveFailed, applicationFailed
 
     public var area: DiagnosticArea {
         switch self {
@@ -28,8 +28,8 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .modelUnavailable, .modelLoadFailed, .transcriptionFailed: .model
         case .silenceTrimmingFailed: .trimming
         case .rewriteConfiguration, .rewriteTimeout, .rewriteTransport, .rewriteHTTPStatus, .rewriteInvalidResponse: .rewrite
-        case .insertionPermissionMissing, .insertionTargetChanged, .insertionClipboardBusy, .insertionNotAcknowledged, .insertionFailed: .insertion
-        case .historyUnavailable, .historySaveFailed: .history
+        case .insertionPermissionMissing, .insertionTargetChanged, .insertionClipboardBusy, .insertionNotAcknowledged, .insertionFailed, .noTranscriptAvailable: .insertion
+        case .historyUnavailable, .historySaveFailed, .historyOperationFailed: .history
         case .dictionaryUnavailable: .dictionary
         case .settingsSaveFailed: .settings
         case .applicationFailed: .application
@@ -44,7 +44,7 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .requiredPermissionsMissing: "Accessibility or Input Monitoring access is missing. Complete Permissions & onboarding."
         case .hotkeyUnavailable: "The dictation shortcut is unavailable. Check shortcut settings and permissions."
         case .secureInputEnabled: "Secure Input is enabled. Modifier-only shortcuts are paused, and protected fields cannot receive dictation."
-        case .modelUnavailable: "The speech engine is unavailable. Select and load an engine before dictating."
+        case .modelUnavailable: "Speech engine selection is pending the benchmark. Dictation is not available yet."
         case .modelLoadFailed: "The speech model could not load. Check engine setup and try again."
         case .transcriptionFailed: "Speech recognition failed. Your dictation could not be transcribed."
         case .silenceTrimmingFailed: "Silence trimming failed. The audio could not be prepared for recognition."
@@ -58,8 +58,10 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .insertionClipboardBusy: "Dictation could not be inserted because the clipboard changed. Copy it from History."
         case .insertionNotAcknowledged: "The target did not confirm reading the dictation clipboard. Check the target before retrying."
         case .insertionFailed: "Dictation could not be inserted. Your text remains available in History."
+        case .noTranscriptAvailable: "No transcript is available to paste yet."
         case .historyUnavailable: "History is unavailable. Existing records have been left untouched."
         case .historySaveFailed: "History could not save this dictation. Keep or copy its pending text before quitting."
+        case .historyOperationFailed: "History could not complete this operation. Check its visible error before trying again."
         case .dictionaryUnavailable: "The dictionary could not be loaded or saved. Existing entries have been left untouched."
         case .settingsSaveFailed: "Settings could not be saved. Review the setting and try again."
         case .applicationFailed: "The operation failed. Review diagnostics and try again."

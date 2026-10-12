@@ -13,6 +13,7 @@ final class DiagnosticsModel: ObservableObject {
     @Published private(set) var events: [DiagnosticEvent] = []
     @Published private(set) var latestTimings: DictationTimings?
     @Published private(set) var copyMessage: String?
+    private let readSystemEnvironment: Bool
 
     var hasWarning: Bool { !activeFailures.isEmpty }
     var warnings: [DiagnosticFailure] { DiagnosticArea.allCases.compactMap { activeFailures[$0] } }
@@ -20,7 +21,11 @@ final class DiagnosticsModel: ObservableObject {
         events.reversed().first { activeFailures[$0.failure.area] == $0.failure }?.failure.message ?? warnings.first?.message
     }
 
-    init() { refresh() }
+    init(environment: DiagnosticEnvironment? = nil) {
+        readSystemEnvironment = environment == nil
+        if let environment { self.environment = environment }
+        else { refresh() }
+    }
 
     func report(_ failure: DiagnosticFailure) {
         guard activeFailures[failure.area] != failure else { return }
@@ -41,6 +46,7 @@ final class DiagnosticsModel: ObservableObject {
     }
 
     func refresh(permissions: PermissionModel.Snapshot? = nil, secureInput: Bool? = nil, engineStatus: DiagnosticEngineStatus? = nil) {
+        guard readSystemEnvironment else { return }
         let microphone = permissions?.microphone ?? AVCaptureDevice.authorizationStatus(for: .audio)
         let accessibility = permissions?.accessibility ?? AXIsProcessTrusted()
         let inputMonitoring = permissions?.inputMonitoring ?? CGPreflightListenEventAccess()
