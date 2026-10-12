@@ -1,0 +1,13 @@
+name: Feature request
+description: Describe the problem a change would solve.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What would success look like?
