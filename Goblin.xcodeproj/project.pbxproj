@@ -8,10 +8,15 @@
 
 /* Begin PBXBuildFile section */
 		12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2CADA2FD0B5602E82686E92 /* EventTap.swift */; };
+		21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */; };
 		31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EBD258A804FC8847A87D791 /* OnboardingView.swift */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
+		45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A854E8221704C177743D7C /* FocusedText.swift */; };
+		705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */; };
+		70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */; };
+		8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86CA786E7971062A617DCC40 /* KeyboardLayout.swift */; };
 		94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */; };
 		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
 		A80D16C881344416CB256003 /* PermissionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D589917F852F1F35A10767 /* PermissionModel.swift */; };
@@ -20,15 +25,20 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		603D6B3E498FEC3BF58AFD5B /* gob-pr-preparation */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-pr-preparation"; path = .; sourceTree = SOURCE_ROOT; };
+		60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardTransaction.swift; sourceTree = "<group>"; };
 		7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyShortcut.swift; sourceTree = "<group>"; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		86CA786E7971062A617DCC40 /* KeyboardLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayout.swift; sourceTree = "<group>"; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
+		9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsertionService.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
+		C2A854E8221704C177743D7C /* FocusedText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedText.swift; sourceTree = "<group>"; };
 		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -87,10 +97,23 @@
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				2121F3256188A52EA0842CDA /* Hotkeys */,
+				FB558193443617ABD3750FC0 /* Insertion */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 			);
 			name = GoblinApp;
 			path = Sources/GoblinApp;
+			sourceTree = "<group>";
+		};
+		FB558193443617ABD3750FC0 /* Insertion */ = {
+			isa = PBXGroup;
+			children = (
+				C2A854E8221704C177743D7C /* FocusedText.swift */,
+				207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */,
+				86CA786E7971062A617DCC40 /* KeyboardLayout.swift */,
+				60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */,
+				9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */,
+			);
+			path = Insertion;
 			sourceTree = "<group>";
 		};
 		FF1388BE8154CBC9382C0E0E = {
@@ -168,12 +191,17 @@
 			files = (
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
 				12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */,
+				45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
 				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
+				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,
+				8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
+				21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */,
 				A80D16C881344416CB256003 /* PermissionModel.swift in Sources */,
 				94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */,
+				705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
