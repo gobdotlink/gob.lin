@@ -14,7 +14,8 @@ if [ "$identity" = 'gob.lin Local Development' ]; then
     scripts/setup-signing.sh
 fi
 identities=$(security find-identity -v -p codesigning)
-certificate=$(printf '%s\n' "$identities" | awk -v requested="$identity" '
+certificate=$(printf '%s\n' "$identities" | goblin_requested_identity="$identity" awk '
+    BEGIN { requested = ENVIRON["goblin_requested_identity"] }
     length($2) == 40 && $2 !~ /[^[:xdigit:]]/ {
         name = $0
         sub(/^[^"]*"/, "", name)
