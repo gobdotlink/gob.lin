@@ -37,6 +37,10 @@ For an existing local or Developer ID certificate:
 GOBLIN_SIGNING_IDENTITY='Your certificate name' scripts/build.sh
 ```
 
+Use an exact certificate name or its full SHA-1 fingerprint from
+`security find-identity -v -p codesigning`. If multiple valid certificates share
+the same name, the build lists their fingerprints and asks you to choose one.
+
 Ad-hoc signing is deliberately rejected. Local certificates are for development;
 public distribution requires Developer ID signing and notarization. The app is
 not sandboxed because dictation must interact with other applications through
@@ -45,6 +49,8 @@ Accessibility. Hardened runtime and the microphone entitlement are enabled.
 To inspect or work in Xcode, open `Goblin.xcodeproj`; run
 `scripts/setup-signing.sh` first. The committed project builds without generators.
 If its structure changes, `project.yml` is the XcodeGen source of truth.
+
+Debug builds include Xcode's debugger entitlement; Release builds exclude it.
 
 ```sh
 swift build                       # unsigned binaries for development and CI
