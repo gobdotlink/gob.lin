@@ -26,10 +26,13 @@ struct OverlayCapture {
                 try png.write(to: URL(fileURLWithPath: output))
                 let next = overlay.begin { overlay.hide() }
                 overlay.hide(session: session)
-                assert(overlay.model.phase == .arming, "A stale hide closed a newer session")
+                precondition(overlay.model.phase == .arming, "A stale hide closed a newer session")
                 overlay.update(.listening, level: .nan, session: next)
-                assert(overlay.model.audioLevel == 0)
+                precondition(overlay.model.audioLevel == 0)
                 overlay.hide(session: next)
+                overlay.update(.listening, session: next)
+                precondition(overlay.model.phase == .hidden, "A canceled session reopened")
+                overlay.shutdown()
                 print("Native overlay captured; non-key panel, stale hide and non-finite input checks passed.")
             } catch {
                 fputs("Overlay capture failed: \(error)\n", stderr)
