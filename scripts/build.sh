@@ -13,10 +13,26 @@ fi
 if [ "$identity" = 'gob.lin Local Development' ]; then
     scripts/setup-signing.sh
 fi
-if ! security find-identity -v -p codesigning | grep -Fq "\"$identity\""; then
-    printf 'No valid signing identity named "%s". Set GOBLIN_SIGNING_IDENTITY to an existing certificate name.\n' "$identity" >&2
+identities=$(security find-identity -v -p codesigning)
+certificate=$(printf '%s\n' "$identities" | goblin_requested_identity="$identity" awk '
+    BEGIN { requested = ENVIRON["goblin_requested_identity"] }
+    length($2) == 40 && $2 !~ /[^[:xdigit:]]/ {
+        name = $0
+        sub(/^[^"]*"/, "", name)
+        sub(/"[^"]*$/, "", name)
+        hash = toupper($2)
+        if ((name == requested || hash == toupper(requested)) && !seen[hash]++) print hash
+    }')
+if [ -z "$certificate" ]; then
+    printf 'No valid signing identity matches "%s". Set GOBLIN_SIGNING_IDENTITY to an exact certificate name or SHA-1 fingerprint.\n' "$identity" >&2
     exit 1
 fi
+case "$certificate" in
+    *$'\n'*)
+        printf 'Multiple valid signing identities match "%s". Set GOBLIN_SIGNING_IDENTITY to one certificate SHA-1 fingerprint:\n%s\n' "$identity" "$certificate" >&2
+        exit 1
+        ;;
+esac
 
 swift build -c "$configuration"
 binary_directory=$(swift build -c "$configuration" --show-bin-path)
@@ -28,10 +44,9 @@ cp -R Sources/GoblinApp/Assets "$app/Contents/Resources/"
 cp Resources/Goblin.icns "$app/Contents/Resources/"
 
 # Pin to the certificate public identity, not the changing executable hash.
-certificate=$(security find-certificate -c "$identity" -p | /usr/bin/openssl x509 -outform DER | shasum -a 1 | awk '{print $1}')
 requirement="designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\""
 codesign --force --options runtime --timestamp=none \
-    --entitlements Resources/Goblin.entitlements --sign "$identity" \
+    --entitlements Resources/Goblin.entitlements --sign "$certificate" \
     --requirements "=$requirement" "$app"
 codesign --verify --strict --verbose=2 "$app"
 printf '\nBuilt %s\nRun: open "%s"\n' "$app" "$app"
