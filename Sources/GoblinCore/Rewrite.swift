@@ -147,8 +147,9 @@ public actor RewriteClient {
                     throw RewriteFailure.httpStatus(response.statusCode)
                 }
                 let reply = try JSONDecoder().decode(ChatResponse.self, from: data)
-                guard let message = reply.choices.first?.message, message.refusal == nil || message.refusal?.isEmpty == true,
-                      let text = message.content, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                guard let choice = reply.choices.first, choice.finish_reason != "length",
+                      choice.message.refusal == nil || choice.message.refusal?.isEmpty == true,
+                      let text = choice.message.content, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw RewriteFailure.invalidResponse
                 }
                 return RewriteResult(rawText: rawText, polishedText: text)
@@ -197,6 +198,7 @@ public actor RewriteClient {
         struct Choice: Decodable {
             struct Message: Decodable { var content: String?; var refusal: String? }
             var message: Message
+            var finish_reason: String?
         }
         var choices: [Choice]
     }

@@ -24,16 +24,13 @@ enum RewriteKeychain {
     }
 
     static func save(_ key: String, for settings: RewriteSettings) throws {
-        let query = try query(for: settings)
-        let data = Data(key.utf8)
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            let added = SecItemAdd(item as CFDictionary, nil)
-            guard added == errSecSuccess else { throw KeychainFailure(added) }
-        } else if status != errSecSuccess { throw KeychainFailure(status) }
+        // Recreate with our creator-default ACL instead of inheriting a precreated item's access list.
+        try delete(for: settings)
+        var item = try query(for: settings)
+        item[kSecValueData as String] = Data(key.utf8)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let added = SecItemAdd(item as CFDictionary, nil)
+        guard added == errSecSuccess else { throw KeychainFailure(added) }
     }
 
     static func delete(for settings: RewriteSettings) throws {
