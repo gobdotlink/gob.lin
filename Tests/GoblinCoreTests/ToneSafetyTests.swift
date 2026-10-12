@@ -11,4 +11,7 @@ import Testing
     #expect(ToneFormatter.format("Who did this?", tone: .veryCasual) == "who did this?")
     #expect(ToneFormatter.format("wait...", tone: .casual) == "Wait...")
     #expect(ToneFormatter.format("hello world", tone: .formal) == "Hello world.")
+    #expect(ToneFormatter.format("Please visit HTTPS://example.com/a;b", tone: .casual) == "Please visit HTTPS://example.com/a;b")
+    #expect(ToneFormatter.format("Please check the U.S.", tone: .veryCasual) == "please check the U.S.")
+    #expect([ToneFormatter.format("Please send JSON", tone: .formal), ToneFormatter.format("Please visit https://example.com", tone: .formal)] == ["Please send JSON.", "Please visit https://example.com"])
 }
