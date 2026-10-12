@@ -24,6 +24,7 @@ final class HotkeyService: ObservableObject {
     private var handler: EventHandlerRef?
     private var carbonShortcut: EventHotKeyRef?
     private var carbonEscape: EventHotKeyRef?
+    private var carbonModifiedEscape: EventHotKeyRef?
     private var carbonPressed = false
     private var sessionObservers: [NSObjectProtocol] = []
 
@@ -103,6 +104,7 @@ final class HotkeyService: ObservableObject {
         guard value.isValid else { status = "Choose a supported shortcut"; return }
         stop()
         shortcut = value
+        carbonIssue = nil
         if let encoded = try? JSONEncoder().encode(value) { UserDefaults.standard.set(encoded, forKey: "goblin.dictationShortcut") }
         recorderActive = false
         start()
@@ -182,7 +184,7 @@ final class HotkeyService: ObservableObject {
         let current = IsSecureEventInputEnabled()
         guard current != secureInput else { return }
         secureInput = current
-        if current && shortcut.keyCode == nil { apply(state.cancel()) }
+        if current && (shortcut.keyCode == nil || (!carbonPressed && state.recording != .handsFree)) { cancelRecording() }
         configureTap()
         setCarbonEscape(recording != nil && current && shortcut.keyCode != nil)
         updateStatus()
@@ -249,9 +251,14 @@ final class HotkeyService: ObservableObject {
 
     private func setCarbonEscape(_ enabled: Bool) {
         if !enabled, let carbonEscape { UnregisterEventHotKey(carbonEscape); self.carbonEscape = nil }
+        if !enabled, let carbonModifiedEscape { UnregisterEventHotKey(carbonModifiedEscape); self.carbonModifiedEscape = nil }
         if enabled, carbonEscape == nil {
             var reference: EventHotKeyRef?
             if RegisterEventHotKey(53, 0, EventHotKeyID(signature: 0x474F424C, id: 2), GetApplicationEventTarget(), 0, &reference) == noErr { carbonEscape = reference }
+        }
+        if enabled, shortcut.carbonModifiers != 0, carbonModifiedEscape == nil {
+            var reference: EventHotKeyRef?
+            if RegisterEventHotKey(53, shortcut.carbonModifiers, EventHotKeyID(signature: 0x474F424C, id: 2), GetApplicationEventTarget(), 0, &reference) == noErr { carbonModifiedEscape = reference }
         }
     }
 }
