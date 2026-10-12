@@ -8,11 +8,15 @@ struct GoblinApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
+        GoblinBrand.registerFonts()
     }
 
     var body: some Scene {
-        MenuBarExtra(GoblinMetadata.name, systemImage: "waveform") {
+        MenuBarExtra {
             GoblinMenu(model: model)
+        } label: {
+            Image(nsImage: GoblinBrand.menuImage(model.mascotState)).renderingMode(.original)
+                .accessibilityLabel("gob.lin " + model.mascotState.rawValue)
         }
 
         Window("gob.lin Settings", id: "settings") {
@@ -53,6 +57,7 @@ private struct GoblinMenu: View {
         Button("Dictionary…") { show("dictionary") }
         Button("Tone…") { show("tone") }
         Button("AI cleanup…") { show("rewrite") }
+        Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
@@ -70,7 +75,7 @@ private struct GoblinMenu: View {
 private struct SettingsShell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(GoblinMetadata.name).font(.largeTitle.bold())
+            GoblinWordmark()
             Text("Native dictation for your Mac.").foregroundStyle(.secondary)
             Divider()
             LabeledContent("Version", value: GoblinMetadata.version)
@@ -80,6 +85,9 @@ private struct SettingsShell: View {
             Spacer()
         }
         .padding(28)
+        .background(GoblinBrand.background)
+        .tint(GoblinBrand.accent)
+        .preferredColorScheme(.dark)
     }
 }
 
