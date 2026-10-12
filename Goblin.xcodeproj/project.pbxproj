@@ -8,9 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */; };
+		1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */; };
 		328878B095DD6E130364C893 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = DDB1197B94259F10AEFE3EFC /* Assets */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
+		669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740B2E14FC110A8510E92CB /* OverlayController.swift */; };
+		7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */; };
 		75603E9EA9B586CFE778063E /* Goblin.icns in Resources */ = {isa = PBXBuildFile; fileRef = 8C7DC821C59D20E3BD8E9846 /* Goblin.icns */; };
 		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
 		CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7BE4BFC2CC19C75E54AB9178 /* GoblinCore */; };
@@ -18,12 +21,15 @@
 
 /* Begin PBXFileReference section */
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4740B2E14FC110A8510E92CB /* OverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayController.swift; sourceTree = "<group>"; };
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
-		824472A711151D0CBE18383B /* gob-19-branding */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-19-branding"; path = .; sourceTree = SOURCE_ROOT; };
 		8C7DC821C59D20E3BD8E9846 /* Goblin.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Goblin.icns; sourceTree = "<group>"; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
+		9869C9EC83CA061EFCB7FA19 /* gob-12-overlay */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-12-overlay"; path = .; sourceTree = SOURCE_ROOT; };
+		D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationOverlay.swift; sourceTree = "<group>"; };
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
+		E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlaySettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,7 +48,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				824472A711151D0CBE18383B /* gob-19-branding */,
+				9869C9EC83CA061EFCB7FA19 /* gob-12-overlay */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -53,6 +59,16 @@
 				451CAE065F64DB5E635BF53C /* Goblin.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		40EA8A05ACABDE4CA467032E /* Overlay */ = {
+			isa = PBXGroup;
+			children = (
+				D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */,
+				4740B2E14FC110A8510E92CB /* OverlayController.swift */,
+				E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */,
+			);
+			path = Overlay;
 			sourceTree = "<group>";
 		};
 		DF7F3C1710AEBA19D2F4A3EA /* Resources */ = {
@@ -69,6 +85,7 @@
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */,
+				40EA8A05ACABDE4CA467032E /* Overlay */,
 			);
 			name = GoblinApp;
 			path = Sources/GoblinApp;
@@ -163,8 +180,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
+				1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
+				669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */,
+				7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
