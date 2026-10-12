@@ -7,21 +7,29 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2CADA2FD0B5602E82686E92 /* EventTap.swift */; };
+		31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EBD258A804FC8847A87D791 /* OnboardingView.swift */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
+		94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */; };
 		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
 		A80D16C881344416CB256003 /* PermissionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D589917F852F1F35A10767 /* PermissionModel.swift */; };
+		B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 329F4335956AA81050B7D254 /* HotkeyService.swift */; };
 		CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7BE4BFC2CC19C75E54AB9178 /* GoblinCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		2407C192D416A3E7F5F68110 /* gob-10-hotkeys */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-10-hotkeys"; path = .; sourceTree = SOURCE_ROOT; };
+		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
+		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyShortcut.swift; sourceTree = "<group>"; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
-		95268A629DDD55DD091A5413 /* gob-7-permissions */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-7-permissions"; path = .; sourceTree = SOURCE_ROOT; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
+		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,7 +48,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				95268A629DDD55DD091A5413 /* gob-7-permissions */,
+				2407C192D416A3E7F5F68110 /* gob-10-hotkeys */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -51,6 +59,17 @@
 				451CAE065F64DB5E635BF53C /* Goblin.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		2121F3256188A52EA0842CDA /* Hotkeys */ = {
+			isa = PBXGroup;
+			children = (
+				D2CADA2FD0B5602E82686E92 /* EventTap.swift */,
+				329F4335956AA81050B7D254 /* HotkeyService.swift */,
+				7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */,
+				2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */,
+			);
+			path = Hotkeys;
 			sourceTree = "<group>";
 		};
 		63D6A1534597FB8FF39193BB /* Permissions */ = {
@@ -67,6 +86,7 @@
 			children = (
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
+				2121F3256188A52EA0842CDA /* Hotkeys */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 			);
 			name = GoblinApp;
@@ -147,9 +167,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
+				12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
+				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
+				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
 				A80D16C881344416CB256003 /* PermissionModel.swift in Sources */,
+				94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
