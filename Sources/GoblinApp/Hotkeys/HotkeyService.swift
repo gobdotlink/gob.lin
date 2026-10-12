@@ -111,6 +111,12 @@ final class HotkeyService: ObservableObject {
         updateStatus()
     }
 
+    func cancelRecording() {
+        holdTimer?.invalidate()
+        releaseTask?.cancel()
+        apply(state.cancel())
+    }
+
     private func restart() { stop(); permissions.refresh(); start() }
 
     private func receive(_ input: HotkeyEventTap.Input) {

@@ -87,6 +87,7 @@ final class HotkeyEventTap: @unchecked Sendable {
             return Unmanaged.passUnretained(event)
         }
         guard !stopped, !suspended else { return Unmanaged.passUnretained(event) }
+        if event.getIntegerValueField(.eventSourceUserData) == 0x474F424C { return Unmanaged.passUnretained(event) }
         let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         if code == 53, recording {
             if type == .keyDown { input(.escape) }
