@@ -1,6 +1,6 @@
 # Permissions and recovery
 
-gob.lin reads microphone, Accessibility and Input Monitoring status at launch and every second while running. Launch can open onboarding, but never calls a permission-request API. Each Allow button starts the corresponding explicit request and links to its System Settings pane. Grants refresh the onboarding window; switching away and back also checks immediately.
+gob.lin reads microphone, Accessibility and Input Monitoring status at launch and every second while running. Launch can open onboarding, but never calls a permission-request API. The Accessibility and Input Monitoring Allow buttons make their explicit request and open the matching System Settings pane. Microphone Allow shows the system dialog while access is undecided, then returns to onboarding; after an earlier decision it opens the Microphone pane instead. Grants refresh the onboarding window; switching away and back also checks immediately.
 
 Accessibility or Input Monitoring revocation calls `PermissionModel.onRevocation` before presenting recovery. The hotkey owner must stop its event tap and invalidate its run-loop source there. Microphone revocation uses the same callback so the recording owner can stop capture. `onChange` allows services to start after grants arrive. No engine has been selected yet, so the under-60-second dictation acceptance remains dependent on the benchmark and engine integration.
 
