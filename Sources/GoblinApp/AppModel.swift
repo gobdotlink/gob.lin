@@ -81,9 +81,6 @@ final class AppModel: ObservableObject {
                 else if self.dictionary.available { self.diagnostics.resolve(.dictionary) }
             }
         }.store(in: &subscriptions)
-        audioPreview.$error.sink { [weak self] error in
-            Task { @MainActor in if error != nil { self?.showFailure(.microphoneUnavailable) } }
-        }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).sink { [weak self] _ in
             Task { @MainActor in self?.refreshConfiguration() }
         }.store(in: &subscriptions)

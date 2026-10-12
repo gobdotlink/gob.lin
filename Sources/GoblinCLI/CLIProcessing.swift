@@ -23,6 +23,9 @@ struct CLIProcessingOptions {
             guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") else {
                 throw CommandError.usage("--dictionary requires a JSON dictionary path")
             }
+            guard FileManager.default.fileExists(atPath: arguments[index + 1]) else {
+                throw CommandError.usage("--dictionary file not found: \(arguments[index + 1])")
+            }
             enabled = true; dictionaryURL = URL(fileURLWithPath: arguments[index + 1]); index += 2
         default: return false
         }

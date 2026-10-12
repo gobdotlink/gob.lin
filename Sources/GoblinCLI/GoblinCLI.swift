@@ -80,7 +80,7 @@ private struct GoblinCommands {
                 guard !recorded else { throw CommandError.usage("--recorded was supplied twice") }
                 recorded = true; index += 1
             case "--history-dir":
-                guard source == "history", historyDirectory == nil, index + 1 < arguments.count else {
+                guard source == "history", historyDirectory == nil, index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") else {
                     throw CommandError.usage("--history-dir requires history and a directory path")
                 }
                 historyDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true); index += 2
@@ -100,7 +100,7 @@ private struct GoblinCommands {
                     let record: EvaluationRecord
                     if recorded {
                         record = EvaluationRecord(id: entry.id.uuidString, rawText: entry.rawText, finalText: entry.finalText,
-                                                  model: entry.model, timings: entry.latencies)
+                                                  model: entry.model, timings: entry.latencies, postprocessingError: entry.processingWarning)
                     } else {
                         guard let file = try await store.audioFileURL(for: entry.id) else {
                             throw CommandError.usage("History entry \(entry.id) has no saved audio. Use --recorded to export its transcript.")

@@ -65,7 +65,8 @@ struct SettingsView: View {
                 Picker("Model", selection: .constant("Parakeet TDT v3")) { Text("Parakeet TDT v3").tag("Parakeet TDT v3") }.disabled(true)
             }.padding(28)
         case .dictionary: DictionarySettingsView(model: model.dictionary)
-        case .rewrite: RewriteSettingsView(defaults: model.defaults, inspectKeychain: model.servicesEnabled, onSaved: model.refreshConfiguration,
+        case .rewrite: RewriteSettingsView(defaults: model.defaults, inspectKeychain: model.servicesEnabled,
+                                               onSaved: { model.refreshConfiguration(); model.diagnostics.resolve(.settings) },
                                                onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
         case .history: HistorySettingsView(history: model.history)
