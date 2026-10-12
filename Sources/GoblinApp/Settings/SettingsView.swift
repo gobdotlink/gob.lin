@@ -28,7 +28,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 16) {
-                GoblinWordmark().scaleEffect(0.72, anchor: .leading).frame(height: 70).padding(.horizontal, 18)
+                GoblinWordmark().fixedSize(horizontal: true, vertical: false).scaleEffect(0.72, anchor: .leading).frame(height: 70).padding(.horizontal, 18)
                 List(SettingsSection.allCases, selection: $model.settingsSelection) { section in
                     Label(section.rawValue, systemImage: section.symbol).tag(section)
                 }
