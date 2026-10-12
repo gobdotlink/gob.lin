@@ -40,7 +40,7 @@ struct GoblinApp: App {
         .defaultSize(width: 640, height: 620)
 
         Window("gob.lin History", id: "history") {
-            HistoryShell()
+            HistoryView(model: model.history)
         }
         .defaultSize(width: 720, height: 480)
     }
@@ -88,12 +88,5 @@ private struct SettingsShell: View {
         .background(GoblinBrand.background)
         .tint(GoblinBrand.accent)
         .preferredColorScheme(.dark)
-    }
-}
-
-private struct HistoryShell: View {
-    var body: some View {
-        ContentUnavailableView("No dictations yet", systemImage: "text.bubble", description: Text("Your completed dictations will appear here."))
-            .padding(28)
     }
 }
