@@ -18,6 +18,7 @@ final class AudioPreviewModel: ObservableObject {
     @Published private(set) var ready = false
     @Published var error: String?
     private var engine: AVAudioEngine?
+    private var configurationObserver: NSObjectProtocol?
     private var sessionID = UUID()
 
     func refresh() {
@@ -55,28 +56,50 @@ final class AudioPreviewModel: ObservableObject {
         guard format.channelCount > 0, format.sampleRate > 0 else { error = "Microphone has no usable input stream."; return }
         let session = sessionID
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
-            var sum: Float = 0
-            for index in 0..<Int(buffer.frameLength) { sum += samples[index] * samples[index] }
-            let rms = sqrt(Double(sum) / Double(buffer.frameLength))
-            let value = max(0, min(1, (20 * log10(max(0.000001, rms)) + 60) / 60))
+            guard buffer.frameLength > 0, buffer.floatChannelData != nil else { return }
+            let value = Self.deviceInputLevel(buffer)
             Task { @MainActor in
                 guard let self, self.sessionID == session, self.running else { return }
                 self.level = value.isFinite ? value : 0; self.ready = true
             }
         }
-        do { try engine.start(); self.engine = engine; running = true }
+        do {
+            try engine.start(); self.engine = engine; running = true
+            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.sessionID == session, self.running else { return }
+                    self.stop()
+                    self.error = "Input device changed; preview stopped. Start the preview again to check the new input."
+                }
+            }
+        }
         catch { input.removeTap(onBus: 0); self.error = "Microphone preview failed: \(error.localizedDescription)" }
     }
 
     func stop() {
         sessionID = UUID()
+        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver); self.configurationObserver = nil }
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil
         running = false
         ready = false
         level = 0
+    }
+
+    nonisolated static func deviceInputLevel(_ buffer: AVAudioPCMBuffer) -> Double {
+        guard let channels = buffer.floatChannelData, buffer.frameLength > 0 else { return 0 }
+        var loudestRMS: Double = 0
+        for channel in 0..<Int(buffer.format.channelCount) {
+            var sum: Double = 0
+            for frame in 0..<Int(buffer.frameLength) {
+                let sample = Double(channels[buffer.format.isInterleaved ? 0 : channel][frame * buffer.stride + (buffer.format.isInterleaved ? channel : 0)])
+                sum += sample * sample
+            }
+            loudestRMS = max(loudestRMS, sqrt(sum / Double(buffer.frameLength)))
+        }
+        let level = max(0, min(1, (20 * log10(max(0.000001, loudestRMS)) + 60) / 60))
+        return level.isFinite ? level : 0
     }
 
     private static func string(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
@@ -102,8 +125,9 @@ struct AudioSettingsView: View {
                 if !selectedUID.isEmpty, !preview.devices.contains(where: { $0.uid == selectedUID }) { Text("Saved microphone (unavailable)").tag(selectedUID) }
             }
             Button("Refresh devices") { preview.refresh() }
-            ProgressView(value: preview.level).tint(GoblinBrand.accent).accessibilityLabel("Microphone input level")
-            if preview.running { Text(preview.ready ? "Receiving audio" : "Waiting for the first audio buffer…").foregroundStyle(.secondary) }
+            Text("Device input level · loudest channel").font(.callout).foregroundStyle(.secondary)
+            ProgressView(value: preview.level).tint(GoblinBrand.accent).accessibilityLabel("Device input level, loudest channel")
+            if preview.running { Text(preview.ready ? "Receiving device input" : "Waiting for the first audio buffer…").foregroundStyle(.secondary) }
             Button(preview.running ? "Stop level preview" : "Preview microphone level") {
                 if preview.running { preview.stop() } else { preview.start(uid: selectedUID) }
             }

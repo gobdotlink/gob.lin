@@ -35,39 +35,47 @@ struct SettingsView: View {
                 Text("LOCAL BY DEFAULT").font(.caption2.monospaced()).foregroundStyle(.secondary).padding(18)
             }.background(GoblinBrand.background).navigationSplitViewColumnWidth(190)
         } detail: {
-            ScrollView {
-                Group {
-                    switch model.settingsSelection ?? .general {
-                    case .general: GeneralSettingsView(model: model)
-                    case .audio: AudioSettingsView(permissions: model.permissions)
-                    case .model:
-                        VStack(alignment: .leading, spacing: 18) {
-                            Text("Speech model").font(.largeTitle.bold())
-                            LabeledContent("Candidate", value: "Parakeet TDT v3")
-                            Label("Engine selection follows the benchmark", systemImage: "clock")
-                            Text("No speech model is downloaded or loaded yet. Dictation will become available after the speech-engine benchmark and audio-capture integration.")
-                                .foregroundStyle(.secondary)
-                            Picker("Model", selection: .constant("Parakeet TDT v3")) { Text("Parakeet TDT v3").tag("Parakeet TDT v3") }.disabled(true)
-                        }.padding(28)
-                    case .dictionary: DictionarySettingsView()
-                    case .rewrite: RewriteSettingsView()
-                    case .tone: ToneSettingsView()
-                    case .history: HistorySettingsView(history: model.history)
-                    case .overlay: OverlaySettingsView(overlay: model.overlay)
-                    case .about: AboutSettingsView()
-                    }
-                }.frame(maxWidth: .infinity, alignment: .topLeading)
-            }.background(GoblinBrand.surface)
+            Group {
+                switch model.settingsSelection ?? .general {
+                case .dictionary, .rewrite, .overlay: sectionContents
+                default: ScrollView { sectionContents }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(GoblinBrand.surface)
         }
         .tint(GoblinBrand.accent).preferredColorScheme(.dark)
         .frame(minWidth: 820, minHeight: 620)
+    }
+
+    @ViewBuilder
+    private var sectionContents: some View {
+        switch model.settingsSelection ?? .general {
+        case .general: GeneralSettingsView(model: model)
+        case .audio: AudioSettingsView(permissions: model.permissions)
+        case .model:
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Speech model").font(.largeTitle.bold())
+                LabeledContent("Candidate", value: "Parakeet TDT v3")
+                Label("Engine selection follows the benchmark", systemImage: "clock")
+                Text("No speech model is downloaded or loaded yet. Dictation will become available after the speech-engine benchmark and audio-capture integration.")
+                    .foregroundStyle(.secondary)
+                Picker("Model", selection: .constant("Parakeet TDT v3")) { Text("Parakeet TDT v3").tag("Parakeet TDT v3") }.disabled(true)
+            }.padding(28)
+        case .dictionary: DictionarySettingsView()
+        case .rewrite: RewriteSettingsView()
+        case .tone: ToneSettingsView()
+        case .history: HistorySettingsView(history: model.history)
+        case .overlay: OverlaySettingsView(overlay: model.overlay)
+        case .about: AboutSettingsView()
+        }
     }
 }
 
 private struct GeneralSettingsView: View {
     @ObservedObject var model: AppModel
     @AppStorage("feedbackSoundsEnabled") private var sounds = true
-    @State private var loginEnabled = SMAppService.mainApp.status == .enabled
+    @State private var loginEnabled = false
     @State private var loginError: String?
 
     var body: some View {
@@ -90,9 +98,8 @@ private struct GeneralSettingsView: View {
                     do {
                         if value { try SMAppService.mainApp.register() }
                         else { try await SMAppService.mainApp.unregister() }
-                        loginEnabled = SMAppService.mainApp.status == .enabled
-                        loginError = SMAppService.mainApp.status == .requiresApproval ? "Allow gob.lin in Login Items to finish enabling launch at login." : nil
-                    } catch { loginError = error.localizedDescription }
+                        refreshLoginStatus()
+                    } catch { refreshLoginStatus(error: error) }
                 }
             }))
             if let loginError { Text(loginError).foregroundStyle(.orange) }
@@ -105,12 +112,20 @@ private struct GeneralSettingsView: View {
             if model.insertion.hasRecoveryClipboard { Button("Restore previous clipboard") { model.insertion.restorePreviousClipboard() }.disabled(model.insertion.busy) }
             Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         }.padding(28)
+        .onAppear { refreshLoginStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
+    }
+
+    private func refreshLoginStatus(error: Error? = nil) {
+        let status = SMAppService.mainApp.status
+        loginEnabled = status == .enabled
+        loginError = status == .requiresApproval ? "Allow gob.lin in Login Items to finish enabling launch at login." : error?.localizedDescription
     }
 }
 
 private struct HistorySettingsView: View {
     @ObservedObject var history: HistoryModel
-    @State private var count = 0
+    @State private var count: Int?
     @State private var days = 0
 
     var body: some View {
@@ -118,20 +133,25 @@ private struct HistorySettingsView: View {
             Text("History retention").font(.largeTitle.bold())
             Text("Raw text, final text and original audio stay recoverable. Starred dictations are always kept.").foregroundStyle(.secondary)
             Picker("Unstarred entries", selection: $count) {
-                Text("Keep all").tag(0)
-                ForEach([100, 500, 1000, 5000], id: \.self) { Text("Keep latest \($0)").tag($0) }
+                Text("Keep all").tag(Int?.none)
+                Text("Keep none (starred only)").tag(Optional(0))
+                ForEach([100, 500, 1000, 5000], id: \.self) { Text("Keep latest \($0)").tag(Optional($0)) }
+                if let count, ![0, 100, 500, 1000, 5000].contains(count) { Text("Keep latest \(count)").tag(Optional(count)) }
             }
             Picker("Age", selection: $days) {
                 Text("No age limit").tag(0)
                 ForEach([7, 30, 90, 365], id: \.self) { Text("\($0) days").tag($0) }
             }
             Text("Applying a shorter policy deletes matching unstarred entries and their audio.").font(.callout).foregroundStyle(.secondary)
-            Button("Apply retention") { Task { await history.saveRetention(HistoryRetention(maximumUnstarredCount: count == 0 ? nil : count, maximumAgeDays: days == 0 ? nil : days)) } }
+            Button("Apply retention") { Task { await history.saveRetention(HistoryRetention(maximumUnstarredCount: count, maximumAgeDays: days == 0 ? nil : days)) } }
             if let error = history.errorMessage { Text(error).foregroundStyle(.orange) }
-        }.padding(28).onAppear {
-            count = history.retention.maximumUnstarredCount ?? 0
-            days = history.retention.maximumAgeDays ?? 0
-        }
+        }.padding(28).onAppear { copyRetention() }
+        .onChange(of: history.retention) { _, _ in copyRetention() }
+    }
+
+    private func copyRetention() {
+        count = history.retention.maximumUnstarredCount
+        days = history.retention.maximumAgeDays ?? 0
     }
 }
 

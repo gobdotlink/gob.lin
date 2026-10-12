@@ -4,8 +4,8 @@ This file records gob.lin's third-party dependency and asset notices.
 
 ## Bundled brand fonts
 
-- Workbench — Copyright 2021 The Workbench Project Authors; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/workbench). See `Licenses/Workbench-OFL.txt`.
-- VT323 — Copyright 2011 The VT323 Project Authors; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/vt323). See `Licenses/VT323-OFL.txt`.
+- Workbench — Copyright 2021 The Workbench Project Authors; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/workbench). See `Workbench-OFL.txt`.
+- VT323 — Copyright 2011 The VT323 Project Authors; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/vt323). See `VT323-OFL.txt`.
 
 The original goblin sprites come from the owner's gob.lin brand kit. Only visual assets and fonts are reused from that kit.
 
