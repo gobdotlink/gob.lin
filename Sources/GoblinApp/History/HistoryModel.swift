@@ -109,7 +109,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func setStarred(_ starred: Bool, entry: HistoryEntry) async {
         do {
             try await store?.setStarred(starred, id: entry.id)
-            await reload()
+            if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index].starred = starred }
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -117,7 +117,9 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if playingEntryID == entry.id { stopAudio() }
         do {
             try await store?.delete(id: entry.id)
-            await reload()
+            requestID = UUID()
+            isLoading = false
+            entries.removeAll { $0.id == entry.id }
         } catch { errorMessage = error.localizedDescription }
     }
 

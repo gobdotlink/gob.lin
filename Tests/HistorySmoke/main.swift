@@ -22,7 +22,7 @@ struct HistorySmoke {
         let first = try await store.insert(HistoryEntry(rawText: raw, finalText: "Clean transcript.",
                                                        targetBundleIdentifier: "test.synthetic", targetApplicationName: "Synthetic fixture",
                                                        createdAt: old, audioDuration: 2, model: "fixture", starred: true), untrimmedAudioURL: source)
-        let second = try await store.insert(HistoryEntry(rawText: "Ordinary words", finalText: "Ordinary words", createdAt: old), untrimmedAudioURL: source)
+        let second = try await store.insert(HistoryEntry(rawText: "Ordinary 1000 words", finalText: "Ordinary words", createdAt: old), untrimmedAudioURL: source)
         let third = try await store.insert(HistoryEntry(rawText: "Newest", finalText: "Newest"))
         check(first.audioFilename != second.audioFilename, "Capture filenames must never collide")
         let firstAudio = try await store.audioFileURL(for: first.id)!
