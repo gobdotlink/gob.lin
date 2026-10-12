@@ -20,6 +20,11 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 640, height: 440)
 
+        Window("gob.lin Dictionary", id: "dictionary") {
+            DictionarySettingsView()
+        }
+        .defaultSize(width: 720, height: 460)
+
         Window("gob.lin History", id: "history") {
             HistoryShell()
         }
@@ -35,6 +40,7 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
+        Button("Dictionary…") { show("dictionary") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
