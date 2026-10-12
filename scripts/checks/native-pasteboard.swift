@@ -4,6 +4,8 @@ import Foundation
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) { precondition(condition(), message) }
 let pasteboard = NSPasteboard.withUniqueName()
 defer { pasteboard.releaseGlobally() }
+pasteboard.clearContents()
+expect(ClipboardSnapshot(pasteboard: pasteboard) != nil, "an empty named clipboard remains a valid snapshot")
 let originalText = NSPasteboardItem()
 originalText.setString("original", forType: .string)
 originalText.setString("<b>original</b>", forType: .html)

@@ -115,7 +115,8 @@ final class TextInsertionService: ObservableObject {
         guard pasteboard.writeObjects([item]) else {
             recovery = snapshot
             hasRecoveryClipboard = true
-            unverifiedChangeCount = nil
+            // Keep recovery while gob.lin's own cleared/partial clipboard retains this count.
+            unverifiedChangeCount = pasteboard.changeCount
             setStatus("Could not prepare the transcript clipboard; previous contents remain recoverable", outcome: .failure(.insertionClipboardBusy)); return
         }
         let ownedCount = pasteboard.changeCount
@@ -150,7 +151,10 @@ final class TextInsertionService: ObservableObject {
                     unverifiedChangeCount = nil
                     providers.removeAll()
                     setStatus("Paste verified in the focused app · clipboard restored", outcome: .success)
-                } else { setStatus("Paste verified, but clipboard restore failed; recovery remains available", outcome: .failure(.insertionClipboardBusy)) }
+                } else {
+                    unverifiedChangeCount = pasteboard.changeCount
+                    setStatus("Paste verified, but clipboard restore failed; recovery remains available", outcome: .failure(.insertionClipboardBusy))
+                }
                 return
             }
             try? await Task.sleep(for: .milliseconds(50))
@@ -167,7 +171,10 @@ final class TextInsertionService: ObservableObject {
             unverifiedChangeCount = nil
             providers.removeAll()
             setStatus("Previous clipboard restored by your request", outcome: .success)
-        } else { setStatus("Clipboard restore failed; recovery remains available", outcome: .failure(.insertionClipboardBusy)) }
+        } else {
+            unverifiedChangeCount = pasteboard.changeCount
+            setStatus("Clipboard restore failed; recovery remains available", outcome: .failure(.insertionClipboardBusy))
+        }
     }
 
     func shutdown() {

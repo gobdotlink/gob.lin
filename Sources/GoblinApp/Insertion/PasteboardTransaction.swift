@@ -6,7 +6,8 @@ struct ClipboardSnapshot {
     init?(pasteboard: NSPasteboard) {
         let count = pasteboard.changeCount
         var result: [[NSPasteboard.PasteboardType: Data]] = []
-        for item in pasteboard.pasteboardItems ?? [] {
+        guard let items = pasteboard.pasteboardItems else { return nil }
+        for item in items {
             var representations: [NSPasteboard.PasteboardType: Data] = [:]
             for type in item.types {
                 // Never overwrite a clipboard whose promised representation cannot be preserved.
@@ -16,7 +17,7 @@ struct ClipboardSnapshot {
             result.append(representations)
         }
         guard count == pasteboard.changeCount else { return nil }
-        items = result
+        self.items = result
     }
 
     @discardableResult
