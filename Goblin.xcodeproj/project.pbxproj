@@ -13,15 +13,20 @@
 		17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */; };
 		1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */; };
 		1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */; };
+		21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */; };
 		31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */; };
 		328878B095DD6E130364C893 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = DDB1197B94259F10AEFE3EFC /* Assets */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EBD258A804FC8847A87D791 /* OnboardingView.swift */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
+		45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A854E8221704C177743D7C /* FocusedText.swift */; };
 		669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740B2E14FC110A8510E92CB /* OverlayController.swift */; };
+		705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */; };
+		70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */; };
 		722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD14CC141C14EE017D44E28D /* HistoryModel.swift */; };
 		7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */; };
 		75603E9EA9B586CFE778063E /* Goblin.icns in Resources */ = {isa = PBXBuildFile; fileRef = 8C7DC821C59D20E3BD8E9846 /* Goblin.icns */; };
+		8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86CA786E7971062A617DCC40 /* KeyboardLayout.swift */; };
 		85E32CD7C7808D071F8091FA /* RewriteKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8E24C44A912745118817BC /* RewriteKeychain.swift */; };
 		94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */; };
 		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
@@ -32,20 +37,25 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
+		3C81C66443374189553A47A0 /* gob-18-settings */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-18-settings"; path = .; sourceTree = SOURCE_ROOT; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4740B2E14FC110A8510E92CB /* OverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayController.swift; sourceTree = "<group>"; };
 		5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySettingsView.swift; sourceTree = "<group>"; };
 		5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardTransaction.swift; sourceTree = "<group>"; };
 		7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyShortcut.swift; sourceTree = "<group>"; };
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
-		758DF33C23372AD6A0E6B6FD /* goblin-integration */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "goblin-integration"; path = .; sourceTree = SOURCE_ROOT; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		86CA786E7971062A617DCC40 /* KeyboardLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayout.swift; sourceTree = "<group>"; };
 		8C7DC821C59D20E3BD8E9846 /* Goblin.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Goblin.icns; sourceTree = "<group>"; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
+		9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsertionService.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
+		C2A854E8221704C177743D7C /* FocusedText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedText.swift; sourceTree = "<group>"; };
 		CD14CC141C14EE017D44E28D /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
 		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 		D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneSettingsView.swift; sourceTree = "<group>"; };
@@ -72,7 +82,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				758DF33C23372AD6A0E6B6FD /* goblin-integration */,
+				3C81C66443374189553A47A0 /* gob-18-settings */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -144,11 +154,24 @@
 				D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */,
 				46547DF0C29D7ED94EADCB64 /* History */,
 				2121F3256188A52EA0842CDA /* Hotkeys */,
+				FB558193443617ABD3750FC0 /* Insertion */,
 				40EA8A05ACABDE4CA467032E /* Overlay */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 			);
 			name = GoblinApp;
 			path = Sources/GoblinApp;
+			sourceTree = "<group>";
+		};
+		FB558193443617ABD3750FC0 /* Insertion */ = {
+			isa = PBXGroup;
+			children = (
+				C2A854E8221704C177743D7C /* FocusedText.swift */,
+				207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */,
+				86CA786E7971062A617DCC40 /* KeyboardLayout.swift */,
+				60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */,
+				9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */,
+			);
+			path = Insertion;
 			sourceTree = "<group>";
 		};
 		FF1388BE8154CBC9382C0E0E = {
@@ -243,19 +266,24 @@
 				1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */,
 				04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */,
 				12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */,
+				45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */,
 				F80F9DD8AE1771A3DE51D7BA /* HistoryView.swift in Sources */,
 				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
 				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
+				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,
+				8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
 				669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */,
 				7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */,
+				21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */,
 				A80D16C881344416CB256003 /* PermissionModel.swift in Sources */,
 				85E32CD7C7808D071F8091FA /* RewriteKeychain.swift in Sources */,
 				174F206992DBAA3EB8F3DF21 /* RewriteSettingsView.swift in Sources */,
 				94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */,
+				705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */,
 				1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

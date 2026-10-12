@@ -53,6 +53,12 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 620, height: 520)
         .windowResizability(.contentSize)
+
+        Window("gob.lin Text insertion", id: "insertion") {
+            InsertionSettingsView(service: model.insertion)
+        }
+        .defaultSize(width: 620, height: 450)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -70,9 +76,11 @@ private struct GoblinMenu: View {
         Button("Overlay…") { show("overlay-settings") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         Button("Shortcuts…") { show("shortcuts") }
+        Button("Text insertion…") { show("insertion") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
+        ClipboardRecoveryMenu(service: model.insertion)
         Divider()
         Button("Quit gob.lin") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
@@ -81,6 +89,15 @@ private struct GoblinMenu: View {
     private func show(_ id: String) {
         openWindow(id: id)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+private struct ClipboardRecoveryMenu: View {
+    @ObservedObject var service: TextInsertionService
+    var body: some View {
+        if service.hasRecoveryClipboard {
+            Button("Restore previous clipboard") { service.restorePreviousClipboard() }.disabled(service.busy)
+        }
     }
 }
 
