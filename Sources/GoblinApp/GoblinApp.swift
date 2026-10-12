@@ -24,6 +24,11 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 640, height: 440)
 
+        Window("gob.lin Overlay", id: "overlay-settings") {
+            OverlaySettingsView(overlay: model.overlay)
+        }
+        .defaultSize(width: 520, height: 260)
+
         Window("gob.lin History", id: "history") {
             HistoryShell()
         }
@@ -39,6 +44,7 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
+        Button("Overlay…") { show("overlay-settings") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
