@@ -43,6 +43,12 @@ struct GoblinApp: App {
             HistoryView(model: model.history)
         }
         .defaultSize(width: 720, height: 480)
+
+        Window("gob.lin Shortcuts", id: "shortcuts") {
+            ShortcutSettingsView(service: model.hotkeys)
+        }
+        .defaultSize(width: 620, height: 520)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -58,6 +64,7 @@ private struct GoblinMenu: View {
         Button("Tone…") { show("tone") }
         Button("AI cleanup…") { show("rewrite") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
+        Button("Shortcuts…") { show("shortcuts") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
