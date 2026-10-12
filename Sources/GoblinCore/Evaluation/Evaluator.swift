@@ -136,7 +136,7 @@ public enum Evaluator {
                 throw EvaluationError.mismatchedReference(id)
             }
             let reference = baseline.referenceText ?? candidate.referenceText
-            let jargon = Set(baseline.jargon + candidate.jargon)
+            let jargon = Set((baseline.jargon + candidate.jargon).map(WordDiff.words))
             let ordinary = Set((baseline.ordinaryWords + candidate.ordinaryWords).map { WordDiff.words($0).first ?? "" })
             let aFalse = try accumulate(baseline, reference: reference, jargon: jargon, ordinary: ordinary, summary: &aSummary)
             let bFalse = try accumulate(candidate, reference: reference, jargon: jargon, ordinary: ordinary, summary: &bSummary)
@@ -169,7 +169,7 @@ public enum Evaluator {
         return result
     }
 
-    private static func accumulate(_ record: EvaluationRecord, reference: String?, jargon: Set<String>, ordinary: Set<String>,
+    private static func accumulate(_ record: EvaluationRecord, reference: String?, jargon: Set<[String]>, ordinary: Set<String>,
                                    summary: inout EvaluationSummary) throws -> [OrdinaryWordCorrection] {
         guard let reference else { return [] }
         summary.referenceRecords += 1
@@ -179,8 +179,7 @@ public enum Evaluator {
         let finalWords = WordDiff.words(record.finalText)
         summary.referenceWords += referenceWords.count
         summary.wordErrors += try WordDiff.between(referenceWords, finalWords).filter { $0.operation != .equal }.count
-        for term in jargon {
-            let phrase = WordDiff.words(term)
+        for phrase in jargon {
             let expected = occurrences(phrase, in: referenceWords)
             summary.jargonExpected += expected
             summary.jargonHits += min(expected, occurrences(phrase, in: finalWords))
