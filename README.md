@@ -92,6 +92,54 @@ its original capture until `HistoryModel.record` returns success.
 migrations, retention, audio boundaries, and paged access to 1,000 synthetic
 entries. It never uses your recordings or history folder.
 
+## CLI evaluation
+
+```sh
+swift run goblin transcribe recording.wav
+swift run goblin replay ./recordings
+swift run goblin replay history
+swift run goblin replay ./recorded-transcripts --recorded > replay.jsonl
+swift run goblin replay history --recorded --history-dir /path/to/data > history.jsonl
+swift run goblin eval A.jsonl B.jsonl
+swift run goblin eval A.jsonl B.jsonl --json > report.json
+```
+
+Audio transcription/replay uses the shared `RecordedAudioPipeline` and
+`SpeechEngine` boundary. Until the benchmark selects and registers an adapter,
+these commands return a structured `engine_not_configured` error with exit 3.
+They never substitute fabricated recognition. The optional postprocessor keeps
+raw text and a visible error in the output when rewriting fails.
+
+`--recorded` reads existing transcript JSONL files from a directory, or exports
+saved History entries. It labels each row `source: "recorded_transcript"` and
+preserves existing text and timings; it does not perform or time recognition.
+Each JSONL row requires `id`, `rawText`, and `finalText`. Optional fields are
+`referenceText`, `jargon` (preferred phrases), `ordinaryWords` (individual words),
+`model`, `timings`, and `postprocessingError`. Stage timings use
+`DictationTimings` milliseconds; absent timings remain unavailable.
+
+Evaluation joins A and B by ID, reports missing IDs, and rejects duplicates or
+conflicting ground truth. WER is weighted by reference word count and ignores
+case/punctuation. Jargon hits count annotated reference occurrences. Ordinary
+word regressions are replacements/deletions of annotated raw words that were
+already correct in the reference. Without ground truth/annotations those
+accuracy metrics are unavailable. Percentiles use nearest-rank p50/p90/p95/p99;
+processing latency excludes capture duration and sums trim, ASR, rewrite, and
+insertion. JSONL input is limited to 64 MiB per file; word diff matrices are
+limited to 4,000,000 cells to bound memory and computation.
+
+The small synthetic fixture set in `Tests/EvaluationSmoke/fixtures` demonstrates
+that a jargon improvement can still be a regression: B corrects “Dev review”
+but incorrectly changes “like” to “Lisa” and “at” to “auth”. CI exercises these
+accuracy checks and the command protocol using only synthetic data and a
+temporary History directory. Real-recording throughput/accuracy remains a
+benchmark acceptance item, with no measurements claimed by these fixtures.
+
+CLI exit codes: 0 success, 1 operation/data failure, 2 usage error, 3 missing
+speech engine. Errors are JSON on stderr; transcript/report output is stdout.
+The command-protocol smoke checks additionally require Python 3 and use only
+its standard library.
+
 ## Planned architecture
 
 Native Swift, macOS 26+, distributed as a direct download.
