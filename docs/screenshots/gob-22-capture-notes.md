@@ -27,6 +27,8 @@ Five images host the production DictationOverlay with explicit synthetic state: 
 
 Every image captures only the owned native window. The desktop and private application windows are excluded. The fixture cleans up its suite/data, stops its AppModel, and requests quit through a run-loop timer using the real GoblinApplicationDelegate. A common-mode timeout prevents a stalled capture from leaving an instance open. The final capture process (owned PID14484) exited normally with status zero and was verified absent afterward.
 
+Separately, the final signed app was verified to quit gracefully through NSRunningApplication IPC. The termination request returned true, and the subsequent running-instance check found zero remaining owned app instances. This verifies the IPC quit path; physical menu and keyboard Quit remain untested.
+
 ## Reused overlay host follow-up
 
 An earlier sequential fixture capture omitted the shared `poli` prefix when moving from “polishing your words…” to “polish failed — pasted raw”. Recreating the host was not sufficient evidence to dismiss that observation, because production OverlayController also reuses its host.
