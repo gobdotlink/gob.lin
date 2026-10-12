@@ -20,11 +20,12 @@ final class HotkeyService: ObservableObject {
     private var secureTimer: Timer?
     private var holdTimer: Timer?
     private var releaseTask: Task<Void, Never>?
+    private var releasePending = false
     private var handler: EventHandlerRef?
     private var carbonShortcut: EventHotKeyRef?
     private var carbonEscape: EventHotKeyRef?
     private var carbonPressed = false
-    private var wakeObserver: NSObjectProtocol?
+    private var sessionObservers: [NSObjectProtocol] = []
 
     init(permissions: PermissionModel) {
         self.permissions = permissions
@@ -39,8 +40,15 @@ final class HotkeyService: ObservableObject {
         secureTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkSecureInput() }
         }
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.restart() }
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
+            sessionObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.restart() }
+            })
+        }
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            sessionObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.stop() }
+            })
         }
         start()
     }
@@ -75,6 +83,7 @@ final class HotkeyService: ObservableObject {
         tapGeneration = UUID()
         holdTimer?.invalidate()
         releaseTask?.cancel()
+        releasePending = false
         carbonPressed = false
         apply(state.cancel())
         unregisterCarbonShortcut()
@@ -86,7 +95,8 @@ final class HotkeyService: ObservableObject {
         stop()
         secureTimer?.invalidate()
         if let handler { RemoveEventHandler(handler); self.handler = nil }
-        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver); self.wakeObserver = nil }
+        for observer in sessionObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        sessionObservers.removeAll()
     }
 
     func setShortcut(_ value: HotkeyShortcut) {
@@ -114,6 +124,7 @@ final class HotkeyService: ObservableObject {
     func cancelRecording() {
         holdTimer?.invalidate()
         releaseTask?.cancel()
+        releasePending = false
         apply(state.cancel())
     }
 
@@ -125,15 +136,17 @@ final class HotkeyService: ObservableObject {
         switch input {
         case .press:
             releaseTask?.cancel()
+            releasePending = false
             state.press(at: now)
             holdTimer?.invalidate()
             holdTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, !self.releasePending else { return }
                     self.apply(self.state.tick(at: ProcessInfo.processInfo.systemUptime))
                 }
             }
         case .release:
+            releasePending = true
             holdTimer?.invalidate()
             // A small hold-back absorbs repeat release/press pairs, never clipboard restoration.
             releaseTask?.cancel()
@@ -142,11 +155,13 @@ final class HotkeyService: ObservableObject {
                 guard !Task.isCancelled, let self else { return }
                 self.holdTimer?.invalidate()
                 self.apply(self.state.release(at: now))
+                self.releasePending = false
             }
         case .chord: apply(state.chord())
         case .escape, .reset:
             holdTimer?.invalidate()
             releaseTask?.cancel()
+            releasePending = false
             apply(state.cancel())
         }
     }
