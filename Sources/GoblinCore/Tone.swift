@@ -32,7 +32,7 @@ public enum ToneFormatter {
         guard !input.isEmpty else { return input }
         var text = input
         var protected = protectedRanges(in: text, terms: protectedTerms)
-        let regex = try! NSRegularExpression(pattern: #"(?:^\s*|[.!?]\s+)([\p{L}\p{M}][\p{L}\p{M}\p{N}'’]*)"#)
+        let regex = try! NSRegularExpression(pattern: #"(?:^\s*|[.!?]\s+)["'“‘(\[{]?([\p{L}\p{M}][\p{L}\p{M}\p{N}'’]*)"#)
         let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
         for match in matches.reversed() {
             let nsrange = match.range(at: 1)
@@ -58,15 +58,18 @@ public enum ToneFormatter {
             }
         }
         guard let last = text.lastIndex(where: { !$0.isWhitespace }) else { return text }
-        let lastRange = NSRange(last...last, in: text)
-        let protectedEnd = protected.contains { NSIntersectionRange($0, lastRange).length > 0 }
+        var ending = last
+        while ending > text.startIndex, #")"'”’]}"#.contains(text[ending]) { ending = text.index(before: ending) }
+        let endingRange = NSRange(ending...ending, in: text)
+        let endingProtection = tone == .formal ? protectedRanges(in: text, terms: [], technicalOnly: true) : protected
+        let protectedEnd = endingProtection.contains { NSIntersectionRange($0, endingRange).length > 0 }
         if tone == .formal {
-            if !protectedEnd, !".!?:;".contains(text[last]), text[last].isLetter || text[last].isNumber {
+            if !protectedEnd, !".!?:;".contains(text[ending]), text[ending].isLetter || text[ending].isNumber {
                 text.insert(".", at: text.index(after: last))
             }
-        } else if text[last] == ".", !protectedEnd {
-            let before = last > text.startIndex ? text[text.index(before: last)] : nil
-            if before != "." { text.remove(at: last) }
+        } else if text[ending] == ".", !protectedEnd {
+            let before = ending > text.startIndex ? text[text.index(before: ending)] : nil
+            if before != "." { text.remove(at: ending) }
         }
         return text
     }
@@ -76,12 +79,13 @@ public enum ToneFormatter {
         return String(first).uppercased() + text.dropFirst()
     }
 
-    private static func protectedRanges(in text: String, terms: [String]) -> [NSRange] {
+    private static func protectedRanges(in text: String, terms: [String], technicalOnly: Bool = false) -> [NSRange] {
         // Keep fenced/inline code, URLs, emails, acronyms, camelCase, and supplied names verbatim.
-        let pattern = #"```[\s\S]*?(?:```|$)|`[^`\n]*(?:`|$)|(?:https?://|www\.)[^\s]+|[\w.+-]+@[\w.-]+\.[\p{L}]{2,}|\b[\p{Lu}]{2,}[\p{L}\p{N}]*\b|\b[\p{Ll}]+[\p{Lu}][\p{L}\p{N}]*\b"#
+        var pattern = #"```[\s\S]*?(?:```|$)|`[^`\n]*(?:`|$)|(?i:https?://|www\.)[^\s]+|[\w.+-]+@[\w.-]+\.[\p{L}]{2,}"#
+        if !technicalOnly { pattern += #"|\b[\p{Lu}]{2,}[\p{L}\p{N}]*\b|\b[\p{Ll}]+[\p{Lu}][\p{L}\p{N}]*\b|\b(?:\p{L}\.){2,}"# }
         let regex = try! NSRegularExpression(pattern: pattern)
         var ranges = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).map(\.range)
-        for term in terms where !term.isEmpty {
+        for term in terms where !technicalOnly && !term.isEmpty {
             let escaped = NSRegularExpression.escapedPattern(for: term)
             let matcher = try! NSRegularExpression(pattern: "(?<![\\p{L}\\p{N}])" + escaped + "(?![\\p{L}\\p{N}])", options: .caseInsensitive)
             ranges += matcher.matches(in: text, range: NSRange(text.startIndex..., in: text)).map(\.range)
