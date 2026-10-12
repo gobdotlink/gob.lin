@@ -30,6 +30,11 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 600, height: 480)
 
+        Window("gob.lin AI Cleanup", id: "rewrite") {
+            RewriteSettingsView()
+        }
+        .defaultSize(width: 640, height: 620)
+
         Window("gob.lin History", id: "history") {
             HistoryShell()
         }
@@ -47,6 +52,7 @@ private struct GoblinMenu: View {
         Button("History") { show("history") }
         Button("Dictionary…") { show("dictionary") }
         Button("Tone…") { show("tone") }
+        Button("AI cleanup…") { show("rewrite") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
