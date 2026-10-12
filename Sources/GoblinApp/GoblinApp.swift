@@ -29,6 +29,11 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 720, height: 460)
 
+        Window("gob.lin Tone", id: "tone") {
+            ToneSettingsView()
+        }
+        .defaultSize(width: 600, height: 480)
+
         Window("gob.lin History", id: "history") {
             HistoryShell()
         }
@@ -45,6 +50,7 @@ private struct GoblinMenu: View {
             .keyboardShortcut(",")
         Button("History") { show("history") }
         Button("Dictionary…") { show("dictionary") }
+        Button("Tone…") { show("tone") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }

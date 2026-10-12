@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
 		17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */; };
+		1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */; };
 		328878B095DD6E130364C893 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = DDB1197B94259F10AEFE3EFC /* Assets */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EBD258A804FC8847A87D791 /* OnboardingView.swift */; };
@@ -28,8 +29,9 @@
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
-		B2C84042CF16ED83D68D625D /* gob-4-merge-resolution */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-4-merge-resolution"; path = .; sourceTree = SOURCE_ROOT; };
+		D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneSettingsView.swift; sourceTree = "<group>"; };
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
+		EDC77A2CAD159A524151DF5D /* gob-5-merge-resolution */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-5-merge-resolution"; path = .; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,7 +50,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				B2C84042CF16ED83D68D625D /* gob-4-merge-resolution */,
+				EDC77A2CAD159A524151DF5D /* gob-5-merge-resolution */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -85,6 +87,7 @@
 				5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */,
+				D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 			);
 			name = GoblinApp;
@@ -185,6 +188,7 @@
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
 				A80D16C881344416CB256003 /* PermissionModel.swift in Sources */,
+				1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
