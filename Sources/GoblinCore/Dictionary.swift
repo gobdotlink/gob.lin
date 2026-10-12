@@ -119,6 +119,7 @@ public enum DictionaryCorrector {
             .sorted { $0.count > $1.count }
         var edits: [(Range<String.Index>, DictionaryCorrection)] = []
         var index = 0
+        var fuzzyLockedUntil = 0
         while index < tokens.count {
             if DictationTextProtection.contains(tokens[index].range, in: text, ranges: protected) {
                 index += 1
@@ -143,7 +144,7 @@ public enum DictionaryCorrector {
                 break
             }
             if matched { continue }
-            // An existing preferred spelling is a no-change lockout, never an implicit alias or fuzzy target.
+            // Preferred spellings block fuzzy changes; explicit aliases still take precedence.
             for words in canonicalPhrases where !words.isEmpty && index + words.count <= tokens.count {
                 let slice = Array(tokens[index..<(index + words.count)])
                 guard slice.map(\.key) == words,
@@ -152,13 +153,11 @@ public enum DictionaryCorrector {
                       }) else { continue }
                 let range = slice[0].range.lowerBound..<slice[slice.count - 1].range.upperBound
                 guard !DictationTextProtection.contains(range, in: text, ranges: protected) else { continue }
-                index += slice.count
-                matched = true
+                fuzzyLockedUntil = max(fuzzyLockedUntil, index + words.count)
                 break
             }
-            if matched { continue }
             let token = tokens[index]
-            if allowFuzzy, text[token.range].count >= 5, token.key.allSatisfy(\.isLetter), !commonEnglish.contains(token.key) {
+            if allowFuzzy, index >= fuzzyLockedUntil, text[token.range].count >= 5, token.key.allSatisfy(\.isLetter), !commonEnglish.contains(token.key) {
                 let candidates = entries.filter {
                     let key = dictionaryKey($0.spelling)
                     return $0.spelling.count >= 5 && key.allSatisfy(\.isLetter) && key != token.key && oneEditApart(token.key, key)

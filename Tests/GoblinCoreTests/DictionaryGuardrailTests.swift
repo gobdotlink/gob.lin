@@ -13,6 +13,7 @@ import Testing
     #expect(DictionaryCorrector.correct("(day review), then postgre!", entries: entries + [DictionaryEntry(spelling: "Postgres", aliases: ["postgre"])]).text == "(Dev review), then Postgres!")
     #expect(DictionaryCorrector.correct("Eye phone", entries: [DictionaryEntry(spelling: "iPhone", aliases: ["eye phone"])]).text == "iPhone")
     #expect(DictionaryCorrector.correct("Node package manager", entries: [DictionaryEntry(spelling: "npm", aliases: ["node package manager"])]).text == "Npm")
+    #expect(DictionaryCorrector.correct("Acme cloud sync", entries: [DictionaryEntry(spelling: "Acme cloud"), DictionaryEntry(spelling: "CloudSync", aliases: ["cloud sync"])]).text == "Acme CloudSync")
 }
 
 @Test func fuzzyNeverChangesCommonOrShortWordsAndIsOffByDefault() {
