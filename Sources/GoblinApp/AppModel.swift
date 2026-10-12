@@ -4,6 +4,7 @@ import SwiftUI
 final class AppModel: ObservableObject {
     let overlay = OverlayController()
     @Published var mascotState: MascotState = .idle
+    let history = HistoryModel()
     @Published var lastTranscript: String?
     var pasteTranscript: ((String) -> Void)?
 
