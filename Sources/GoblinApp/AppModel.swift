@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
+    let permissions = PermissionModel()
     @Published var lastTranscript: String?
     var pasteTranscript: ((String) -> Void)?
 
