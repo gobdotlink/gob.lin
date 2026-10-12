@@ -7,9 +7,17 @@ preview='.build/settings-capture/gob.lin Settings Capture.app'
 mkdir -p "$preview/Contents/MacOS" "$preview/Contents/Resources"
 sources=()
 while IFS= read -r source; do sources+=("$source"); done < <(rg --files Sources/GoblinApp -g '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
+mkdir -p .build/settings-capture
+python3 - <<'PYTHON'
+from pathlib import Path
+source = Path("Sources/GoblinApp/GoblinApp.swift").read_text()
+menu = source[source.index("private struct GoblinMenu: View {"):]
+menu = menu.replace("private struct GoblinMenu: View {", "struct GoblinMenu: View {", 1)
+Path(".build/settings-capture/ProductionMenu.swift").write_text("import AppKit\nimport GoblinCore\nimport SwiftUI\n" + menu)
+PYTHON
 swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx26.0 \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
-    "${sources[@]}" scripts/capture-settings.swift \
+    "${sources[@]}" scripts/capture-settings.swift .build/settings-capture/ProductionMenu.swift \
     "$binary_directory"/GoblinCore.build/*.swift.o "$binary_directory"/GoblinEngines.build/*.swift.o \
     -o "$preview/Contents/MacOS/SettingsCapture"
 cp -R Sources/GoblinApp/Assets "$preview/Contents/Resources/"
