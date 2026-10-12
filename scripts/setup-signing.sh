@@ -2,7 +2,7 @@
 set -euo pipefail
 
 identity='gob.lin Local Development'
-keychain="${GOBLIN_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+keychain="$HOME/Library/Keychains/login.keychain-db"
 
 if security find-identity -v -p codesigning "$keychain" | grep -Fq "\"$identity\""; then
     printf 'Signing identity already available: %s\n' "$identity"

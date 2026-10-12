@@ -34,5 +34,8 @@ targets:
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
         CODE_SIGNING_REQUIRED: YES
         COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: YES
     scheme:
       testTargets: []

@@ -15,7 +15,7 @@
 
 /* Begin PBXFileReference section */
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		576B5126560CD2CC1CDAD24A /* gob-5-skeleton */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-5-skeleton"; path = .; sourceTree = SOURCE_ROOT; };
+		968861AE69753BEE7B5E3F32 /* gob-5-signing-fixes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-5-signing-fixes"; path = .; sourceTree = SOURCE_ROOT; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -36,7 +36,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				576B5126560CD2CC1CDAD24A /* gob-5-skeleton */,
+				968861AE69753BEE7B5E3F32 /* gob-5-signing-fixes */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -290,7 +290,7 @@
 				CODE_SIGNING_REQUIRED = YES;
 				CODE_SIGN_ENTITLEMENTS = Resources/Goblin.entitlements;
 				CODE_SIGN_IDENTITY = "gob.lin Local Development";
-				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
