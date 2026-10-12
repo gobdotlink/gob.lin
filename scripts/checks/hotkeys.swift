@@ -1,0 +1,32 @@
+import Foundation
+
+func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
+    precondition(condition(), message)
+}
+
+var state = HotkeyStateMachine()
+state.press(at: 1)
+expect(state.release(at: 1.1) == [.beginRecording(.handsFree)], "quick tap starts hands-free")
+state.press(at: 2)
+expect(state.release(at: 2.1) == [.finishRecording(queueForProcessing: false)], "second tap finishes")
+state.press(at: 3)
+expect(state.tick(at: 3.31) == [.beginRecording(.hold)], "hold starts even while processing")
+expect(state.release(at: 3.5) == [.finishRecording(queueForProcessing: true)], "processing queues without losing a new press")
+expect(state.processingCount == 2, "both jobs retained")
+state.processingCompleted(); state.processingCompleted()
+expect(state.processingCount == 0, "jobs complete independently")
+state.press(at: 4)
+expect(state.chord().isEmpty, "Cmd+S must not start a Cmd-only recording")
+expect(state.release(at: 4.1).isEmpty, "chord release is ignored")
+state.press(at: 5)
+expect(state.tick(at: 5.31) == [.beginRecording(.hold)], "hold after chord works")
+expect(state.chord() == [.cancelRecording], "adding a chord cancels a pending modifier hold")
+expect(state.release(at: 5.5).isEmpty, "cancelled hold does not become a tap")
+state.press(at: 6)
+expect(state.release(at: 6.1) == [.beginRecording(.handsFree)], "next tap works")
+expect(state.cancel() == [.cancelRecording], "Escape cancels recording")
+expect(state.cancel().isEmpty, "Escape outside recording has no action")
+state.press(at: 7)
+state.press(at: 7.05)
+expect(state.release(at: 7.1) == [.beginRecording(.handsFree)], "repeat presses cannot replace the initial press")
+print("Hotkey safety checks passed")
