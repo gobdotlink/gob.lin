@@ -39,7 +39,7 @@ struct SettingsView: View {
         } detail: {
             Group {
                 switch model.settingsSelection ?? .general {
-                case .dictionary, .rewrite, .overlay, .diagnostics: sectionContents
+                case .dictionary, .rewrite, .history, .overlay, .diagnostics: sectionContents
                 default: ScrollView { sectionContents }
                 }
             }
@@ -69,7 +69,7 @@ struct SettingsView: View {
                                                onSaved: { model.refreshConfiguration(); model.diagnostics.resolve(.settings) },
                                                onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
-        case .history: HistorySettingsView(history: model.history)
+        case .history: HistoryView(model: model.history)
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
         case .about: AboutSettingsView()
@@ -125,38 +125,6 @@ private struct GeneralSettingsView: View {
         let status = SMAppService.mainApp.status
         loginEnabled = status == .enabled
         loginError = status == .requiresApproval ? "Allow gob.lin in Login Items to finish enabling launch at login." : error?.localizedDescription
-    }
-}
-
-private struct HistorySettingsView: View {
-    @ObservedObject var history: HistoryModel
-    @State private var count: Int?
-    @State private var days = 0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("History retention").font(.largeTitle.bold())
-            Text("Raw text, final text and original audio stay recoverable. Starred dictations are always kept.").foregroundStyle(.secondary)
-            Picker("Unstarred entries", selection: $count) {
-                Text("Keep all").tag(Int?.none)
-                Text("Keep none (starred only)").tag(Optional(0))
-                ForEach([100, 500, 1000, 5000], id: \.self) { Text("Keep latest \($0)").tag(Optional($0)) }
-                if let count, ![0, 100, 500, 1000, 5000].contains(count) { Text("Keep latest \(count)").tag(Optional(count)) }
-            }
-            Picker("Age", selection: $days) {
-                Text("No age limit").tag(0)
-                ForEach([7, 30, 90, 365], id: \.self) { Text("\($0) days").tag($0) }
-            }
-            Text("Applying a shorter policy deletes matching unstarred entries and their audio.").font(.callout).foregroundStyle(.secondary)
-            Button("Apply retention") { Task { await history.saveRetention(HistoryRetention(maximumUnstarredCount: count, maximumAgeDays: days == 0 ? nil : days)) } }
-            if let error = history.errorMessage { Text(error).foregroundStyle(.orange) }
-        }.padding(28).onAppear { copyRetention() }
-        .onChange(of: history.retention) { _, _ in copyRetention() }
-    }
-
-    private func copyRetention() {
-        count = history.retention.maximumUnstarredCount
-        days = history.retention.maximumAgeDays ?? 0
     }
 }
 

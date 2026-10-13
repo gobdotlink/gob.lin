@@ -26,11 +26,6 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 940, height: 720)
 
-        Window("gob.lin History", id: "history") {
-            HistoryView(model: model.history)
-        }
-        .defaultSize(width: 820, height: 620)
-
     }
 
     private func attachLifecycle() { lifecycle.model = model }
@@ -43,7 +38,7 @@ private struct GoblinMenu: View {
     var body: some View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
-        Button("History") { show("history") }
+        Button("History") { model.settingsSelection = .history; show("settings") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         if let warning = model.diagnostics.warningMessage {
             Text(warning)

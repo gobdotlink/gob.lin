@@ -10,6 +10,18 @@ struct HistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("History").font(.largeTitle.bold())
+                    Spacer()
+                    Button("Retention…", systemImage: "clock") { showingRetention = true }
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.reload() } }
+                }
+                TextField("Search transcripts or app names", text: $model.searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Search history")
+            }.padding(20)
+            Divider()
             if let error = model.errorMessage {
                 HStack(alignment: .top) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -33,7 +45,7 @@ struct HistoryView: View {
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.1))
             }
-            NavigationSplitView {
+            HSplitView {
                 List(selection: $selectedID) {
                     ForEach(model.entries) { entry in
                         HStack(alignment: .top) {
@@ -56,30 +68,30 @@ struct HistoryView: View {
                                                systemImage: "text.bubble", description: Text("Raw text, final text, and original audio stay together here."))
                     }
                 }
-                .navigationSplitViewColumnWidth(min: 220, ideal: 280)
-            } detail: {
-                if let entry = model.entries.first(where: { $0.id == selectedID }) {
-                    details(entry)
-                } else {
-                    ContentUnavailableView("Select a dictation", systemImage: "text.alignleft")
+                .frame(minWidth: 220, idealWidth: 250, maxWidth: 320, maxHeight: .infinity)
+                Group {
+                    if let entry = model.entries.first(where: { $0.id == selectedID }) {
+                        details(entry)
+                    } else {
+                        ContentUnavailableView("Select a dictation", systemImage: "text.alignleft")
+                    }
                 }
+                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .searchable(text: $model.searchText, prompt: "Search transcripts or app names")
         .task(id: model.searchText) { await model.reload() }
-        .toolbar {
-            Button("Retention", systemImage: "clock") { showingRetention = true }
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.reload() } }
+        .onChange(of: model.entries.map(\.id), initial: true) { _, ids in
+            if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
         }
         .sheet(isPresented: $showingRetention) { HistoryRetentionView(model: model) }
         .alert("Delete this dictation and its saved audio?", isPresented: Binding(get: { deleteCandidate != nil }, set: { if !$0 { deleteCandidate = nil } })) {
             Button("Delete", role: .destructive) {
-                if let entry = deleteCandidate { Task { await model.delete(entry); selectedID = nil } }
+                if let entry = deleteCandidate { Task { await model.delete(entry) } }
             }
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
         }
         .onDisappear { model.stopAudio() }
-        .frame(minWidth: 700, minHeight: 420)
+        .frame(minHeight: 420)
     }
 
     private func details(_ entry: HistoryEntry) -> some View {
@@ -104,16 +116,9 @@ struct HistoryView: View {
                 Divider()
                 transcript("Final text", text: entry.finalText)
                 transcript("Raw text", text: entry.rawText)
-                HStack {
-                    Button(model.playingEntryID == entry.id ? "Stop audio" : "Play audio", systemImage: "play.fill") {
-                        Task { await model.play(entry) }
-                    }.disabled(entry.audioFilename == nil)
-                    Button("Re-transcribe") { Task { await model.reprocess(entry, transcribe: true) } }
-                        .disabled(model.retranscribeAction == nil || entry.audioFilename == nil)
-                        .help(model.retranscribeAction == nil ? "Unavailable until a speech engine is selected." : "Create a new dictation from the original, untrimmed audio.")
-                    Button("Rewrite") { Task { await model.reprocess(entry, transcribe: false) } }
-                        .disabled(model.rewriteAction == nil)
-                        .help(model.rewriteAction == nil ? "Enable and configure AI cleanup to rewrite this dictation." : "Save rewritten text as a new entry; the original stays intact.")
+                ViewThatFits(in: .horizontal) {
+                    reprocessControls(entry)
+                    reprocessControls(entry, vertical: true)
                 }
                 if model.retranscribeAction == nil {
                     Text("Re-transcription becomes available after the speech engine benchmark.").font(.caption).foregroundStyle(.secondary)
@@ -127,6 +132,21 @@ struct HistoryView: View {
                 }
             }
             .padding(24)
+        }
+    }
+
+    private func reprocessControls(_ entry: HistoryEntry, vertical: Bool = false) -> some View {
+        let layout = vertical ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())
+        return layout {
+            Button(model.playingEntryID == entry.id ? "Stop audio" : "Play audio", systemImage: "play.fill") {
+                Task { await model.play(entry) }
+            }.disabled(entry.audioFilename == nil)
+            Button("Re-transcribe") { Task { await model.reprocess(entry, transcribe: true) } }
+                .disabled(model.retranscribeAction == nil || entry.audioFilename == nil)
+                .help(model.retranscribeAction == nil ? "Unavailable until a speech engine is selected." : "Create a new dictation from the original, untrimmed audio.")
+            Button("Rewrite") { Task { await model.reprocess(entry, transcribe: false) } }
+                .disabled(model.rewriteAction == nil)
+                .help(model.rewriteAction == nil ? "Enable and configure AI cleanup to rewrite this dictation." : "Save rewritten text as a new entry; the original stays intact.")
         }
     }
 
