@@ -43,6 +43,7 @@ final class HotkeyService: ObservableObject {
             guard let self else { return }
             if new.accessibility { self.start() } else { self.stop() }
         }
+        permissions.onRetry = { [weak self] in self?.start() }
         guard monitorSystem else { return }
         secureTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkSecureInput() }
@@ -61,7 +62,11 @@ final class HotkeyService: ObservableObject {
     }
 
     func start() {
-        guard monitorSystem, tap == nil, permissions.snapshot.accessibility else { return }
+        guard monitorSystem, tap == nil else { return }
+        guard permissions.snapshot.accessibility else {
+            permissions.reportTapBlocked()
+            return
+        }
         checkSecureInput()
         installCarbonHandler()
         registerCarbonShortcut()
@@ -72,11 +77,20 @@ final class HotkeyService: ObservableObject {
                 guard let self, self.tapGeneration == generation else { return }
                 self.receive(input)
             }
-        }, result: { [weak self] succeeded in
+        }, result: { [weak self] result in
             Task { @MainActor in
                 guard let self, self.tap != nil, self.tapGeneration == generation else { return }
-                if succeeded { self.lastFailure = self.carbonIssue == nil ? nil : .hotkeyUnavailable; self.permissions.reportTapWorking(); self.updateStatus() }
-                else { self.stop(); self.lastFailure = .hotkeyUnavailable; self.status = "Shortcut access needs a refresh"; self.permissions.reportTapFailure() }
+                switch result {
+                case .success:
+                    self.lastFailure = self.carbonIssue == nil ? nil : .hotkeyUnavailable
+                    self.permissions.reportTapWorking()
+                    self.updateStatus()
+                case .failure(let failure):
+                    self.stop()
+                    self.lastFailure = .hotkeyUnavailable
+                    self.status = "Shortcut unavailable"
+                    self.permissions.reportTapFailure(failure)
+                }
             }
         })
         tap = created
@@ -205,7 +219,7 @@ final class HotkeyService: ObservableObject {
         else if secureInput { status = shortcut.keyCode == nil ? "Secure Input: choose a keyed shortcut" : "Secure Input: using keyed fallback" }
         else if recording != nil { status = "Shortcut recording state · engine not connected" }
         else if tap != nil { status = "Shortcut ready · engine not connected" }
-        else { status = "Waiting for permissions" }
+        else { status = permissions.tapFailure == nil ? "Waiting for permissions" : "Shortcut unavailable" }
     }
 
     private func installCarbonHandler() {
