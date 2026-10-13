@@ -21,6 +21,7 @@ struct DictationOverlay: View {
                                     .frame(width: 3, height: 5 + model.audioLevel * Double(index % 3 + 1) * 8)
                             }
                         }.frame(width: 40, height: 28).accessibilityLabel("Microphone level")
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.audioLevel)
                     } else if case .error = model.phase {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
                     } else {
@@ -53,7 +54,6 @@ struct DictationOverlay: View {
             }
         }
         .padding(8).frame(width: 456).fixedSize(horizontal: false, vertical: true)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: model.audioLevel)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { model.sizeChanged($0) }
         .preferredColorScheme(.dark)
     }
