@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F90900000000000000000001 /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000003 /* SpeechModelService.swift */; };
+		F90900000000000000000002 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000004 /* ModelSettingsView.swift */; };
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
 		12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2CADA2FD0B5602E82686E92 /* EventTap.swift */; };
 		174F206992DBAA3EB8F3DF21 /* RewriteSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */; };
@@ -44,6 +46,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F90900000000000000000003 /* SpeechModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelService.swift; sourceTree = "<group>"; };
+		F90900000000000000000004 /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
@@ -93,6 +97,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		F90900000000000000000005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F90900000000000000000003 /* SpeechModelService.swift */,
+				F90900000000000000000004 /* ModelSettingsView.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
@@ -194,6 +207,7 @@
 				40EA8A05ACABDE4CA467032E /* Overlay */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 				148979F2473089BBF41C17BC /* Settings */,
+				F90900000000000000000005 /* Models */,
 			);
 			name = GoblinApp;
 			path = Sources/GoblinApp;
@@ -299,6 +313,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F90900000000000000000001 /* SpeechModelService.swift in Sources */,
+				F90900000000000000000002 /* ModelSettingsView.swift in Sources */,
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
 				130000000000000000000001 /* DictationSession.swift in Sources */,
 				130000000000000000000003 /* ActiveDictation.swift in Sources */,

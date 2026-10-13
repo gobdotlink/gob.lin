@@ -9,7 +9,7 @@ struct ModelSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Speech model").font(.largeTitle.bold())
-            Text("Ready at launch. Your audio is transcribed locally.").foregroundStyle(.secondary)
+            Text("Loads at launch. Your audio is transcribed locally.").foregroundStyle(.secondary)
             Picker("Model", selection: Binding(get: { service.selectedModel.id }, set: { id in
                 do { try service.selectModel(id: id); selectionError = nil }
                 catch { selectionError = error.localizedDescription }
@@ -27,7 +27,8 @@ struct ModelSettingsView: View {
             status
             if let selectionError { Text(selectionError).foregroundStyle(.orange) }
             if service.activeSessionCount > 0 {
-                Label("In use by \(service.activeSessionCount) dictation(s)", systemImage: "mic.fill").foregroundStyle(.secondary)
+                Label(service.activeSessionCount == 1 ? "In use by 1 dictation" : "In use by \(service.activeSessionCount) dictations",
+                      systemImage: "mic.fill").foregroundStyle(.secondary)
             }
             if let timing = service.lastLoadTiming {
                 LabeledContent(timing.cache == .installed ? "New installation load" : "Cached model load",

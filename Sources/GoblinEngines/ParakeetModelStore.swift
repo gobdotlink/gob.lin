@@ -2,15 +2,17 @@ import CryptoKit
 import FluidAudio
 import Foundation
 import GoblinCore
+import Synchronization
 
 public enum SpeechModelStoreError: Error, LocalizedError {
-    case invalidDirectory, busy, invalidCache
+    case invalidDirectory, busy, invalidCache, listingStalled
 
     public var errorDescription: String? {
         switch self {
         case .invalidDirectory: "The model cache must use its dedicated model folder."
         case .busy: "A model installation is already running."
         case .invalidCache: "The cached model failed its integrity check. Download it again to repair it."
+        case .listingStalled: "The model server did not finish listing files within two minutes. Check your connection and retry."
         }
     }
 }
@@ -54,29 +56,85 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
             return .cached
         }
 
+        // Adopt a complete staged SDK cache locally; missing/partial files still enter resumable download.
+        if AsrModels.modelsExist(at: directory, version: .v3, encoderPrecision: .int8) {
+            do {
+                let inventory = try Inventory.capture(at: directory, required: Self.required)
+                try save(inventory, to: inventoryURL)
+                validated = true
+                return .cached
+            } catch is CancellationError { throw CancellationError() }
+            catch SpeechModelStoreError.invalidCache { /* Incomplete SDK cache: resume below. */ }
+        }
+
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         progress(.init(phase: .downloading))
-        // Use download-only SDK APIs so installation never creates a second runtime loader.
-        try await ModelHub.download(.parakeetV3, to: directory.deletingLastPathComponent(), variant: "int8",
-                                    additionalModelNames: [ModelNames.ASR.vocabularyFile],
-                                    progressHandler: { update in
-            switch update.phase {
-            case .listing: progress(.init(phase: .downloading, component: "Finding model files"))
-            case .downloading(let complete, let total):
-                // ModelHub reserves its upper half for compilation, which this API never performs.
-                progress(.init(phase: .downloading, fractionCompleted: update.fractionCompleted * 2,
-                               component: "\(complete) of \(total) files"))
-            case .compiling(let name): progress(.init(phase: .compiling, component: name))
+        for attempt in 0..<2 {
+            do { try await download(progress: progress); break }
+            catch SpeechModelStoreError.listingStalled where attempt == 0 {
+                progress(.init(phase: .downloading, component: "Retrying model server…"))
+                try await Task.sleep(for: .seconds(2))
             }
-        })
+        }
         try Task.checkCancellation()
         progress(.init(phase: .checkingCache, component: "Verifying installed files"))
         let inventory = try Inventory.capture(at: directory, required: Self.required)
-        try JSONEncoder().encode(inventory).write(to: inventoryURL, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: inventoryURL.path)
+        try save(inventory, to: inventoryURL)
         validated = true
         return .installed
+    }
+
+    private func download(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws {
+        let directory = directory
+        // The SDK guards stalled byte streams; its metadata listing has no progress watchdog.
+        try await Self.guardListing { transferStarted in
+            // Download-only: compilation never falls under this network watchdog.
+            try await ModelHub.download(.parakeetV3, to: directory.deletingLastPathComponent(), variant: "int8",
+                                        additionalModelNames: [ModelNames.ASR.vocabularyFile],
+                                        progressHandler: { update in
+                switch update.phase {
+                case .listing: progress(.init(phase: .downloading, component: "Finding model files"))
+                case .downloading(let complete, let total):
+                    transferStarted()
+                    // ModelHub reserves its upper half for compilation, which this API never performs.
+                    progress(.init(phase: .downloading, fractionCompleted: update.fractionCompleted * 2,
+                                   component: "\(complete) of \(total) files"))
+                case .compiling(let name):
+                    transferStarted()
+                    progress(.init(phase: .compiling, component: name))
+                }
+            })
+        }
+    }
+
+    nonisolated static func guardListing(timeout: Duration = .seconds(120),
+        operation: @escaping @Sendable (@escaping @Sendable () -> Void) async throws -> Void
+    ) async throws {
+        let listing = ListingState()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await operation { listing.active.withLock { $0 = false } }
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                if listing.active.withLock({ $0 }) { throw SpeechModelStoreError.listingStalled }
+                // Once transfer starts, the SDK owns its retry/resume/stall policy.
+                while true { try await Task.sleep(for: .seconds(30)) }
+            }
+            defer { group.cancelAll() }
+            _ = try await group.next()
+        }
+    }
+
+    private final class ListingState: Sendable {
+        let active = Mutex(true)
+    }
+
+    private func save(_ inventory: Inventory, to url: URL) throws {
+        try Task.checkCancellation()
+        try JSONEncoder().encode(inventory).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     /// Explicit repair is separate from retry so interrupted downloads keep their partial bytes.

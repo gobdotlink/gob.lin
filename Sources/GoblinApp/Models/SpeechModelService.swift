@@ -95,8 +95,18 @@ final class SpeechModelService: ObservableObject {
 
     func readyEngine(for lease: SpeechModelLease) async throws -> any PCMSpeechEngine {
         try validate(lease)
-        startPreparation()
-        if let preparationTask { try await preparationTask.value }
+        while !loaded {
+            startPreparation()
+            guard let preparationTask else { throw SpeechModelServiceError.notReady }
+            do { try await preparationTask.value }
+            catch {
+                try Task.checkCancellation()
+                try validate(lease)
+                // A hotkey can arrive while a settings cancellation is draining; resume for its new lease.
+                if state == .cancelled { continue }
+                throw error
+            }
+        }
         try Task.checkCancellation()
         try validate(lease)
         guard loaded else { throw SpeechModelServiceError.notReady }
