@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 
 final class CaptureEvidence: @unchecked Sendable {
@@ -47,14 +48,28 @@ final class CaptureEvidence: @unchecked Sendable {
         lock.withLock {
             let rms = expectedPosition > 0 ? sqrt(sum / Double(expectedPosition)) : 0
             print("\(label): samples=\(expectedPosition) frames=\(frames) peak=\(peak) rms=\(rms) firstBufferMs=\(firstAfter ?? -1) preRoll=\(audio?.preRollSampleCount ?? 0) failure=\(failure?.rawValue ?? "none")")
+            fflush(nil)
         }
     }
 }
 
 @main
 struct AudioCaptureCheck {
-    @MainActor static func main() async throws {
-        if CommandLine.arguments.contains("--native") { try await native(); return }
+    @MainActor static func main() async {
+        if Bundle.main.bundleIdentifier == "app.goblin.dictation" {
+            let log = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("native.log")
+            let fd = open(log.path, O_CREAT | O_TRUNC | O_WRONLY, 0o600)
+            if fd >= 0 { dup2(fd, STDOUT_FILENO); dup2(fd, STDERR_FILENO); close(fd) }
+        }
+        do { try await run() }
+        catch {
+            FileHandle.standardError.write(Data("Capture check failed: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+
+    @MainActor static func run() async throws {
+        if CommandLine.arguments.contains("--native") || Bundle.main.bundleIdentifier == "app.goblin.dictation" { try await native(); return }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-capture-check-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let device = AudioInputResolution(requestedUID: "", device: AudioInputDevice(id: 0, uid: "check", name: "Check input"))
@@ -110,17 +125,65 @@ struct AudioCaptureCheck {
             let restored = try AVAudioFile(forReading: files[0])
             precondition(restored.length == 1600)
         }
-        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption.")
+        let warm = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        let warmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 9000)!
+        warmBuffer.frameLength = 9000
+        for i in 0..<9000 { warmBuffer.floatChannelData![0][i] = Float(i) / 10_000 }
+        warm.receive(warmBuffer)
+        let warmID = UUID(), warmEvidence = CaptureEvidence()
+        try warm.begin(sessionID: warmID, directory: directory, resolution: device, handler: warmEvidence.record)
+        let warmAudio = try await warm.finish(sessionID: warmID, cancel: false)!
+        try warmEvidence.check(warmAudio)
+        precondition(warmAudio.preRollSampleCount == 8000 && warmAudio.sampleCount == 8000)
+        warm.resume()
+        let nextID = UUID(), nextEvidence = CaptureEvidence()
+        try warm.begin(sessionID: nextID, directory: directory, resolution: device, handler: nextEvidence.record)
+        warm.receive(buffer)
+        let nextAudio = try await warm.finish(sessionID: nextID, cancel: false)!
+        try nextEvidence.check(nextAudio)
+        precondition(nextAudio.preRollSampleCount == 0 && nextAudio.sampleCount == 1600)
+        warm.resume()
+        let discardID = UUID()
+        try warm.begin(sessionID: discardID, directory: directory, resolution: device, handler: { _ in })
+        warm.receive(buffer)
+        let discarded = try await warm.finish(sessionID: discardID, cancel: true)
+        precondition(discarded == nil && !FileManager.default.fileExists(atPath: directory.appendingPathComponent(discardID.uuidString + ".partial.wav").path))
+        let overflow = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        let overflowID = UUID()
+        try overflow.begin(sessionID: overflowID, directory: directory, resolution: device, handler: { _ in })
+        let oversized = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 32_001)!
+        oversized.frameLength = 32_001
+        overflow.receive(oversized)
+        do { _ = try await overflow.finish(sessionID: overflowID, cancel: false); preconditionFailure("Overload must fail explicitly") }
+        catch let error as AudioCaptureFailure { precondition(error.kind == .bufferOverflow && error.recoveryURL != nil) }
+        let neverStarted = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        let zeros = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        let zeroBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
+        zeroBuffer.frameLength = 160
+        for i in 0..<160 { zeroBuffer.floatChannelData![0][i] = 0 }
+        for _ in 0..<53 { zeros.receive(zeroBuffer); try await Task.sleep(for: .milliseconds(100)) }
+        precondition(zeros.watchdogFailure() == .allZeroStream)
+        // Keep this short real-clock check separate from any long-recording hardware claim.
+        try await Task.sleep(for: .seconds(5))
+        precondition(neverStarted.watchdogFailure() == .noCallbacks)
+        let badDirectory = directory.appendingPathComponent("regular-file")
+        try Data().write(to: badDirectory)
+        do { _ = try CaptureFile(sessionID: UUID(), directory: badDirectory); preconditionFailure("Non-directory storage must fail") }
+        catch { }
+        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, zero-stream and no-callback watchdogs, invalid storage.")
     }
 
     @MainActor static func native() async throws {
-        print("Microphone permission: \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)")
+        print("Microphone permission: \(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)"); fflush(nil)
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { throw AudioCaptureFailure(.permissionMissing) }
         let devices = try AudioInputDevices.list()
         let builtIn = devices.first { $0.name.localizedCaseInsensitiveContains("MacBook") || $0.name.localizedCaseInsensitiveContains("Built-in") }
         let external = devices.first { $0.name.localizedCaseInsensitiveContains("DJI") }
         let service = AudioCaptureService.shared
-        let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_DIRECTORY"] ?? FileManager.default.temporaryDirectory.appendingPathComponent("goblin-native-capture-" + UUID().uuidString).path)
+        let root = Bundle.main.bundleIdentifier == "app.goblin.dictation" ? Bundle.main.bundleURL.deletingLastPathComponent() : FileManager.default.temporaryDirectory.appendingPathComponent("goblin-native-capture-" + UUID().uuidString)
+        let configURL = root.appendingPathComponent("native-config.json")
+        let config = (try? JSONSerialization.jsonObject(with: Data(contentsOf: configURL))) as? [String: Double] ?? [:]
+        let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_DIRECTORY"] ?? root.appendingPathComponent("audio").path)
         let seconds = Double(ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_SECONDS"] ?? "3") ?? 3
         for (label, uid) in [("built-in cold", builtIn?.uid ?? ""), ("selected external", external?.uid ?? ""), ("built-in restart", builtIn?.uid ?? ""), ("missing UID fallback", "unavailable-probe-device")] {
             if label == "selected external" && external == nil { print("Selected external: unavailable, not tested"); continue }
@@ -144,6 +207,24 @@ struct AudioCaptureCheck {
         try await Task.sleep(for: .milliseconds(250))
         try await service.cancel(sessionID: cancelledID)
         precondition(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(cancelledID.uuidString + ".partial.wav").path))
+        if let longSeconds = config["longSeconds"], longSeconds >= 1800 {
+            print("Starting actual long capture: \(longSeconds) wall-clock seconds"); fflush(nil)
+            let evidence = CaptureEvidence()
+            let id = try service.start(uid: builtIn?.uid ?? "", directory: directory, onEvent: evidence.record)
+            let start = ContinuousClock.now
+            var elapsed = 0.0
+            while elapsed < longSeconds {
+                try await Task.sleep(for: .seconds(min(60, longSeconds - elapsed)))
+                let duration = start.duration(to: .now).components
+                elapsed = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+                evidence.report(label: "long capture progress \(Int(elapsed))s")
+            }
+            let audio = try await service.stop(sessionID: id)
+            try evidence.check(audio, requireNonzero: true)
+            precondition(audio.duration >= longSeconds - 10)
+            evidence.report(label: "actual long capture complete", audio: audio)
+            print("Long capture wall-clock seconds: \(elapsed), durable WAV duration: \(audio.duration)")
+        }
         await service.shutdown()
         print("Native capture complete; probe engine closed. Raw probe audio is private and may be deleted after inspection.")
     }

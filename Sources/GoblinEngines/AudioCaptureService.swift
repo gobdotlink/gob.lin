@@ -56,11 +56,12 @@ public final class AudioCaptureService {
             try startEngine()
             return id
         } catch {
-            processor?.interrupt((error as? AudioCaptureFailure)?.kind ?? .startFailed)
+            let failure = processor?.abortStart((error as? AudioCaptureFailure)?.kind ?? .startFailed)
+                ?? AudioCaptureFailure(.startFailed)
             // A file created before an unsuccessful open remains recoverable; no speech is claimed.
             activeSessionID = nil; eventHandler = nil
             closeInput()
-            throw error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed)
+            throw failure
         }
     }
 

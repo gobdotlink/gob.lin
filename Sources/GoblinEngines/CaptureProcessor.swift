@@ -148,6 +148,11 @@ final class CaptureProcessor: @unchecked Sendable {
         onFailure(failure!)
     }
 
+    func abortStart(_ kind: AudioCaptureFailure.Kind) -> AudioCaptureFailure {
+        pause()
+        return queue.sync { fail(kind); return failure! }
+    }
+
     func interrupt(_ kind: AudioCaptureFailure.Kind) {
         lock.withLock { accepting = false; queue.async { self.fail(kind) } }
     }
@@ -254,7 +259,7 @@ final class CaptureProcessor: @unchecked Sendable {
         }
         let position = file.sampleCount
         do { try file.append(samples) }
-        catch { fail(.storageFailed); throw error }
+        catch { fail(.storageFailed); throw AudioCaptureFailure(.storageFailed, recoveryURL: file.partialURL) }
         if !ready { ready = true; handler?(.ready(sessionID: file.sessionID, device: resolution)) }
         handler?(.frame(AudioCaptureFrame(sessionID: file.sessionID, samplePosition: position, samples: samples)))
         let rms = sqrt(samples.reduce(0) { $0 + Double($1) * Double($1) } / Double(samples.count))
