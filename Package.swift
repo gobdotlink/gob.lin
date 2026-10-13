@@ -10,11 +10,14 @@ let package = Package(
         .executable(name: "GoblinApp", targets: ["GoblinApp"]),
         .executable(name: "goblin", targets: ["GoblinCLI"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7", traits: []),
+    ],
     targets: [
         .plugin(name: "BuildIdentity", capability: .buildTool()),
         .systemLibrary(name: "CSQLite", providers: [.apt(["libsqlite3-dev"])]),
         .target(name: "GoblinCore", dependencies: ["CSQLite"], plugins: [.plugin(name: "BuildIdentity")]),
-        .target(name: "GoblinEngines", dependencies: ["GoblinCore"]),
+        .target(name: "GoblinEngines", dependencies: ["GoblinCore", .product(name: "FluidAudio", package: "FluidAudio")]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),
         .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
