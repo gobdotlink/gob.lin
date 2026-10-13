@@ -37,10 +37,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0999734D8A7B33ABB00D399B /* gob-11-merge-resolution */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-11-merge-resolution"; path = .; sourceTree = SOURCE_ROOT; };
 		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
-		3D0A36417CBD6323FDA3380A /* gob-10-merge-resolution */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-10-merge-resolution"; path = .; sourceTree = SOURCE_ROOT; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4740B2E14FC110A8510E92CB /* OverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayController.swift; sourceTree = "<group>"; };
 		5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySettingsView.swift; sourceTree = "<group>"; };
@@ -82,7 +82,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				3D0A36417CBD6323FDA3380A /* gob-10-merge-resolution */,
+				0999734D8A7B33ABB00D399B /* gob-11-merge-resolution */,
 			);
 			name = Packages;
 			sourceTree = "<group>";

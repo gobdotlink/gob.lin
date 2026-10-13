@@ -4,27 +4,172 @@ import GoblinEngines
 
 @main
 struct GoblinCLI {
-    static func main() {
-        let arguments = Array(CommandLine.arguments.dropFirst())
-        switch arguments {
-        case ["--version"]:
-            print("\(GoblinMetadata.name) \(GoblinMetadata.version)")
-        case ["--self-check"]:
-            let request = TranscriptionRequest(audioFileURL: URL(fileURLWithPath: "/tmp/goblin-smoke.wav"))
-            precondition(request.audioFileURL.isFileURL)
-            precondition(!GoblinMetadata.bundleIdentifier.isEmpty)
-            print("GoblinCore and GoblinEngines loaded successfully.")
-        case [], ["--help"], ["-h"]:
-            print("""
-            goblin — the gob.lin command-line companion
-
-            Usage: goblin --version | --self-check | --help
-
-            Speech recognition is added after the engine benchmark.
-            """)
-        default:
-            FileHandle.standardError.write(Data("Unknown arguments. Run goblin --help.\n".utf8))
-            exit(2)
+    static func main() async {
+        do {
+            // Register the benchmark-selected adapter here when it becomes available.
+            try await GoblinCommands(pipeline: nil).run(Array(CommandLine.arguments.dropFirst()))
+        } catch {
+            let code: String
+            let status: Int32
+            switch error {
+            case RecordedAudioError.engineNotConfigured: code = "engine_not_configured"; status = 3
+            case is CommandError: code = "usage"; status = 2
+            default: code = "operation_failed"; status = 1
+            }
+            let payload = ["error": ["code": code, "message": error.localizedDescription]]
+            let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])) ?? Data("{\"error\":{\"code\":\"operation_failed\"}}".utf8)
+            FileHandle.standardError.write(data + Data([0x0A]))
+            exit(status)
         }
     }
+}
+
+private enum CommandError: Error, LocalizedError {
+    case usage(String)
+    var errorDescription: String? { switch self { case .usage(let message): message } }
+}
+
+private struct GoblinCommands {
+    let pipeline: RecordedAudioPipeline?
+
+    func run(_ arguments: [String]) async throws {
+        switch arguments {
+        case ["--version"]: print("\(GoblinMetadata.name) \(GoblinMetadata.version)")
+        case ["--self-check"]: print("GoblinCore, GoblinEngines, and system SQLite loaded successfully.")
+        case [], ["--help"], ["-h"]: print(Self.help)
+        case let values where values.first == "transcribe":
+            guard values.count == 2 else { throw CommandError.usage("Usage: goblin transcribe <audio-file>") }
+            let file = URL(fileURLWithPath: values[1])
+            guard FileManager.default.isReadableFile(atPath: file.path),
+                  try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { throw RecordedAudioError.invalidFile }
+            guard let pipeline else { throw RecordedAudioError.engineNotConfigured }
+            let result = try await pipeline.transcribe(file)
+            try writeJSON(result)
+        case let values where values.first == "replay": try await replay(Array(values.dropFirst()))
+        case let values where values.first == "eval": try evaluate(Array(values.dropFirst()))
+        default: throw CommandError.usage("Unknown arguments. Run goblin --help.")
+        }
+    }
+
+    private func replay(_ arguments: [String]) async throws {
+        guard let source = arguments.first, !source.hasPrefix("--") else {
+            throw CommandError.usage("Usage: goblin replay <directory | history> [--recorded] [--history-dir <path>]")
+        }
+        var recorded = false
+        var historyDirectory: URL?
+        var index = 1
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--recorded":
+                guard !recorded else { throw CommandError.usage("--recorded was supplied twice") }
+                recorded = true; index += 1
+            case "--history-dir":
+                guard source == "history", historyDirectory == nil, index + 1 < arguments.count else {
+                    throw CommandError.usage("--history-dir requires history and a directory path")
+                }
+                historyDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true); index += 2
+            default: throw CommandError.usage("Unknown replay option: \(arguments[index])")
+            }
+        }
+        if !recorded, pipeline == nil { throw RecordedAudioError.engineNotConfigured }
+        if source == "history" {
+            let store = try HistoryStore(directory: historyDirectory)
+            var offset = 0
+            while true {
+                let entries = try await store.entries(limit: 200, offset: offset)
+                for entry in entries {
+                    let record: EvaluationRecord
+                    if recorded {
+                        record = EvaluationRecord(id: entry.id.uuidString, rawText: entry.rawText, finalText: entry.finalText,
+                                                  model: entry.model, timings: entry.latencies)
+                    } else {
+                        guard let file = try await store.audioFileURL(for: entry.id) else {
+                            throw CommandError.usage("History entry \(entry.id) has no saved audio. Use --recorded to export its transcript.")
+                        }
+                        record = try await transcribedRecord(file, id: entry.id.uuidString)
+                    }
+                    try FileHandle.standardOutput.write(contentsOf: try EvaluationJSONL.encode(record))
+                }
+                if entries.count < 200 { break }
+                offset += entries.count
+            }
+        } else {
+            let directory = URL(fileURLWithPath: source, isDirectory: true)
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+                .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            if recorded {
+                let records = try files.filter { $0.pathExtension.lowercased() == "jsonl" }.flatMap(EvaluationJSONL.read)
+                guard !records.isEmpty else { throw CommandError.usage("No recorded-transcript JSONL files found in this directory.") }
+                try Evaluator.validate(records)
+                for record in records {
+                    var exported = record
+                    exported.source = "recorded_transcript"
+                    try FileHandle.standardOutput.write(contentsOf: try EvaluationJSONL.encode(exported))
+                }
+            } else {
+                let extensions = Set(["wav", "aiff", "aif", "m4a", "mp3", "caf", "flac"])
+                let audioFiles = files.filter { extensions.contains($0.pathExtension.lowercased()) }
+                guard !audioFiles.isEmpty else { throw CommandError.usage("No audio recordings found in this directory.") }
+                for file in audioFiles {
+                    try FileHandle.standardOutput.write(contentsOf: try EvaluationJSONL.encode(await transcribedRecord(file, id: file.lastPathComponent)))
+                }
+            }
+        }
+    }
+
+    private func transcribedRecord(_ file: URL, id: String) async throws -> EvaluationRecord {
+        guard let pipeline else { throw RecordedAudioError.engineNotConfigured }
+        let result = try await pipeline.transcribe(file)
+        return EvaluationRecord(id: id, rawText: result.rawText, finalText: result.finalText,
+                                model: result.model, source: "audio_transcription", timings: result.timings,
+                                postprocessingError: result.postprocessingError)
+    }
+
+    private func evaluate(_ arguments: [String]) throws {
+        guard arguments.count == 2 || (arguments.count == 3 && arguments[2] == "--json") else {
+            throw CommandError.usage("Usage: goblin eval <A.jsonl> <B.jsonl> [--json]")
+        }
+        let report = try Evaluator.compare(EvaluationJSONL.read(URL(fileURLWithPath: arguments[0])),
+                                           EvaluationJSONL.read(URL(fileURLWithPath: arguments[1])))
+        if arguments.count == 3 { try writeJSON(report); return }
+        print("Aligned \(report.alignedRecords) recordings; \(report.changedRecords) changed.")
+        print("Missing from A: \(report.missingFromA.isEmpty ? "none" : report.missingFromA.joined(separator: ", "))")
+        print("Missing from B: \(report.missingFromB.isEmpty ? "none" : report.missingFromB.joined(separator: ", "))")
+        for (name, summary) in [("A", report.a), ("B", report.b)] {
+            let wer = summary.wordErrorRate.map { String(format: "%.2f%%", $0 * 100) } ?? "unavailable (no nonempty ground truth)"
+            let jargon = summary.jargonAnnotatedRecords > 0 ? "\(summary.jargonHits)/\(summary.jargonExpected)" : "unavailable (no annotations)"
+            let ordinary = summary.ordinaryWordAnnotatedRecords > 0 ? "\(summary.ordinaryWordFalseCorrections)" : "unavailable (no annotations)"
+            print("\(name): WER \(wer); jargon \(jargon); ordinary-word false corrections \(ordinary)")
+            if let timing = summary.latencyMilliseconds["processing"] {
+                print(String(format: "  Processing latency (%d samples): p50 %.1f ms, p90 %.1f ms, p95 %.1f ms, p99 %.1f ms", timing.count, timing.p50, timing.p90, timing.p95, timing.p99))
+            } else { print("  Latency unavailable (no recorded timings)") }
+        }
+        for record in report.records where record.wordDiff.contains(where: { $0.operation != .equal }) {
+            let changes = record.wordDiff.filter { $0.operation != .equal }.map { edit in
+                [edit.referenceWord.map { "-\($0)" }, edit.candidateWord.map { "+\($0)" }].compactMap { $0 }.joined(separator: " ")
+            }.joined(separator: " | ")
+            print("\(record.id): \(changes)")
+        }
+    }
+
+    private func writeJSON<T: Encodable>(_ value: T) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try FileHandle.standardOutput.write(contentsOf: try encoder.encode(value) + Data([0x0A]))
+    }
+
+    private static let help = """
+    goblin — the gob.lin command-line companion
+
+    Usage:
+      goblin transcribe <audio-file>                 JSON text and stage timings
+      goblin replay <directory | history>            JSONL, using the selected engine
+      goblin replay <directory | history> --recorded JSONL from existing transcripts
+      goblin replay history --recorded --history-dir <path>
+      goblin eval <A.jsonl> <B.jsonl> [--json]        ID-aligned evaluation report
+      goblin --version | --self-check | --help
+
+    Engine selection follows the benchmark. Recorded replay and eval work now.
+    Ground truth, jargon, and ordinary-word annotations are needed for accuracy metrics.
+    """
 }

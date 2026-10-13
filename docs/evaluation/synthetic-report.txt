@@ -1,0 +1,11 @@
+Synthetic fixture comparison. Latencies below are fixture inputs, not engine measurements.
+
+Aligned 2 recordings; 2 changed.
+Missing from A: none
+Missing from B: none
+A: WER 10.00%; jargon 0/1; ordinary-word false corrections 0
+  Processing latency (2 samples): p50 100.0 ms, p90 200.0 ms, p95 200.0 ms, p99 200.0 ms
+B: WER 20.00%; jargon 1/1; ordinary-word false corrections 2
+  Processing latency (2 samples): p50 120.0 ms, p90 350.0 ms, p95 350.0 ms, p99 350.0 ms
+jargon: -day +dev
+ordinary: -like +lisa | -at +auth
