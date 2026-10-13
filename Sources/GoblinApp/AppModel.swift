@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import GoblinCore
+import GoblinEngines
 import SwiftUI
 
 @MainActor
@@ -21,6 +22,8 @@ final class AppModel: ObservableObject {
     @Published var lastTranscript: String?
     private var subscriptions: Set<AnyCancellable> = []
     private var insertionTask: Task<Void, Never>?
+    private let processingQueue = DictationProcessingQueue()
+    private var dictationSessions: [UUID: DictationSession] = [:]
     private var shuttingDown = false
 
     init(dataDirectory: URL? = nil, defaults: UserDefaults = .standard, servicesEnabled: Bool = true,
@@ -199,6 +202,8 @@ final class AppModel: ObservableObject {
         guard !shuttingDown else { return }
         diagnostics.report(failure)
         mascotState = .warning
+        // A background operation must not replace the current dictation's text.
+        guard dictationSessions.isEmpty else { return }
         let session = overlay.begin { [weak self] in self?.overlay.hide() }
         overlay.update(.error(failure.message), session: session)
         overlay.hide(after: 4, session: session)
@@ -213,12 +218,73 @@ final class AppModel: ObservableObject {
         insertionTask?.cancel()
         await insertionTask?.value
         insertionTask = nil
+        for session in dictationSessions.values { session.cancel() }
+        await processingQueue.shutdown()
+        dictationSessions.removeAll()
         insertion.shutdown()
         history.stopAudio()
         audioPreview.stop(reason: .shutdown)
         overlay.shutdown()
         subscriptions.removeAll()
         diagnostics.developmentLog.record(.appStopped, area: .application)
+    }
+
+    private func completeDictation(_ raw: String, model: String, audioURL: URL,
+                                  duration: Double, timings: DictationTimings,
+                                  session: DictationSession) async throws {
+        try session.checkCancellation()
+        if let overlayID = session.overlayID {
+            overlay.update(.polishing, session: overlayID)
+        }
+        let result = await processTranscript(raw)
+        try session.checkCancellation()
+        var timings = timings
+        timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
+        var warning = result.warning?.message
+        let text = result.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            lastTranscript = result.finalText
+            if let overlayID = session.overlayID {
+                overlay.update(.transcribing, committed: result.finalText, tentative: "", session: overlayID)
+            }
+            let insertionStart = ContinuousClock.now
+            if session.targetIsFocused && !insertion.busy && insertionTask == nil {
+                diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
+                await insertion.insert(result.finalText)
+                var details = DevelopmentDetails()
+                if case .failure(let failure) = insertion.outcome {
+                    details.failure = failure
+                    details.succeeded = false
+                    warning = warning ?? failure.message
+                } else if case .success = insertion.outcome { details.succeeded = true }
+                diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: session.id, details: details)
+            } else {
+                let failure: DiagnosticFailure = session.targetIsFocused ? .insertionNotAcknowledged : .insertionTargetChanged
+                diagnostics.report(failure, operation: session.id)
+                warning = warning ?? failure.message
+            }
+            timings.insertionMilliseconds = Self.milliseconds(since: insertionStart)
+        }
+        try session.checkCancellation()
+        let entry = HistoryEntry(id: session.id, rawText: raw, finalText: result.finalText,
+            tone: result.tone.rawValue, polished: result.polished,
+            targetBundleIdentifier: session.target?.bundleIdentifier,
+            targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,
+            completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
+            processingWarning: warning)
+        let saved = await history.record(entry, untrimmedAudioURL: audioURL)
+        if saved { try? FileManager.default.removeItem(at: audioURL) }
+        if let overlayID = session.overlayID {
+            if let warning {
+                overlay.update(.error(warning), session: overlayID)
+                overlay.hide(after: 4, session: overlayID)
+            } else { overlay.hide(session: overlayID) }
+        }
+    }
+
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = start.duration(to: .now).components
+        return Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15
     }
 
     private func refreshDiagnostics(snapshot: PermissionModel.Snapshot) {

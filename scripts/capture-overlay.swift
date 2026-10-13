@@ -11,7 +11,7 @@ struct OverlayCapture {
         let overlay = OverlayController()
         let session = overlay.begin { overlay.hide() }
         overlay.update(.listening, committed: "Ship the small things. Keep your hands on the keyboard.",
-            tentative: "Let the goblin do the typing.", level: 0.65, session: session)
+            tentative: " Let the goblin do the typing.", level: 0.65, session: session)
         Task { @MainActor in
             do {
                 try await Task.sleep(for: .milliseconds(800))
@@ -24,6 +24,12 @@ struct OverlayCapture {
                 guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CaptureError.captureFailed }
                 let output = CommandLine.arguments.dropFirst().first ?? "docs/screenshots/gob-12-overlay.png"
                 try png.write(to: URL(fileURLWithPath: output))
+                let height = overlay.model.textHeight
+                overlay.update(.transcribing, session: session)
+                precondition(!overlay.model.committedText.isEmpty && !overlay.model.tentativeText.isEmpty,
+                             "Finalization discarded visible text")
+                overlay.update(.polishing, committed: "Done.", tentative: "", session: session)
+                precondition(overlay.model.textHeight == height, "Finalization collapsed the text area")
                 let next = overlay.begin { overlay.hide() }
                 overlay.hide(session: session)
                 precondition(overlay.model.phase == .arming, "A stale hide closed a newer session")
@@ -33,7 +39,7 @@ struct OverlayCapture {
                 overlay.update(.listening, session: next)
                 precondition(overlay.model.phase == .hidden, "A canceled session reopened")
                 overlay.shutdown()
-                print("Native overlay captured; non-key panel, stale hide and non-finite input checks passed.")
+                print("Native overlay captured; finalization, non-key panel, stale hide and non-finite input checks passed.")
             } catch {
                 fputs("Overlay capture failed: \(error)\n", stderr)
                 exit(1)

@@ -26,6 +26,7 @@ final class OverlayModel: ObservableObject {
     @Published var committedText = ""
     @Published var tentativeText = ""
     @Published var audioLevel: Double = 0
+    @Published var textHeight: Double = 44
     var cancel: () -> Void = {}
     var sizeChanged: (CGSize) -> Void = { _ in }
 }
@@ -78,6 +79,7 @@ final class OverlayController {
         model.committedText = ""
         model.tentativeText = ""
         model.audioLevel = 0
+        model.textHeight = 44
         model.cancel = onCancel
         model.phase = .arming
         reposition()
@@ -93,6 +95,8 @@ final class OverlayController {
         model.phase = phase
         if let committed { model.committedText = committed }
         if let tentative { model.tentativeText = tentative }
+        let textHeight = min(130, max(44, Double(model.committedText.count + model.tentativeText.count) / 48 * 20))
+        model.textHeight = max(model.textHeight, textHeight)
         if let level { model.audioLevel = level.isFinite ? min(1, max(0, level)) : 0 }
         panel.orderFrontRegardless()
     }

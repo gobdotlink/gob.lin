@@ -35,10 +35,10 @@ struct DictationOverlay: View {
                 }
                 if hasText {
                     ScrollView {
-                        Text("\(Text(model.committedText).foregroundStyle(.white))\(Text(model.tentativeText.isEmpty ? "" : " " + model.tentativeText).foregroundStyle(.secondary))")
+                        Text("\(Text(model.committedText).foregroundStyle(.white))\(Text(model.tentativeText).foregroundStyle(.secondary))")
                             .font(.system(size: 15)).frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.disabled)
-                    }.frame(height: min(130, max(44, Double(model.committedText.count + model.tentativeText.count) / 48 * 20)))
+                    }.frame(height: model.textHeight)
                 }
             }
             .padding(.horizontal, 18).padding(.vertical, 16)
