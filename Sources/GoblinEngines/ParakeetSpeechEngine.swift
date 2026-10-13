@@ -26,7 +26,7 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
 
     public static var defaultModelDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("gob.lin/models/parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
+            .appendingPathComponent("gob.lin/models/parakeet-tdt-0.6b-v3", isDirectory: true)
     }
 
     public init(modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory) {
