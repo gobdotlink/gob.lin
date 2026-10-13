@@ -19,6 +19,10 @@ final class CaptureFile {
         finalURL = directory.appendingPathComponent(sessionID.uuidString + ".wav")
         let fd = open(partialURL.path, O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw AudioCaptureFailure(.storageFailed) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            close(fd); try? FileManager.default.removeItem(at: partialURL)
+            throw AudioCaptureFailure(.storageFailed)
+        }
         handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         do { try handle!.write(contentsOf: Self.header(samples: 0)); try handle!.synchronize(); try Self.syncDirectory(directory) }
         catch { try? handle?.close(); handle = nil; try? FileManager.default.removeItem(at: partialURL); throw error }
@@ -43,17 +47,22 @@ final class CaptureFile {
     }
 
     func finish(preRoll: Int) throws -> CapturedAudio {
-        try checkpoint()
-        try handle?.close(); handle = nil
-        try FileManager.default.moveItem(at: partialURL, to: finalURL)
-        do { try Self.syncDirectory(finalURL.deletingLastPathComponent()) }
-        catch { throw AudioCaptureFailure(.storageFailed, recoveryURL: finalURL) }
+        do {
+            try checkpoint()
+            // Keep the writer lock through the rename so recovery cannot race finalization.
+            try FileManager.default.moveItem(at: partialURL, to: finalURL)
+            try Self.syncDirectory(finalURL.deletingLastPathComponent())
+            try handle?.close(); handle = nil
+        } catch {
+            let recovery = FileManager.default.fileExists(atPath: finalURL.path) ? finalURL : partialURL
+            throw AudioCaptureFailure(.storageFailed, recoveryURL: recovery)
+        }
         return CapturedAudio(sessionID: sessionID, fileURL: finalURL, sampleCount: sampleCount, preRollSampleCount: preRoll)
     }
 
     func cancel() throws {
-        try handle?.close(); handle = nil
         if FileManager.default.fileExists(atPath: partialURL.path) { try FileManager.default.removeItem(at: partialURL); try Self.syncDirectory(partialURL.deletingLastPathComponent()) }
+        try handle?.close(); handle = nil
     }
 
     func preserve() {
@@ -70,6 +79,7 @@ final class CaptureFile {
             guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
             let fd = open(url.path, O_RDWR | O_NOFOLLOW)
             guard fd >= 0 else { throw AudioCaptureFailure(.storageFailed, recoveryURL: url) }
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); continue }
             let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             do {
                 let header = try handle.read(upToCount: 44) ?? Data()
@@ -84,9 +94,10 @@ final class CaptureFile {
                 try handle.seek(toOffset: 0)
                 try handle.write(contentsOf: Self.header(samples: samples))
                 try handle.truncate(atOffset: UInt64(44 + samples * 4))
-                try handle.synchronize(); try handle.close()
+                try handle.synchronize()
                 let final = url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent.replacingOccurrences(of: ".partial.wav", with: ".wav"))
                 try FileManager.default.moveItem(at: url, to: final)
+                try handle.close()
                 recovered.append(final)
             } catch { try? handle.close(); throw AudioCaptureFailure(.storageFailed, recoveryURL: url) }
         }

@@ -104,7 +104,10 @@ struct AudioCaptureCheck {
             precondition(data.count == 44 + Int(audio.sampleCount) * 4)
         }
         let file = try CaptureFile(sessionID: UUID(), directory: directory)
-        try file.append([0.125, 0.25, -0.5]); file.preserve()
+        try file.append([0.125, 0.25, -0.5])
+        let whileWriting = try CaptureFile.recover(in: directory)
+        precondition(whileWriting.isEmpty && FileManager.default.fileExists(atPath: file.partialURL.path))
+        file.preserve()
         let brokenTail = try FileHandle(forWritingTo: file.partialURL)
         try brokenTail.seekToEnd(); try brokenTail.write(contentsOf: Data([1, 2])); try brokenTail.close()
         let recovered = try CaptureFile.recover(in: directory)
