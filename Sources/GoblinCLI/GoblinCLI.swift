@@ -1,10 +1,12 @@
 import Foundation
+import FluidAudio
 import GoblinCore
 import GoblinEngines
 
 @main
 struct GoblinCLI {
     static func main() async {
+        AppLogger.mirrorsToConsole = false
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
             var modelDirectory = ParakeetSpeechEngine.defaultModelDirectory

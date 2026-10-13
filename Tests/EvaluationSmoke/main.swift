@@ -107,7 +107,7 @@ struct EvaluationSmoke {
             try await Task.sleep(for: .milliseconds(20))
             let drainingUnload = Task { await runtime.unload() }
             let recognized = try await inFlight.value
-            check(!recognized.text.isEmpty, "Real speech fixture must finish before queued unload")
+            check(!recognized.text.isEmpty, "In-flight inference must survive a queued unload with nonempty text")
             await drainingUnload.value
             do { _ = try await runtime.transcribe(request); preconditionFailure("Unloaded runtime accepted inference") }
             catch SpeechRuntimeError.modelNotInstalled { }
@@ -121,7 +121,7 @@ struct EvaluationSmoke {
             try await runtime.prepare()
             check((try await runtime.transcribe(samples: [])).text.isEmpty, "Reloaded PCM boundary remains usable")
             await runtime.unload()
-            print("Real runtime gate smoke passed: inference drains before unload, cancellation suppresses output, reload remains usable.")
+            print("Real runtime gate smoke passed: in-flight inference survives a queued unload, cancellation suppresses output, reload remains usable.")
         }
         print("Evaluation safety smoke passed: ID alignment, word edits/WER, jargon, ordinary-word regressions, annotations, percentiles, matrix bounds, raw-text fallback.")
     }
