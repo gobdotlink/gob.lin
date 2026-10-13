@@ -32,7 +32,7 @@ struct LiveTranscriptionCheck {
         }
         await live.append([Float](repeating: 0.1, count: 64_000), at: 0)
         try await Task.sleep(for: .milliseconds(40))
-        await live.append([Float](repeating: 0.1, count: 6_400), at: 64_000)
+        await live.append([Float](repeating: 0.1, count: 9_600), at: 64_000)
         try await Task.sleep(for: .milliseconds(40))
         let result = try await live.finish()
         precondition(result?.text == "hello world tail", "Final tail was lost or overlap duplicated")

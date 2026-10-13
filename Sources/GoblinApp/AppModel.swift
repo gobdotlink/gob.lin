@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import GoblinCore
 import GoblinEngines
@@ -25,16 +26,19 @@ final class AppModel: ObservableObject {
     private var insertionTask: Task<Void, Never>?
     private let processingQueue = DictationProcessingQueue()
     private var dictationSessions: [UUID: DictationSession] = [:]
+    private let capture = AudioCaptureService.shared
+    private let captureDirectory: URL?
+    private var activeCapture: ActiveDictation?
+    private var liveSessions: [UUID: ActiveDictation] = [:]
+    private var captureDrainTask: Task<Void, Never>?
     private var shuttingDown = false
 
     init(dataDirectory: URL? = nil, defaults: UserDefaults = .standard, servicesEnabled: Bool = true,
          diagnosticEnvironment: DiagnosticEnvironment? = nil) {
         self.defaults = defaults
         self.servicesEnabled = servicesEnabled
-        let modelDirectory = dataDirectory.map {
-            $0.appendingPathComponent("models", isDirectory: true)
-                .appendingPathComponent(ParakeetSpeechEngine.defaultModelDirectory.lastPathComponent, isDirectory: true)
-        } ?? ParakeetSpeechEngine.defaultModelDirectory
+        captureDirectory = dataDirectory?.appendingPathComponent("Captures", isDirectory: true)
+        let modelDirectory = ParakeetSpeechEngine.defaultModelDirectory
         speechModels = SpeechModelService(engine: ParakeetSpeechEngine(modelDirectory: modelDirectory),
             store: ParakeetModelStore(directory: modelDirectory), defaults: defaults)
         diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
@@ -52,12 +56,18 @@ final class AppModel: ObservableObject {
             }.store(in: &subscriptions)
         }
         permissions.$snapshot.sink { [weak self] snapshot in
-            Task { @MainActor in self?.refreshDiagnostics(snapshot: snapshot) }
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshDiagnostics(snapshot: snapshot)
+                if snapshot.microphone != .authorized, let active = self.activeCapture { self.cancelDictation(active) }
+                self.applyWarmMicrophone()
+            }
         }.store(in: &subscriptions)
         speechModels.$state.sink { [weak self] state in
             Task { @MainActor in
                 guard let self, !self.shuttingDown else { return }
                 self.refreshDiagnostics(snapshot: self.permissions.snapshot)
+                self.hotkeys.engineConnected = state == .ready
                 if case .failed = state { self.showFailure(.modelLoadFailed) }
                 else if state == .ready { self.diagnostics.resolve(.model) }
             }
@@ -167,6 +177,7 @@ final class AppModel: ObservableObject {
                 tone: result.tone.rawValue, polished: result.polished, model: engine.identifier,
                 latencies: timings, warning: result.warning?.message)
         } : nil
+        applyWarmMicrophone()
         objectWillChange.send()
     }
 
@@ -214,18 +225,230 @@ final class AppModel: ObservableObject {
         switch action {
         case .beginRecording:
             diagnostics.developmentLog.record(.hotkeyBegin, area: .hotkeys, operation: UUID())
-            hotkeys.cancelRecording()
-            if permissions.snapshot.microphone != .authorized { showFailure(.microphonePermissionMissing) }
-            else if !permissions.snapshot.accessibility { showFailure(.requiredPermissionsMissing) }
-            else if permissions.tapFailure != nil { showFailure(.hotkeyUnavailable) }
-            else if hotkeys.secureInput { showFailure(.secureInputEnabled) }
-            else { showFailure(.modelUnavailable) }
+            let failure: DiagnosticFailure?
+            if permissions.snapshot.microphone != .authorized { failure = .microphonePermissionMissing }
+            else if !permissions.snapshot.accessibility { failure = .requiredPermissionsMissing }
+            else if permissions.tapFailure != nil { failure = .hotkeyUnavailable }
+            else if hotkeys.secureInput { failure = .secureInputEnabled }
+            else if !servicesEnabled { failure = .modelUnavailable }
+            else { failure = nil }
+            if let failure { hotkeys.cancelRecording(); showFailure(failure) }
+            else { beginDictation() }
         case .finishRecording:
             diagnostics.developmentLog.record(.hotkeyFinish, area: .hotkeys)
-            hotkeys.processingCompleted()
+            if let active = activeCapture { finishDictation(active, counted: true) }
+            else { hotkeys.processingCompleted() }
         case .cancelRecording:
             diagnostics.developmentLog.record(.hotkeyCancel, area: .hotkeys)
-            overlay.hide()
+            if let active = activeCapture { cancelDictation(active) }
+        }
+    }
+
+    private func beginDictation() {
+        guard activeCapture == nil else { return }
+        let session = DictationSession()
+        let lease: SpeechModelLease
+        do { lease = try speechModels.beginSession() }
+        catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
+        let readiness = Task<any PCMSpeechEngine, Error> { [speechModels] in
+            try await speechModels.readyEngine(for: lease)
+        }
+        let active = ActiveDictation(session: session, lease: lease, readiness: readiness)
+        dictationSessions[session.id] = session
+        liveSessions[session.id] = active
+        activeCapture = active
+        session.overlayID = overlay.begin { [weak self, weak active] in
+            guard let active else { return }
+            self?.cancelDictation(active)
+        }
+        active.textTask = Task { @MainActor [weak self] in
+            for await text in active.live.updates {
+                guard let self, !session.cancelled, let overlayID = session.overlayID else { continue }
+                self.overlay.update(active.stopping ? .transcribing : .listening,
+                    committed: text.committedText, tentative: text.tentativeText, session: overlayID)
+            }
+        }
+        let previousDrain = captureDrainTask
+        active.startTask = Task { @MainActor [weak self] in
+            await previousDrain?.value
+            guard let self, !session.cancelled, !Task.isCancelled else { active.eventContinuation.finish(); return }
+            do {
+                let continuation = active.eventContinuation
+                active.captureID = try self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
+                    directory: self.captureDirectory) { event in
+                    continuation.yield(event)
+                    switch event {
+                    case .finished, .failed, .cancelled: continuation.finish()
+                    default: break
+                    }
+                }
+                active.frameTask = Task { @MainActor [weak self] in
+                    for await event in active.events { await self?.consume(event, for: active) }
+                }
+            } catch {
+                active.failure = error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed)
+                active.eventContinuation.finish()
+                if !active.stopping && !session.cancelled { self.finishDictation(active, counted: false) }
+            }
+        }
+    }
+
+    private func consume(_ event: AudioCaptureEvent, for active: ActiveDictation) async {
+        let session = active.session
+        guard !session.cancelled else { return }
+        switch event {
+        case .ready(let id, _):
+            guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
+            diagnostics.resolve(.microphone)
+            diagnostics.developmentLog.record(.firstBuffer, area: .microphone, operation: session.id)
+            overlay.update(.listening, session: overlayID)
+        case .frame(let frame):
+            guard frame.sessionID == active.captureID else { return }
+            await active.live.append(frame.samples, at: frame.samplePosition)
+        case .level(let id, let rms):
+            guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
+            overlay.update(.listening, level: AudioInputDevices.displayLevel(rms: rms), session: overlayID)
+        case .failed(let id, let failure):
+            guard id == active.captureID else { return }
+            active.failure = failure
+            if !active.stopping { finishDictation(active, counted: false) }
+        case .finished(let audio):
+            if audio.sessionID == active.captureID { active.audio = audio }
+        case .cancelled: break
+        }
+    }
+
+    private func finishDictation(_ active: ActiveDictation, counted: Bool) {
+        guard !active.stopping else { return }
+        active.stopping = true
+        active.countedForProcessing = counted
+        if activeCapture === active {
+            activeCapture = nil
+            if !counted { hotkeys.cancelRecording() }
+        }
+        if let overlayID = active.session.overlayID { overlay.update(.transcribing, session: overlayID) }
+        active.stopTask = Task { @MainActor [weak self] in
+            await active.startTask?.value
+            guard let self else { throw CancellationError() }
+            try active.session.checkCancellation()
+            guard let captureID = active.captureID else { throw active.failure ?? AudioCaptureFailure(.startFailed) }
+            defer { active.eventContinuation.finish() }
+            let audio = try await self.capture.stop(sessionID: captureID)
+            active.audio = audio
+            await active.frameTask?.value
+            self.applyWarmMicrophone()
+            return audio
+        }
+        let stop = active.stopTask
+        captureDrainTask = Task { _ = try? await stop?.value }
+        enqueueDictation(active)
+    }
+
+    private func enqueueDictation(_ active: ActiveDictation) {
+        guard !active.enqueued else { return }
+        active.enqueued = true
+        processingQueue.enqueue(active.session, operation: { [weak self] in
+            guard let self else { return }
+            do {
+                guard let stop = active.stopTask else { throw CancellationError() }
+                let audio = try await stop.value
+                await active.frameTask?.value
+                try active.session.checkCancellation()
+                let result = try await active.live.finish()
+                await active.textTask?.value
+                try active.session.checkCancellation()
+                var timings = DictationTimings(captureMilliseconds: Self.milliseconds(since: active.session.captureStarted),
+                                               asrMilliseconds: await active.live.computeMilliseconds)
+                let raw: String
+                if let result, !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { raw = result.text }
+                else {
+                    let engine = try await active.readiness.value
+                    try active.session.checkCancellation()
+                    let run = try await RecordedAudioPipeline(engine: engine).transcribe(audio.fileURL)
+                    raw = run.rawText
+                    timings.asrMilliseconds += run.timings.asrMilliseconds
+                }
+                try await self.completeDictation(raw, model: active.lease.modelID, audioURL: audio.fileURL,
+                    duration: audio.duration, timings: timings, session: active.session)
+            } catch is CancellationError {
+            } catch {
+                guard !active.session.cancelled else { return }
+                await self.recordFailedDictation(active, failure: active.failure == nil ? .transcriptionFailed : Self.diagnostic(active.failure!))
+            }
+        }, completed: { [weak self] in
+            guard let self else { return }
+            await active.cancelTask?.value
+            await active.startTask?.value
+            _ = try? await active.stopTask?.value
+            active.eventContinuation.finish()
+            await active.frameTask?.value
+            await active.live.cancel()
+            await active.textTask?.value
+            _ = try? await active.readiness.value
+            if active.session.cancelled, !active.session.audioOwnedByHistory, let audio = active.audio {
+                try? FileManager.default.removeItem(at: audio.fileURL)
+            }
+            self.speechModels.endSession(active.lease)
+            self.liveSessions[active.session.id] = nil
+            self.dictationSessions[active.session.id] = nil
+            if active.countedForProcessing { self.hotkeys.processingCompleted() }
+            self.applyWarmMicrophone()
+        })
+    }
+
+    private func cancelDictation(_ active: ActiveDictation) {
+        guard !active.session.cancelled else { return }
+        processingQueue.cancel(active.session)
+        active.startTask?.cancel()
+        active.readiness.cancel()
+        if let overlayID = active.session.overlayID { overlay.hide(session: overlayID) }
+        if activeCapture === active { activeCapture = nil; hotkeys.cancelRecording() }
+        active.cancelTask = Task { @MainActor [weak self] in
+            await active.startTask?.value
+            if let self, let captureID = active.captureID, self.capture.activeSessionID == captureID {
+                do { try await self.capture.cancel(sessionID: captureID) }
+                catch { self.diagnostics.report(.microphoneCaptureFailed, operation: active.session.id) }
+            }
+            active.eventContinuation.finish()
+            await active.frameTask?.value
+        }
+        let cancellation = active.cancelTask
+        captureDrainTask = Task { await cancellation?.value }
+        enqueueDictation(active)
+    }
+
+    private func recordFailedDictation(_ active: ActiveDictation, failure: DiagnosticFailure) async {
+        diagnostics.report(failure, operation: active.session.id)
+        if let overlayID = active.session.overlayID {
+            overlay.update(.error(failure.message), session: overlayID)
+            overlay.hide(after: 4, session: overlayID)
+        }
+        guard let url = active.audio?.fileURL ?? active.failure?.recoveryURL,
+              FileManager.default.isReadableFile(atPath: url.path) else { return }
+        let session = active.session
+        let duration = (try? AVAudioFile(forReading: url)).map { Double($0.length) / $0.processingFormat.sampleRate } ?? 0
+        let entry = HistoryEntry(id: session.id, rawText: "", finalText: "", targetBundleIdentifier: session.target?.bundleIdentifier,
+            targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,
+            audioDuration: active.audio?.duration ?? duration, model: active.lease.modelID,
+            latencies: DictationTimings(captureMilliseconds: Self.milliseconds(since: session.captureStarted)),
+            processingWarning: failure.message)
+        let saved = await history.record(entry, untrimmedAudioURL: url)
+        session.audioOwnedByHistory = true
+        if saved { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private func applyWarmMicrophone() {
+        guard servicesEnabled, !shuttingDown, activeCapture == nil, capture.activeSessionID == nil else { return }
+        let enabled = permissions.snapshot.microphone == .authorized && defaults.bool(forKey: "audio.keepMicrophoneWarm")
+        do { try capture.setWarmMicrophone(enabled: enabled, uid: defaults.string(forKey: "audio.inputDeviceUID") ?? "") }
+        catch { diagnostics.report(Self.diagnostic(error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed))) }
+    }
+
+    private static func diagnostic(_ failure: AudioCaptureFailure) -> DiagnosticFailure {
+        switch failure.kind {
+        case .permissionMissing: .microphonePermissionMissing
+        case .deviceUnavailable: .microphoneUnavailable
+        default: .microphoneCaptureFailed
         }
     }
 
@@ -249,10 +472,13 @@ final class AppModel: ObservableObject {
         insertionTask?.cancel()
         await insertionTask?.value
         insertionTask = nil
-        for session in dictationSessions.values { session.cancel() }
+        for active in Array(liveSessions.values) { cancelDictation(active) }
+        let modelShutdown = Task { [speechModels] in await speechModels.shutdown() }
         await processingQueue.shutdown()
+        await captureDrainTask?.value
+        if servicesEnabled { await capture.shutdown() }
         dictationSessions.removeAll()
-        await speechModels.shutdown()
+        await modelShutdown.value
         insertion.shutdown()
         history.stopAudio()
         audioPreview.stop(reason: .shutdown)
@@ -310,6 +536,7 @@ final class AppModel: ObservableObject {
             completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
             processingWarning: warning)
         let saved = await history.record(entry, untrimmedAudioURL: audioURL)
+        session.audioOwnedByHistory = true
         if saved { try? FileManager.default.removeItem(at: audioURL) }
         if let overlayID = session.overlayID {
             if let warning {

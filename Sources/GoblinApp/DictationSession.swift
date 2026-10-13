@@ -7,6 +7,7 @@ final class DictationSession {
     let captureStarted = ContinuousClock.now
     let target: NSRunningApplication?
     var overlayID: UUID?
+    var audioOwnedByHistory = false
     private(set) var cancelled = false
 
     init(target: NSRunningApplication? = NSWorkspace.shared.frontmostApplication) {
@@ -35,14 +36,14 @@ final class DictationProcessingQueue {
     var isEmpty: Bool { tasks.isEmpty }
 
     func enqueue(_ session: DictationSession, operation: @escaping @MainActor () async -> Void,
-                 completed: @escaping @MainActor () -> Void) {
+                 completed: @escaping @MainActor () async -> Void) {
         let previous = tail
         let task = Task { @MainActor [weak self] in
             await previous?.value
             if !session.cancelled && !Task.isCancelled { await operation() }
+            await completed()
             self?.tasks[session.id] = nil
             if self?.tasks.isEmpty == true { self?.tail = nil }
-            completed()
         }
         tasks[session.id] = task
         tail = task

@@ -13,6 +13,7 @@ final class HotkeyService: ObservableObject {
     @Published private(set) var recorderActive = false
     @Published private(set) var lastFailure: DiagnosticFailure?
     var onAction: ((HotkeyStateMachine.Action) -> Void)?
+    var engineConnected = false { didSet { updateStatus() } }
     private let permissions: PermissionModel
     private var state = HotkeyStateMachine()
     private var tap: HotkeyEventTap?
@@ -227,8 +228,9 @@ final class HotkeyService: ObservableObject {
     private func updateStatus() {
         if secureInput, let carbonIssue { status = carbonIssue }
         else if secureInput { status = shortcut.keyCode == nil ? "Secure Input: choose a keyed shortcut" : "Secure Input: using keyed fallback" }
-        else if recording != nil { status = "Shortcut recording state · engine not connected" }
-        else if tap != nil { status = "Shortcut ready · engine not connected" }
+        else if recording != nil { status = "Recording" }
+        else if processingCount > 0 { status = "Processing \(processingCount) dictation(s)" }
+        else if tap != nil { status = engineConnected ? "Shortcut ready" : "Shortcut ready · prepare a speech model" }
         else { status = permissions.tapFailure == nil ? "Waiting for permissions" : "Shortcut unavailable" }
     }
 

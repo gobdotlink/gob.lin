@@ -21,9 +21,10 @@ public actor LiveTranscriber {
     private var failed = false
     private var cancelled = false
     private var finishing = false
+    private var hasText = false
     public private(set) var computeMilliseconds = 0.0
 
-    public init(engine: Task<any PCMSpeechEngine, Error>, maximumWindowSamples: Int = 240_000) {
+    public init(engine: Task<any PCMSpeechEngine, Error>, maximumWindowSamples: Int = 96_000) {
         self.engine = engine
         maximumSamples = min(240_000, max(1, maximumWindowSamples))
         (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -75,7 +76,7 @@ public actor LiveTranscriber {
 
     private func scheduleIfNeeded() {
         guard !failed, !cancelled, !finishing, inference == nil,
-              received - lastScheduled >= 6_400 else { return }
+              received - lastScheduled >= (hasText ? 9_600 : 6_400) else { return }
         let snapshot = samples
         let snapshotOrigin = origin
         let snapshotEnd = received
@@ -100,6 +101,7 @@ public actor LiveTranscriber {
         inference = nil
         computeMilliseconds += milliseconds
         guard !cancelled, !failed else { return }
+        hasText = hasText || !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if let words = Self.words(result, origin: origin), let remainder = remainingWords(words) {
             let agreement = zip(previous, remainder).prefix { old, new in
                 old.text == new.text && abs(old.end - new.end) <= 4_000
