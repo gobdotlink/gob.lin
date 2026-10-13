@@ -47,7 +47,6 @@
 		60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardTransaction.swift; sourceTree = "<group>"; };
 		7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyShortcut.swift; sourceTree = "<group>"; };
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
-		766AAAD2B3DBFEC59693C5CD /* gob-ui-publication */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "gob-ui-publication"; path = .; sourceTree = SOURCE_ROOT; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		86CA786E7971062A617DCC40 /* KeyboardLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayout.swift; sourceTree = "<group>"; };
 		8C7DC821C59D20E3BD8E9846 /* Goblin.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Goblin.icns; sourceTree = "<group>"; };
@@ -57,6 +56,7 @@
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
 		C2A854E8221704C177743D7C /* FocusedText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedText.swift; sourceTree = "<group>"; };
 		CD14CC141C14EE017D44E28D /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
+		CFB3982C8AD54452D9320E23 /* goblin-merges */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "goblin-merges"; path = .; sourceTree = SOURCE_ROOT; };
 		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 		D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneSettingsView.swift; sourceTree = "<group>"; };
 		D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationOverlay.swift; sourceTree = "<group>"; };
@@ -82,7 +82,7 @@
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				766AAAD2B3DBFEC59693C5CD /* gob-ui-publication */,
+				CFB3982C8AD54452D9320E23 /* goblin-merges */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
