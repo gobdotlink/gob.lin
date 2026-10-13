@@ -116,11 +116,35 @@ final class AudioPreviewModel: ObservableObject {
             }
         }
         log(.tapInstalled)
+        let selectedDeviceID = id
         configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { @Sendable [weak self] _ in
             Task { @MainActor in
                 guard let self, self.sessionID == session, self.running else { return }
-                var details = DevelopmentDetails(); details.engineRunning = self.engine?.isRunning
-                self.log(.configurationChanged, severity: .warning, details: details)
+                guard let currentEngine = self.engine else { return }
+                let currentInput = currentEngine.inputNode
+                let currentFormat = currentInput.inputFormat(forBus: 0)
+                var currentDevice = AudioDeviceID(0)
+                var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+                var details = DevelopmentDetails(); details.engineRunning = currentEngine.isRunning
+                details.channelCount = currentFormat.channelCount; details.sampleRate = currentFormat.sampleRate
+                details.inputMatchesTap = currentFormat.sampleRate == format.sampleRate && currentFormat.channelCount == format.channelCount && currentInput.outputFormat(forBus: 0).isEqual(format)
+                if let unit = currentInput.audioUnit {
+                    details.osStatus = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &currentDevice, &size)
+                    details.deviceMatchesStart = details.osStatus == noErr && currentDevice == selectedDeviceID
+                    if details.osStatus == noErr {
+                        if let currentUID = Self.string(currentDevice, selector: kAudioDevicePropertyDeviceUID) { details.resolvedDevice = self.diagnostics?.developmentLog.deviceID(currentUID) }
+                        var alive: UInt32 = 0
+                        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+                        details.deviceAlive = AudioObjectGetPropertyData(currentDevice, &address, 0, nil, &size, &alive) == noErr && alive != 0
+                    }
+                    var unitRunning: UInt32 = 0
+                    size = UInt32(MemoryLayout<UInt32>.size)
+                    if AudioUnitGetProperty(unit, kAudioOutputUnitProperty_IsRunning, kAudioUnitScope_Global, 0, &unitRunning, &size) == noErr { details.unitRunning = unitRunning != 0 }
+                }
+                // Device selection can deliver a delayed notification after this engine has already started.
+                let canContinue = details.engineRunning == true && details.unitRunning == true && details.deviceMatchesStart == true && details.deviceAlive == true && details.inputMatchesTap == true
+                self.log(.configurationChanged, severity: canContinue ? .info : .warning, details: details)
+                guard !canContinue else { return }
                 self.stop(reason: .configurationChanged)
                 self.refresh()
                 self.error = "Audio configuration changed; preview stopped. Start the preview again to reconnect."
