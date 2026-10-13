@@ -11,7 +11,7 @@ companion, Xcode project, stable local signing, and a macOS build workflow.
 
 ## Build and run
 
-Requires macOS 26+ and Xcode 26.3+ (Swift 6.2). No third-party dependencies.
+Requires macOS 26+ and Xcode 26.3+ (Swift 6.2). FluidAudio 0.17.7 provides local Parakeet recognition.
 The signing scripts use the tools included with macOS; Homebrew is not required.
 
 ```sh
@@ -93,7 +93,9 @@ scripts/smoke.sh                   # package, CLI, and bundle metadata checks
 - `Resources`: app metadata and hardened-runtime entitlements.
 
 The engine protocol accepts a local audio file and returns recognized text.
-No engine or live dictation is bundled until the speech benchmark selects one.
+Parakeet TDT v3 is the first/default runtime. The PCM boundary accepts bounded
+16 kHz mono windows and returns token timings for live-session text handling.
+See [runtime measurements and limits](docs/speech-runtime.md).
 
 ## History
 
@@ -121,6 +123,7 @@ entries. It never uses your recordings or history folder.
 ## CLI evaluation
 
 ```sh
+swift run goblin prepare-model
 swift run goblin transcribe recording.wav
 swift run goblin replay ./recordings
 swift run goblin replay history
@@ -130,11 +133,23 @@ swift run goblin eval A.jsonl B.jsonl
 swift run goblin eval A.jsonl B.jsonl --json > report.json
 ```
 
-Audio transcription/replay uses the shared `RecordedAudioPipeline` and
-`SpeechEngine` boundary. Until the benchmark selects and registers an adapter,
-these commands return a structured `engine_not_configured` error with exit 3.
-They never substitute fabricated recognition. The optional postprocessor keeps
-raw text and a visible error in the output when rewriting fails.
+Audio transcription/replay uses Parakeet through the shared `RecordedAudioPipeline`
+and `SpeechEngine` boundary. Run `prepare-model` once to acquire and compile the
+model; recognition commands load local models only and return `model_not_installed`
+(exit 3) when missing. `--model-dir <path>` overrides the exact compiled model folder.
+The optional postprocessor keeps raw text and a visible error when rewriting fails.
+
+`goblin benchmark <file | directory> [--repeat N]` emits local batch timing JSONL,
+including raw recognition, audio duration, load time and resident memory.
+`--windows 1.5,3,6,12 --cadence-ms 400` adds accelerated bounded-window replay.
+Those timings measure inference work; they do not measure native key-up, queued
+capture, text commitment or insertion latency. Keep detailed corpus JSONL private;
+accuracy metrics require trusted annotations, and machine agreement is not WER.
+For the optional acoustic-vocabulary diagnostic, explicitly acquire its auxiliary
+model with `prepare-model --vocabulary-support`, then run
+`benchmark <directory> --vocabulary <terms-file>`. Terms may use the SDK JSON configuration or a text
+file with one term per line. The app does not yet expose this diagnostic as a
+validated vocabulary feature.
 
 `--recorded` reads existing transcript JSONL files from a directory, or exports
 saved History entries. It labels each row `source: "recorded_transcript"` and

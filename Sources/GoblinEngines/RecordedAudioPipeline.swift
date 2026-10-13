@@ -33,7 +33,7 @@ public enum RecordedAudioError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .engineNotConfigured: "No speech engine is configured. Engine selection follows the benchmark; use replay --recorded to evaluate existing transcripts."
+        case .engineNotConfigured: "No speech engine is configured. Use replay --recorded to evaluate existing transcripts."
         case .invalidFile: "Audio input must be a readable local file."
         }
     }

@@ -57,6 +57,23 @@ struct EvaluationSmoke {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-pipeline-smoke-\(UUID().uuidString).wav")
         try Data([0]).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
+        // These failures must release the runtime gate and never acquire a model or network connection.
+        let localEngine = ParakeetSpeechEngine(modelDirectory: file.deletingLastPathComponent().appendingPathComponent("missing-parakeet-\(UUID().uuidString)"))
+        do { _ = try await localEngine.transcribe(samples: [.nan]); preconditionFailure("Nonfinite PCM accepted") }
+        catch SpeechRuntimeError.invalidSamples { }
+        do { _ = try await localEngine.transcribe(samples: [Float](repeating: 0, count: 240_001)); preconditionFailure("Growing PCM buffer accepted") }
+        catch SpeechRuntimeError.windowTooLong { }
+        await withTaskGroup(of: Bool.self) { group in
+            for _ in 0..<3 {
+                group.addTask {
+                    do { try await localEngine.prepare(); return false }
+                    catch SpeechRuntimeError.modelNotInstalled { return true }
+                    catch { return false }
+                }
+            }
+            for await failedLocally in group { check(failedLocally, "Missing model must fail locally, releasing concurrent gate waiters") }
+        }
+        await localEngine.unload()
         let pipeline = RecordedAudioPipeline(engine: FixtureEngine()) { _ in throw EvaluationError.invalidRecord("Synthetic rewrite failure") }
         let run = try await pipeline.transcribe(file)
         check(run.rawText == run.finalText && run.postprocessingError != nil, "Rewrite failure must preserve raw text and report its error")
@@ -81,6 +98,30 @@ struct EvaluationSmoke {
             for record in a {
                 try await store.insert(HistoryEntry(rawText: record.rawText, finalText: record.finalText, model: record.model ?? "fixture", latencies: record.timings ?? DictationTimings()))
             }
+        }
+        if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--runtime-fixture" {
+            let runtime = ParakeetSpeechEngine(modelDirectory: URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true))
+            let request = TranscriptionRequest(audioFileURL: URL(fileURLWithPath: CommandLine.arguments[3]))
+            try await runtime.prepare()
+            let inFlight = Task { try await runtime.transcribe(request) }
+            try await Task.sleep(for: .milliseconds(20))
+            let drainingUnload = Task { await runtime.unload() }
+            let recognized = try await inFlight.value
+            check(!recognized.text.isEmpty, "Real speech fixture must finish before queued unload")
+            await drainingUnload.value
+            do { _ = try await runtime.transcribe(request); preconditionFailure("Unloaded runtime accepted inference") }
+            catch SpeechRuntimeError.modelNotInstalled { }
+            try await runtime.prepare()
+            let cancelled = Task { try await runtime.transcribe(request) }
+            try await Task.sleep(for: .milliseconds(20))
+            cancelled.cancel()
+            do { _ = try await cancelled.value; preconditionFailure("Cancelled inference leaked a result") }
+            catch is CancellationError { }
+            await runtime.unload()
+            try await runtime.prepare()
+            check((try await runtime.transcribe(samples: [])).text.isEmpty, "Reloaded PCM boundary remains usable")
+            await runtime.unload()
+            print("Real runtime gate smoke passed: inference drains before unload, cancellation suppresses output, reload remains usable.")
         }
         print("Evaluation safety smoke passed: ID alignment, word edits/WER, jargon, ordinary-word regressions, annotations, percentiles, matrix bounds, raw-text fallback.")
     }

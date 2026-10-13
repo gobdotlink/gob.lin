@@ -19,7 +19,7 @@ let package = Package(
         .target(name: "GoblinCore", dependencies: ["CSQLite"], plugins: [.plugin(name: "BuildIdentity")]),
         .target(name: "GoblinEngines", dependencies: ["GoblinCore", .product(name: "FluidAudio", package: "FluidAudio")]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
-        .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),
+        .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines", .product(name: "FluidAudio", package: "FluidAudio")]),
         .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
         .executableTarget(name: "HistorySmoke", dependencies: ["GoblinCore", "CSQLite"], path: "Tests/HistorySmoke"),
         .executableTarget(name: "DiagnosticsSmoke", dependencies: ["GoblinCore"], path: "Tests/DiagnosticsSmoke"),

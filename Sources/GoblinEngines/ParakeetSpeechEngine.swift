@@ -93,7 +93,7 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
 
     private static func result(_ result: ASRResult) -> TranscriptionResult {
         TranscriptionResult(text: result.text, tokens: (result.tokenTimings ?? []).map {
-            TranscriptionToken(text: $0.token, startSeconds: $0.startTime, endSeconds: $0.endTime, confidence: $0.confidence)
+            TranscriptionToken(text: $0.token, startSeconds: $0.startTime, endSeconds: $0.endTime, confidence: $0.confidence, tokenID: $0.tokenId)
         })
     }
 

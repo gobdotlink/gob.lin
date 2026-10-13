@@ -30,12 +30,14 @@ public struct TranscriptionToken: Sendable, Equatable, Codable {
     public let startSeconds: Double
     public let endSeconds: Double
     public let confidence: Float
+    public let tokenID: Int?
 
-    public init(text: String, startSeconds: Double, endSeconds: Double, confidence: Float) {
+    public init(text: String, startSeconds: Double, endSeconds: Double, confidence: Float, tokenID: Int? = nil) {
         self.text = text
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
         self.confidence = confidence
+        self.tokenID = tokenID
     }
 }
 
