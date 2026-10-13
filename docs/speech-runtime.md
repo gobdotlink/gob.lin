@@ -47,7 +47,11 @@ is made, and no cache was deleted just to manufacture one. A later debug runtime
 smoke showed about **16.2 seconds** between vocabulary loading and manager
 initialization, followed by ~0.1s reloads. Warm release measurements do not
 establish a universal first-load bound; capture must remain recoverable while
-preparation is delayed.
+preparation is delayed. A final release cached-prepare sample separated **309.3 ms**
+cache verification from **242.1 ms** local load, with **95.4 ms** immediate reload.
+That process sampled **391.7 MB RSS** after preparation and unload. This larger
+sample includes the store verification/loading path; the corpus-only 133.6 MB
+measurement is not an end-to-end memory ceiling.
 
 ### Bounded-window candidates
 
