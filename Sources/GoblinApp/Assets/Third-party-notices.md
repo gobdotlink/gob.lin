@@ -1,6 +1,6 @@
 # Third-party notices
 
-This file records gob.lin's third-party dependency and asset notices.
+This document lists bundled fonts and planned dependencies for gob.lin.
 
 ## Bundled brand fonts
 

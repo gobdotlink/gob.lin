@@ -1,6 +1,6 @@
 # gob.lin
 
-An independently implemented native macOS dictation app.
+A native macOS dictation app with a menu bar interface, configurable shortcuts, and local transcript history.
 
 ## Project
 
@@ -193,13 +193,6 @@ Stats, learning from corrections, context integration, per-app styles, snippets,
 4. **M3 Dogfood-ready:** CLI evaluations, diagnostics, distribution, updates, and open-source readiness.
 
 The starting tickets are [GOB-5: project skeleton](https://linear.app/goblink/issue/GOB-5/project-skeleton-swift-packages-menu-bar-app-stable-signing-licence) and [GOB-6: speech engine spike](https://linear.app/goblink/issue/GOB-6).
-
-## References
-
-- Local UX research screenshots: shortcuts, microphone controls, history, models, advanced options, post-processing, and app information.
-- `reference/wispr flow/screenshots/`: dictation history, insights, dictionary, snippets, tone, and cleanup controls.
-
-These screenshots are local research material and are excluded from version control.
 
 ## License
 
