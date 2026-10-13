@@ -30,8 +30,10 @@ final class HotkeyService: ObservableObject {
     private var sessionObservers: [NSObjectProtocol] = []
     private let monitorSystem: Bool
     private let defaults: UserDefaults
+    private weak var diagnostics: DiagnosticsModel?
 
-    init(permissions: PermissionModel, defaults: UserDefaults = .standard, monitorSystem: Bool = true) {
+    init(permissions: PermissionModel, defaults: UserDefaults = .standard, monitorSystem: Bool = true, diagnostics: DiagnosticsModel? = nil) {
+        self.diagnostics = diagnostics
         self.permissions = permissions
         self.defaults = defaults
         self.monitorSystem = monitorSystem
@@ -67,6 +69,7 @@ final class HotkeyService: ObservableObject {
             permissions.reportTapBlocked()
             return
         }
+        diagnostics?.developmentLog.record(.hotkeyStarting, area: .hotkeys)
         checkSecureInput()
         installCarbonHandler()
         registerCarbonShortcut()
@@ -80,6 +83,12 @@ final class HotkeyService: ObservableObject {
         }, result: { [weak self] result in
             Task { @MainActor in
                 guard let self, self.tap != nil, self.tapGeneration == generation else { return }
+                var details = DevelopmentDetails()
+                switch result {
+                case .success: details.succeeded = self.carbonIssue == nil
+                case .failure: details.succeeded = false
+                }
+                self.diagnostics?.developmentLog.record(.hotkeyReady, area: .hotkeys, severity: details.succeeded == true ? .info : .warning, details: details)
                 switch result {
                 case .success:
                     self.lastFailure = self.carbonIssue == nil ? nil : .hotkeyUnavailable
@@ -99,6 +108,7 @@ final class HotkeyService: ObservableObject {
     }
 
     func stop() {
+        if tap != nil { diagnostics?.developmentLog.record(.hotkeyStopped, area: .hotkeys) }
         tap?.stop()
         tap = nil
         tapGeneration = UUID()

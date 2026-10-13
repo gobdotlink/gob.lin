@@ -11,8 +11,9 @@ let package = Package(
         .executable(name: "goblin", targets: ["GoblinCLI"]),
     ],
     targets: [
+        .plugin(name: "BuildIdentity", capability: .buildTool()),
         .systemLibrary(name: "CSQLite", providers: [.apt(["libsqlite3-dev"])]),
-        .target(name: "GoblinCore", dependencies: ["CSQLite"]),
+        .target(name: "GoblinCore", dependencies: ["CSQLite"], plugins: [.plugin(name: "BuildIdentity")]),
         .target(name: "GoblinEngines", dependencies: ["GoblinCore"]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines"]),

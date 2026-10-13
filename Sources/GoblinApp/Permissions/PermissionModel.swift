@@ -1,4 +1,5 @@
 import AppKit
+import GoblinCore
 import AVFoundation
 @preconcurrency import ApplicationServices
 import SwiftUI
@@ -49,8 +50,10 @@ final class PermissionModel: ObservableObject {
     private var onboarding: NSWindowController?
     private var awaitingSettingsReturn = false
     private let monitorSystem: Bool
+    private weak var diagnostics: DiagnosticsModel?
 
-    init(snapshot: Snapshot? = nil, monitorSystem: Bool = true) {
+    init(snapshot: Snapshot? = nil, monitorSystem: Bool = true, diagnostics: DiagnosticsModel? = nil) {
+        self.diagnostics = diagnostics
         self.monitorSystem = monitorSystem
         self.snapshot = snapshot ?? Self.readSnapshot()
         guard monitorSystem else { return }
@@ -99,6 +102,10 @@ final class PermissionModel: ObservableObject {
     }
 
     func checkAgain() {
+        if monitorSystem {
+            Self.logDiagnostic("permission_retry", fields: ["reason": "manual", "tap_failure": tapFailure?.rawValue ?? "none"])
+            diagnostics?.developmentLog.record(.permissionRetry, area: .permissions, details: DevelopmentDetails(reason: .manualRetry))
+        }
         refresh()
         onRetry?()
     }
@@ -107,6 +114,8 @@ final class PermissionModel: ObservableObject {
         refresh()
         guard awaitingSettingsReturn else { return }
         awaitingSettingsReturn = false
+        Self.logDiagnostic("permission_retry", fields: ["reason": "app_opened_settings", "tap_failure": tapFailure?.rawValue ?? "none"])
+        diagnostics?.developmentLog.record(.permissionRetry, area: .permissions, details: DevelopmentDetails(reason: .settingsReturn))
         onRetry?()
         showOnboarding()
     }
