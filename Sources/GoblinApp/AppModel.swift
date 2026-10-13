@@ -242,6 +242,7 @@ final class AppModel: ObservableObject {
         timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
         var warning = result.warning?.message
         let text = result.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var insertionAttempted = false
         if !text.isEmpty {
             lastTranscript = result.finalText
             if let overlayID = session.overlayID {
@@ -249,6 +250,7 @@ final class AppModel: ObservableObject {
             }
             let insertionStart = ContinuousClock.now
             if session.targetIsFocused && !insertion.busy && insertionTask == nil {
+                insertionAttempted = true
                 diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
                 await insertion.insert(result.finalText)
                 var details = DevelopmentDetails()
@@ -264,8 +266,11 @@ final class AppModel: ObservableObject {
                 warning = warning ?? failure.message
             }
             timings.insertionMilliseconds = Self.milliseconds(since: insertionStart)
+        } else {
+            warning = warning ?? DiagnosticFailure.noTranscriptAvailable.message
         }
-        try session.checkCancellation()
+        // Once insertion starts, retain its text/audio even if cancellation interrupts acknowledgement.
+        if !insertionAttempted { try session.checkCancellation() }
         let entry = HistoryEntry(id: session.id, rawText: raw, finalText: result.finalText,
             tone: result.tone.rawValue, polished: result.polished,
             targetBundleIdentifier: session.target?.bundleIdentifier,
