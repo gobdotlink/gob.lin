@@ -14,8 +14,9 @@ actor ScriptedPCM: PCMSpeechEngine {
         return TranscriptionResult(text: "hello world tail", tokens: [
             .init(text: "▁hel", startSeconds: 0, endSeconds: 0.2, confidence: 1),
             .init(text: "lo", startSeconds: 0.2, endSeconds: 0.5, confidence: 1),
-            .init(text: "▁world", startSeconds: 0.6, endSeconds: 1, confidence: 1),
-            .init(text: "▁tail", startSeconds: 2.5, endSeconds: 3, confidence: 1)
+            .init(text: " ", startSeconds: 0.5, endSeconds: 0.6, confidence: 1),
+            .init(text: "world", startSeconds: 0.6, endSeconds: 1, confidence: 1),
+            .init(text: " tail", startSeconds: 2.5, endSeconds: 3, confidence: 1)
         ])
     }
 }

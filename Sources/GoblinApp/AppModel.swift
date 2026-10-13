@@ -330,9 +330,12 @@ final class AppModel: ObservableObject {
         active.stopTask = Task { @MainActor [weak self] in
             await active.startTask?.value
             guard let self else { throw CancellationError() }
+            defer {
+                active.captureMilliseconds = Self.milliseconds(since: active.session.captureStarted)
+                active.eventContinuation.finish()
+            }
             try active.session.checkCancellation()
             guard let captureID = active.captureID else { throw active.failure ?? AudioCaptureFailure(.startFailed) }
-            defer { active.eventContinuation.finish() }
             let audio = try await self.capture.stop(sessionID: captureID)
             active.audio = audio
             await active.frameTask?.value
@@ -357,7 +360,7 @@ final class AppModel: ObservableObject {
                 let result = try await active.live.finish()
                 await active.textTask?.value
                 try active.session.checkCancellation()
-                var timings = DictationTimings(captureMilliseconds: Self.milliseconds(since: active.session.captureStarted),
+                var timings = DictationTimings(captureMilliseconds: active.captureMilliseconds,
                                                asrMilliseconds: await active.live.computeMilliseconds)
                 let raw: String
                 if let result, !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { raw = result.text }
@@ -430,7 +433,8 @@ final class AppModel: ObservableObject {
         let entry = HistoryEntry(id: session.id, rawText: "", finalText: "", targetBundleIdentifier: session.target?.bundleIdentifier,
             targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,
             audioDuration: active.audio?.duration ?? duration, model: active.lease.modelID,
-            latencies: DictationTimings(captureMilliseconds: Self.milliseconds(since: session.captureStarted)),
+            latencies: DictationTimings(captureMilliseconds: active.captureMilliseconds,
+                                       asrMilliseconds: await active.live.computeMilliseconds),
             processingWarning: failure.message)
         let saved = await history.record(entry, untrimmedAudioURL: url)
         session.audioOwnedByHistory = true

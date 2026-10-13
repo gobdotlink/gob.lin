@@ -114,7 +114,9 @@ public actor LiveTranscriber {
             continuation.yield(LiveTranscript(committedText: prefix,
                 tentativeText: (prefix.isEmpty || tail.isEmpty ? "" : " ") + tail))
             if let last = committed.last {
-                let retainedOrigin = max(self.origin, last.end - 24_000)
+                let overlapStart = last.end - 24_000
+                let wordStart = committed.first { $0.end > overlapStart }?.start ?? overlapStart
+                let retainedOrigin = max(self.origin, wordStart)
                 let discard = Int(retainedOrigin - self.origin)
                 if discard > 0 {
                     samples.removeFirst(discard)
@@ -160,14 +162,17 @@ public actor LiveTranscriber {
 
     private static func words(_ result: TranscriptionResult, origin: Int64) -> [Word]? {
         var words: [Word] = []
+        var pendingBoundary = false
         for token in result.tokens {
+            if token.text == "<blank>" || token.text == "<pad>" { continue }
             guard token.startSeconds.isFinite, token.endSeconds.isFinite,
                   token.startSeconds >= 0, token.endSeconds >= token.startSeconds,
                   token.endSeconds <= 16 else { return nil }
-            let startsWord = token.text.hasPrefix("▁")
+            let startsWord = pendingBoundary || token.text.hasPrefix("▁") || token.text.first?.isWhitespace == true
             let text = token.text.replacingOccurrences(of: "▁", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
+            guard !text.isEmpty else { pendingBoundary = startsWord; continue }
+            pendingBoundary = false
             let start = origin + Int64(token.startSeconds * 16_000)
             let end = origin + Int64(token.endSeconds * 16_000)
             if startsWord || words.isEmpty { words.append(Word(text: text, start: start, end: end)) }

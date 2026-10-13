@@ -1,0 +1,152 @@
+{
+  "date": "2026-10-13",
+  "machine": "Apple M4 Pro / macOS 26.6.2",
+  "acceptanceComplete": false,
+  "nativeMethod": "Certificate-signed production AppModel probe; actual microphone; neutral spoken playback; OS Option-Space events; isolated native paste target",
+  "nativeTimingEndpoint": "First final recognition text displayed with tentative tail cleared; postprocessing time separately retained in timings; acknowledgement/history separately measured",
+  "nativeShortChecks": {
+    "captureBeforeModelReady": true,
+    "maximumOverlappingLeases": 2,
+    "newCaptureSurvivedPriorCompletion": true,
+    "finalizationPreservedTextArea": true,
+    "cancelSuppressedOutput": true,
+    "clipboardRestored": true,
+    "dictionaryAndToneApplied": true
+  },
+  "nativeSavedAudioComparisons": [
+    {
+      "audioSeconds": 6.4,
+      "endingPreserved": true,
+      "liveEqualsBatch": true,
+      "wordCount": 15
+    },
+    {
+      "audioSeconds": 6.4,
+      "endingPreserved": true,
+      "liveEqualsBatch": true,
+      "wordCount": 15
+    },
+    {
+      "audioSeconds": 6.6254375,
+      "endingPreserved": true,
+      "liveEqualsBatch": true,
+      "wordCount": 15
+    }
+  ],
+  "nativeTimedCaptures": [
+    {
+      "firstTextMillisecondsFromReady": 43.352709,
+      "insertionAcknowledged": true,
+      "liveEqualsBatch": true,
+      "releaseToFinalTextMilliseconds": 129.35375,
+      "releaseToHistoryMilliseconds": 325.129459,
+      "requestedCaptureSeconds": 3,
+      "savedAudioSeconds": 3.6254375,
+      "timings": [
+        "Capture: 3098.1 ms",
+        "Silence trimming: 0.0 ms",
+        "ASR: 528.8 ms",
+        "Rewrite: 2.0 ms",
+        "Insert: 167.8 ms"
+      ],
+      "wordCount": 8
+    },
+    {
+      "firstTextMillisecondsFromReady": 432.679917,
+      "insertionAcknowledged": true,
+      "liveEqualsBatch": true,
+      "releaseToFinalTextMilliseconds": 405.812875,
+      "releaseToHistoryMilliseconds": 581.821042,
+      "requestedCaptureSeconds": 60,
+      "savedAudioSeconds": 60.51075,
+      "timings": [
+        "Capture: 60079.7 ms",
+        "Silence trimming: 0.0 ms",
+        "ASR: 1186.6 ms",
+        "Rewrite: 3.1 ms",
+        "Insert: 164.4 ms"
+      ],
+      "wordCount": 146
+    },
+    {
+      "firstTextMillisecondsFromReady": 1631.030041,
+      "insertionAcknowledged": true,
+      "liveEqualsBatch": true,
+      "releaseToFinalTextMilliseconds": 1424.774042,
+      "releaseToHistoryMilliseconds": 1595.6205,
+      "requestedCaptureSeconds": 300,
+      "savedAudioSeconds": 300.6228125,
+      "timings": [
+        "Capture: 300101.6 ms",
+        "Silence trimming: 0.0 ms",
+        "ASR: 2229.0 ms",
+        "Rewrite: 8.7 ms",
+        "Insert: 162.4 ms"
+      ],
+      "wordCount": 758
+    }
+  ],
+  "acceleratedMerger": [
+    {
+      "audioSeconds": 3,
+      "tailFinishMilliseconds": 49.835584,
+      "batchMilliseconds": 46.733084,
+      "usedBatchFallback": false,
+      "maximumCommittedWords": 14,
+      "pcmDecodeCalls": 6,
+      "liveEqualsBatch": true,
+      "batchWordCount": 14,
+      "firstTextAudioSeconds": 0.4
+    },
+    {
+      "audioSeconds": 60,
+      "batchMilliseconds": 351.045541,
+      "usedBatchFallback": true,
+      "maximumCommittedWords": 5,
+      "pcmDecodeCalls": 7,
+      "liveEqualsBatch": false,
+      "batchWordCount": 142,
+      "firstTextAudioSeconds": 0.4
+    },
+    {
+      "audioSeconds": 300,
+      "batchMilliseconds": 1237.044042,
+      "usedBatchFallback": true,
+      "maximumCommittedWords": 1,
+      "pcmDecodeCalls": 12,
+      "liveEqualsBatch": false,
+      "batchWordCount": 784,
+      "firstTextAudioSeconds": 1.6
+    }
+  ],
+  "limits": [
+    "Long native release target exceeded",
+    "First text not universally within 0.5s; warm pre-roll is not fresh speech-onset evidence",
+    "Two-hypothesis commitment is not a batch-equivalence proof; changed overlaps require full-file recovery",
+    "No human-labeled corpus accuracy or Neural Engine energy measurement",
+    "Physical Fn and cold first-word capture not checked",
+    "Capture-owner review fixes for partial writes, gated silence and preview/warm/sleep are pending an explicit published checkpoint"
+  ],
+  "finalNativeRecheck": {
+    "captureBeforeModelReady": true,
+    "maximumOverlappingLeases": 2,
+    "newCaptureSurvivedPriorCompletion": true,
+    "finalizationPreservedTextArea": true,
+    "cancelSuppressedOutput": true,
+    "clipboardRestored": true,
+    "dictionaryAndToneApplied": true,
+    "sharedPreviewPreservedCapture": true,
+    "finalizationCancelSuppressedOutput": true,
+    "releaseToFinalTextMilliseconds": 140.162541,
+    "firstTextMilliseconds": 2074.508167,
+    "insertionAcknowledged": true,
+    "timingEndpoint": "Published final postprocessed transcript",
+    "modelFix": "2d4e16b6d99bc344a0324e7f3f3f5f138e31e22c",
+    "runtimeFollowup": "52b3893d31079e66b615ffa3c13efd3a48ccf80b"
+  },
+  "cliParity": {
+    "rawMatchesSavedNative": true,
+    "finalMatchesDictionaryTone": true,
+    "structuredMissingModelError": true
+  }
+}

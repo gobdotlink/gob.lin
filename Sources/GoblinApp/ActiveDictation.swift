@@ -20,6 +20,7 @@ final class ActiveDictation {
     var stopping = false
     var enqueued = false
     var countedForProcessing = false
+    var captureMilliseconds = 0.0
 
     init(session: DictationSession, lease: SpeechModelLease, readiness: Task<any PCMSpeechEngine, Error>) {
         self.session = session
