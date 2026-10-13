@@ -2,6 +2,7 @@ import AppKit
 import AudioToolbox
 import AVFoundation
 import CoreAudio
+import GoblinCore
 import SwiftUI
 
 struct InputDevice: Identifiable {
@@ -21,8 +22,10 @@ final class AudioPreviewModel: ObservableObject {
     private var configurationObserver: NSObjectProtocol?
     private var sessionID = UUID()
     private let monitorSystem: Bool
+    private weak var diagnostics: DiagnosticsModel?
 
-    init(devices: [InputDevice]? = nil) {
+    init(devices: [InputDevice]? = nil, diagnostics: DiagnosticsModel? = nil) {
+        self.diagnostics = diagnostics
         monitorSystem = devices == nil
         if let devices { self.devices = devices }
     }
@@ -31,11 +34,20 @@ final class AudioPreviewModel: ObservableObject {
         guard monitorSystem else { return }
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { error = "Could not enumerate microphones."; return }
+        let sizeStatus = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size)
+        guard sizeStatus == noErr else {
+            error = "Could not enumerate microphones."
+            var details = DevelopmentDetails(); details.osStatus = sizeStatus
+            log(.deviceEnumerationFailed, severity: .error, details: details); return
+        }
         guard size > 0 else { devices = []; return }
         var identifiers = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
         let result = identifiers.withUnsafeMutableBytes { AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, $0.baseAddress!) }
-        guard result == noErr else { error = "Could not read microphone devices."; return }
+        guard result == noErr else {
+            error = "Could not read microphone devices."
+            var details = DevelopmentDetails(); details.osStatus = result
+            log(.deviceEnumerationFailed, severity: .error, details: details); return
+        }
         devices = identifiers.compactMap { id in
             var streams = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioDevicePropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
             var bytes: UInt32 = 0
@@ -47,46 +59,97 @@ final class AudioPreviewModel: ObservableObject {
     }
 
     func start(uid: String) {
-        stop()
+        stop(reason: .restart)
+        let session = sessionID
+        var selection = DevelopmentDetails(reason: uid.isEmpty ? .systemDefault : .savedDevice)
+        if !uid.isEmpty { selection.selectedDevice = diagnostics?.developmentLog.deviceID(uid) }
+        log(.previewRequested, details: selection)
         guard monitorSystem else { return }
-        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { error = "Allow Microphone in onboarding before previewing audio."; return }
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            fail("Allow Microphone in onboarding before previewing audio.", reason: .permissionMissing); return
+        }
         refresh()
+        var inventory = DevelopmentDetails(); inventory.deviceCount = devices.count
+        log(.devicesEnumerated, details: inventory)
         let engine = AVAudioEngine()
         let input = engine.inputNode
         if !uid.isEmpty {
             if let device = devices.first(where: { $0.uid == uid }), let unit = input.audioUnit {
                 var id = device.id
-                guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else { error = "Could not select that microphone."; return }
+                let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+                selection.osStatus = status
+                log(.deviceSelection, severity: status == noErr ? .info : .error, details: selection)
+                guard status == noErr else { fail("Could not select that microphone.", reason: .startFailed); return }
                 error = nil
-            } else { error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept." }
+            } else {
+                error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept."
+                selection.reason = .deviceUnavailable
+                log(.deviceFallback, severity: .warning, details: selection)
+            }
         } else { error = nil }
+        var id = AudioDeviceID(0)
+        var bytes = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var resolved = DevelopmentDetails()
+        if let unit = input.audioUnit {
+            resolved.osStatus = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, &bytes)
+            if resolved.osStatus == noErr, let resolvedUID = Self.string(id, selector: kAudioDevicePropertyDeviceUID) {
+                resolved.resolvedDevice = diagnostics?.developmentLog.deviceID(resolvedUID)
+            }
+        }
+        resolved.succeeded = resolved.resolvedDevice != nil
+        log(.deviceResolved, severity: resolved.succeeded == true ? .info : .warning, details: resolved)
         let format = input.outputFormat(forBus: 0)
-        guard format.channelCount > 0, format.sampleRate > 0 else { error = "Microphone has no usable input stream."; return }
-        let session = sessionID
+        var formatDetails = DevelopmentDetails()
+        formatDetails.channelCount = format.channelCount; formatDetails.sampleRate = format.sampleRate
+        log(.inputFormat, details: formatDetails)
+        guard format.channelCount > 0, format.sampleRate > 0 else { fail("Microphone has no usable input stream.", reason: .invalidFormat); return }
+        log(.tapInstalling)
         // Sendable prevents this audio-thread callback from inheriting MainActor isolation.
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { @Sendable [weak self] buffer, _ in
             guard buffer.frameLength > 0, buffer.floatChannelData != nil else { return }
             let value = Self.deviceInputLevel(buffer)
             Task { @MainActor in
                 guard let self, self.sessionID == session, self.running else { return }
+                // This breadcrumb runs on the main actor, once per preview, never on the audio callback.
+                if !self.ready { self.log(.firstBuffer) }
                 self.level = value.isFinite ? value : 0; self.ready = true
             }
         }
-        do {
-            try engine.start(); self.engine = engine; running = true
-            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { @Sendable [weak self] _ in
-                Task { @MainActor in
-                    guard let self, self.sessionID == session, self.running else { return }
-                    self.stop()
-                    self.refresh()
-                    self.error = "Audio configuration changed; preview stopped. Start the preview again to reconnect."
-                }
+        log(.tapInstalled)
+        configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { @Sendable [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.sessionID == session, self.running else { return }
+                var details = DevelopmentDetails(); details.engineRunning = self.engine?.isRunning
+                self.log(.configurationChanged, severity: .warning, details: details)
+                self.stop(reason: .configurationChanged)
+                self.refresh()
+                self.error = "Audio configuration changed; preview stopped. Start the preview again to reconnect."
             }
         }
-        catch { input.removeTap(onBus: 0); self.error = "Microphone preview failed: \(error.localizedDescription)" }
+        do {
+            log(.engineStarting)
+            try engine.start(); self.engine = engine; running = true
+            var details = DevelopmentDetails(); details.engineRunning = engine.isRunning
+            log(.engineStarted, details: details)
+            if diagnostics?.activeFailures[.microphone] == .microphoneCaptureFailed { diagnostics?.resolve(.microphone) }
+        }
+        catch {
+            var details = DevelopmentDetails(reason: .startFailed); details.underlyingError = error
+            log(.previewFailed, severity: .error, details: details)
+            diagnostics?.report(.microphoneCaptureFailed, operation: session)
+            sessionID = UUID()
+            if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver); self.configurationObserver = nil }
+            input.removeTap(onBus: 0)
+            engine.stop()
+            diagnostics?.developmentLog.record(.previewStopped, area: .microphone, operation: session, details: DevelopmentDetails(reason: .startFailed))
+            self.error = "Microphone preview failed: \(error.localizedDescription)"
+        }
     }
 
-    func stop() {
+    func stop(reason: DevelopmentReason = .user) {
+        let operation = sessionID
+        let hadEngine = engine != nil || running
+        if hadEngine { log(.previewStopping, details: DevelopmentDetails(reason: reason)) }
         sessionID = UUID()
         if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver); self.configurationObserver = nil }
         engine?.inputNode.removeTap(onBus: 0)
@@ -95,6 +158,18 @@ final class AudioPreviewModel: ObservableObject {
         running = false
         ready = false
         level = 0
+        if hadEngine { diagnostics?.developmentLog.record(.previewStopped, area: .microphone, operation: operation, details: DevelopmentDetails(reason: reason)) }
+    }
+
+    private func log(_ event: DevelopmentEventName, severity: DevelopmentSeverity = .info, details: DevelopmentDetails = DevelopmentDetails()) {
+        diagnostics?.developmentLog.record(event, area: .microphone, severity: severity, operation: sessionID, details: details)
+    }
+
+    private func fail(_ message: String, reason: DevelopmentReason) {
+        error = message
+        log(.previewFailed, severity: .error, details: DevelopmentDetails(reason: reason))
+        diagnostics?.report(reason == .permissionMissing ? .microphonePermissionMissing : .microphoneCaptureFailed, operation: sessionID)
+        log(.previewStopped, details: DevelopmentDetails(reason: reason))
     }
 
     nonisolated static func deviceInputLevel(_ buffer: AVAudioPCMBuffer) -> Double {
@@ -151,8 +226,8 @@ struct AudioSettingsView: View {
             Text("The preview is local and is not saved. Missing devices fall back to the system default without erasing your saved selection.").foregroundStyle(.secondary)
         }.padding(28)
         .onAppear { preview.refresh() }
-        .onDisappear { preview.stop() }
-        .onChange(of: selectedUID) { _, uid in if preview.running { preview.start(uid: uid) } }
-        .onChange(of: permissions.snapshot.microphone) { _, status in if status != .authorized { preview.stop() } }
+        .onDisappear { preview.stop(reason: .viewClosed) }
+        .onChange(of: selectedUID) { _, uid in if preview.running { preview.stop(reason: .selectionChanged); preview.start(uid: uid) } }
+        .onChange(of: permissions.snapshot.microphone) { _, status in if status != .authorized { preview.stop(reason: .permissionLost) } }
     }
 }
