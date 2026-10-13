@@ -29,6 +29,7 @@ public actor LiveTranscriber {
     private var generation = 0
     private var consecutiveDecodeFailures = 0
     private var recoveryReason: LiveRecoveryReason?
+    private var previewHasGap = false
     private var cancelled = false
     private var finishing = false
     public private(set) var requiresFinalRecovery = false
@@ -41,7 +42,7 @@ public actor LiveTranscriber {
     }
 
     public func append(_ frame: [Float], at samplePosition: Int64) {
-        guard !cancelled, !finishing else { return }
+        guard !cancelled, !finishing, !unavailable else { return }
         guard samplePosition >= received else {
             degrade(.inputDiscontinuity, needsOriginal: true)
             return
@@ -63,21 +64,13 @@ public actor LiveTranscriber {
             degrade(.invalidSamples, needsOriginal: true)
             return
         }
+        // Keep the in-flight snapshot valid, but allow at most three seconds of pending audio.
+        guard frame.count <= maximumSamples + 48_000 - samples.count else {
+            degrade(.decodeUnavailable, needsOriginal: true)
+            return
+        }
         received += Int64(frame.count)
-        let overflow = samples.count + frame.count - maximumSamples
-        if overflow > 0 {
-            // Resume a bounded preview; only the saved original can recover a skipped boundary.
-            let retained = frame.count >= maximumSamples ? Array(frame.suffix(maximumSamples))
-                : Array(samples.suffix(maximumSamples - frame.count)) + frame
-            samples = retained
-            origin = received - Int64(retained.count)
-            generation += 1
-            committed.removeAll { $0.end > origin }
-            previous = []
-            previousText = ""
-            tentative = ""
-            degrade(.windowLimit, needsOriginal: true)
-        } else { samples.append(contentsOf: frame) }
+        samples.append(contentsOf: frame)
         scheduleIfNeeded()
     }
 
@@ -88,6 +81,10 @@ public actor LiveTranscriber {
         try checkCancellation()
         defer { continuation.finish() }
         guard !requiresFinalRecovery else { return nil }
+        guard samples.count <= maximumSamples else {
+            degrade(.decodeUnavailable, needsOriginal: true)
+            return nil
+        }
         guard !samples.isEmpty else { return TranscriptionResult(text: committedText) }
         let runtime = try await engine.value
         try checkCancellation()
@@ -120,10 +117,21 @@ public actor LiveTranscriber {
     }
 
     private var committedText: String { Self.join(settled, Self.text(committed)) }
+    private var unavailable: Bool { recoveryReason == .decodeUnavailable }
 
     private func scheduleIfNeeded() {
-        guard !cancelled, !finishing, consecutiveDecodeFailures < 3, inference == nil, !samples.isEmpty,
+        guard !cancelled, !finishing, !unavailable, inference == nil, !samples.isEmpty,
               received - lastScheduled >= (previousText.isEmpty ? 6_400 : 9_600) else { return }
+        if samples.count > maximumSamples {
+            // A skipped boundary starts a separate preview; original audio owns final continuity.
+            degrade(.windowLimit, needsOriginal: true)
+            discard(before: received - Int64(maximumSamples))
+            previewHasGap = true
+            settled = ""
+            committed = []
+            previous = []
+            previousText = ""
+        }
         let snapshot = samples
         let snapshotOrigin = origin
         let snapshotEnd = received
@@ -149,7 +157,7 @@ public actor LiveTranscriber {
                         generation snapshotGeneration: Int, milliseconds: Double) {
         inference = nil
         computeMilliseconds += milliseconds
-        guard !cancelled else { return }
+        guard !cancelled, !unavailable else { return }
         guard snapshotGeneration == generation else { scheduleIfNeeded(); return }
         consecutiveDecodeFailures = 0
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,7 +170,7 @@ public actor LiveTranscriber {
         if result.speechPresence == .notDetected, previousText.isEmpty,
            committed.allSatisfy({ $0.end <= snapshotOrigin }) {
             tentative = ""
-            recoveryReason = nil
+            recoveryReason = previewHasGap ? .windowLimit : nil
             discard(before: max(origin, end - 8_000))
             publish()
         } else if let words = Self.words(result, origin: snapshotOrigin) {
@@ -190,7 +198,7 @@ public actor LiveTranscriber {
                         discard(before: max(origin, wordStart))
                     }
                 }
-                recoveryReason = nil
+                recoveryReason = previewHasGap ? .windowLimit : nil
                 publish()
             } else {
                 // Re-decode retained audio instead of permanently latching a stale suffix.
@@ -207,11 +215,11 @@ public actor LiveTranscriber {
                 previousText = ""
                 tentative = ""
                 discard(before: max(origin, end - 8_000))
-                recoveryReason = nil
+                recoveryReason = previewHasGap ? .windowLimit : nil
             } else {
                 previousText = text
                 tentative = text
-                recoveryReason = text.isEmpty ? nil : .timingUnavailable
+                recoveryReason = previewHasGap ? .windowLimit : (text.isEmpty ? nil : .timingUnavailable)
             }
             previous = []
             publish()
@@ -240,7 +248,7 @@ public actor LiveTranscriber {
 
     private func decodeFailed(generation snapshotGeneration: Int) {
         inference = nil
-        guard !cancelled else { return }
+        guard !cancelled, !unavailable else { return }
         if snapshotGeneration == generation {
             consecutiveDecodeFailures += 1
             degrade(consecutiveDecodeFailures < 3 ? .decodeFailed : .decodeUnavailable,
@@ -251,7 +259,12 @@ public actor LiveTranscriber {
 
     private func degrade(_ reason: LiveRecoveryReason, needsOriginal: Bool) {
         requiresFinalRecovery = requiresFinalRecovery || needsOriginal
+        guard !unavailable else { return }
         recoveryReason = reason
+        if unavailable {
+            inference?.cancel()
+            samples.removeAll()
+        }
         publish()
     }
 

@@ -39,6 +39,25 @@ actor Values {
     func add(_ value: LiveTranscript) { values.append(value) }
 }
 
+actor SlowUntimedPCM: PCMSpeechEngine {
+    nonisolated let identifier = "slow-check"
+    nonisolated let maximumWindowSamples = 240_000
+    private let delay: Duration
+    private(set) var calls = 0
+    private(set) var largestWindow = 0
+    init(delay: Duration) { self.delay = delay }
+    func prepare() async throws {}
+    func unload() async {}
+    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { fatalError() }
+    func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+        calls += 1
+        largestWindow = max(largestWindow, samples.count)
+        precondition(samples.count <= maximumWindowSamples)
+        try await Task.sleep(for: delay)
+        return .init(text: samples.last == 0.2 ? "Second sentence." : "hello world.")
+    }
+}
+
 actor ScriptedPCM: PCMSpeechEngine {
     enum FinalOverlap: Sendable { case unchanged, interiorWord, leadingFragment }
     nonisolated let identifier = "check"
@@ -179,10 +198,48 @@ struct LiveTranscriptionCheck {
 
         let brokenRuntime = SignalPCM(failures: 20)
         let broken = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { brokenRuntime })
+        let brokenValues = Values()
+        let brokenCollector = Task { for await value in broken.updates { await brokenValues.add(value) } }
         var brokenPosition: Int64 = 0
-        try await feed(0.1, seconds: 12, live: broken, position: &brokenPosition)
+        try await feed(0.1, seconds: 32, live: broken, position: &brokenPosition)
         verify(await brokenRuntime.calls == 3, "Persistent failure retried without a bound")
         verify(try await broken.finish() == nil, "Persistent failure did not request original-file recovery")
+        await brokenCollector.value
+        verify(await brokenValues.values.last?.recoveryReason == .decodeUnavailable, "Later frames replaced terminal failure with recovering")
+
+        let slowRuntime = SlowUntimedPCM(delay: .milliseconds(20))
+        let slow = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { slowRuntime })
+        let slowValues = Values()
+        let slowCollector = Task { for await value in slow.updates { await slowValues.add(value) } }
+        var slowPosition: Int64 = 0
+        try await feed(0.1, seconds: 20, live: slow, position: &slowPosition)
+        try await feed(0.2, seconds: 8, live: slow, position: &slowPosition)
+        verify(try await slow.finish() == nil, "Skipped window invented final transcript continuity")
+        await slowCollector.value
+        let slowSnapshots = await slowValues.values
+        let overflowIndex = slowSnapshots.firstIndex { $0.recoveryReason == .windowLimit }
+        verify(overflowIndex != nil, "Slow untimed check did not reach window advancement")
+        let resumed = slowSnapshots.dropFirst(overflowIndex ?? slowSnapshots.count)
+        verify(resumed.allSatisfy { !$0.tentativeText.isEmpty }, "Window advancement blanked the visible preview")
+        verify(resumed.contains { $0.tentativeText == "Second sentence." && $0.committedText.isEmpty && $0.recoveryReason == .windowLimit },
+               "Slow decode did not progress after overflow or stitched across skipped audio")
+        verify(await slowRuntime.calls <= 35, "Overflow started repeated catch-up inference")
+        verify(await slowRuntime.largestWindow <= 240_000, "Pending audio reached the engine beyond its limit")
+
+        let ceilingRuntime = SlowUntimedPCM(delay: .milliseconds(100))
+        let ceiling = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { ceilingRuntime })
+        let ceilingValues = Values()
+        let ceilingCollector = Task { for await value in ceiling.updates { await ceilingValues.add(value) } }
+        var ceilingPosition: Int64 = 0
+        try await feed(0.1, seconds: 30, live: ceiling, position: &ceilingPosition)
+        let stoppedCalls = await ceilingRuntime.calls
+        verify(stoppedCalls <= 5, "Hard ceiling kept starting full-window inference")
+        verify(await ceilingValues.values.last?.recoveryReason == .decodeUnavailable, "Hard memory ceiling did not stop live preview explicitly")
+        try await feed(0.2, seconds: 10, live: ceiling, position: &ceilingPosition)
+        verify(await ceilingRuntime.calls == stoppedCalls, "Later frames restarted a terminal ceiling stop")
+        verify(try await ceiling.finish() == nil, "Ceiling stop lost original-file recovery")
+        await ceilingCollector.value
+        verify(await ceilingValues.values.last?.recoveryReason == .decodeUnavailable, "Terminal ceiling reason was overwritten")
 
         let overflow = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { runtime }, maximumWindowSamples: 6_400)
         await overflow.append([Float](repeating: 0.1, count: 12_800), at: 0)
@@ -196,6 +253,6 @@ struct LiveTranscriptionCheck {
         await cancelled.cancel()
         do { _ = try await cancelled.finish(); preconditionFailure("Cancelled stream produced text") }
         catch is CancellationError {}
-        print("Live regression checks passed: 33s replay, repeated long pauses, second sentence, normalized tokens, untimed endpoints, quiet/short/reset, bounded retry/recovery, ordering and cancellation.")
+        print("Live regression checks passed: long pauses, continuous speech, slow untimed overflow progress, terminal ceiling/failure, overlap/fragments, reset, ordering and cancellation.")
     }
 }

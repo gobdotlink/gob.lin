@@ -103,31 +103,28 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
             do {
                 let inventory = try JSONDecoder().decode(Inventory.self, from: Data(contentsOf: inventoryURL))
                 try inventory.verify(at: detectorDirectory, required: required, modelID: Self.detectorID)
+                detectorValidated = true
+                return false
             } catch is CancellationError { throw CancellationError() }
-            catch { throw SpeechModelStoreError.invalidCache }
-            detectorValidated = true
-            return false
+            catch { /* Invalid inventory must re-enter the resumable acquisition owner. */ }
         }
-        let existed = required.allSatisfy { FileManager.default.fileExists(atPath: detectorDirectory.appendingPathComponent($0).path) }
-        if !existed {
-            progress(.init(phase: .downloading, component: "Preparing speech detection"))
-            _ = Self.configureDetectorRevision
-            try await Self.guardListing { transferStarted in
-                try await ModelHub.download(.vad, to: self.directory.deletingLastPathComponent(), progressHandler: { update in
-                    switch update.phase {
-                    case .listing: break
-                    case .downloading, .compiling: transferStarted()
-                    }
-                    progress(.init(phase: .downloading, fractionCompleted: update.fractionCompleted,
-                                   component: "Preparing speech detection"))
-                })
-            }
+        progress(.init(phase: .downloading, component: "Preparing speech detection"))
+        _ = Self.configureDetectorRevision
+        try await Self.guardListing { transferStarted in
+            try await ModelHub.download(.vad, to: self.directory.deletingLastPathComponent(), progressHandler: { update in
+                switch update.phase {
+                case .listing: break
+                case .downloading, .compiling: transferStarted()
+                }
+                progress(.init(phase: .downloading, fractionCompleted: update.fractionCompleted,
+                               component: "Preparing speech detection"))
+            })
         }
         try Task.checkCancellation()
         let inventory = try Inventory.capture(at: detectorDirectory, required: required, modelID: Self.detectorID)
         try save(inventory, to: inventoryURL)
         detectorValidated = true
-        return !existed
+        return true
     }
 
     private func download(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws {
