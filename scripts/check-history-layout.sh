@@ -12,7 +12,7 @@ objects = (root / 'GoblinApp.product/Objects.LinkFileList').read_text().splitlin
 Path(sys.argv[2]).write_text('\n'.join('"' + p + '"' for p in objects if '/GoblinApp.build/' not in p) + '\n')
 PY
 sources=()
-while IFS= read -r source; do sources+=("$source"); done < <(rg --files Sources/GoblinApp -g '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
+while IFS= read -r source; do sources+=("$source"); done < <(find Sources/GoblinApp -name '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
 swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx26.0 \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
     -I .build/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include \
