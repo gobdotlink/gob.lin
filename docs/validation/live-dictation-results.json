@@ -286,5 +286,125 @@
       "Full current-cutoff overlap/preview/finalization-cancel workflow"
     ],
     "physicalInterruptionAndCheckedAccuracyEstablished": false
+  },
+  "djiRecoveryWorkflow": {
+    "success": true,
+    "inputDevice": "DJI MIC MINI",
+    "inputFollowsSystemDefault": false,
+    "inputUsedFallback": false,
+    "releaseToFinalTextMilliseconds": 246.362917,
+    "firstTextMilliseconds": 592.295458,
+    "hadLiveText": true,
+    "automaticSuspension": {
+      "finalTextRetained": true,
+      "historyOnly": true,
+      "monitoringRestored": true,
+      "originalAudioReadable": true,
+      "targetAndClipboardUnchanged": true
+    },
+    "stopFailureRecovery": {
+      "failedEntryAndAudioRetained": true,
+      "failureTimingsRecorded": true,
+      "lastTranscriptPreserved": true
+    },
+    "pendingSourceOwnership": {
+      "borrowedHistorySourcePreserved": true,
+      "retryFailureKeptOwnedSource": true,
+      "retrySuccessRemovedOwnedSource": true,
+      "savedCopiesReadable": true
+    },
+    "maximumOverlappingLeases": 2,
+    "sharedPreviewPreservedCapture": true,
+    "cancelSuppressedOutput": true,
+    "finalizationCancelSuppressedOutput": true,
+    "isolatedTargetFocusLost": false,
+    "insertionAcknowledged": true,
+    "clipboardRestored": true,
+    "dictionaryAndToneApplied": true,
+    "captureBeforeModelReady": true,
+    "newCaptureSurvivedPriorCompletion": true,
+    "finalizationPreservedTextArea": true,
+    "settingsPreparationCancellationIssued": true,
+    "validLeaseJoinedCancellation": true,
+    "dictationSurvivedSettingsCancellation": true,
+    "signalPreflight": {
+      "convertedFrameNonzeroSamples": 3199,
+      "convertedFramePeak": 0.022849533706903458,
+      "explicitUIDMatched": true,
+      "inputMismatch": false,
+      "nativeRMSMaximum": 0.0054481028909910256,
+      "requestedDevice": "DJI MIC MINI",
+      "resolvedDevice": "DJI MIC MINI",
+      "savedWAVChannels": 1,
+      "savedWAVNonzeroSamples": 3199,
+      "savedWAVPeak": 0.022849533706903458,
+      "savedWAVSampleRate": 16000,
+      "savedWAVSamples": 3200,
+      "usedFallback": false
+    },
+    "executedBuild": {
+      "sourceRevision": "3baeb86fb1f46fb74cf71897218d9d921e3dac76",
+      "sourceModified": false,
+      "builtAt": "2026-10-13T20:18:21Z",
+      "buildID": "00AE25E1-401B-4E00-AA98-CAC74A910B9A",
+      "configuration": "debug"
+    },
+    "reservationEnded": true,
+    "productionSourceChanged": false,
+    "releaseTargetMet": false,
+    "checkedTruthAccuracyEstablished": false,
+    "physicalTapDisableSleepRevocationExercised": false,
+    "firstTextEndpoint": "From keydown; includes hold threshold and may include warm speech, not controlled fresh speech onset",
+    "recognitionComparisonsAreDiagnostic": true,
+    "batchComparisons": [
+      {
+        "audioSeconds": 6.6,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 6.72675,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 6.3,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 0,
+        "endingPreserved": true,
+        "liveEqualsBatch": false,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 0,
+        "endingPreserved": true,
+        "liveEqualsBatch": false,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 6.6,
+        "endingPreserved": false,
+        "liveEqualsBatch": false,
+        "wordCount": 0
+      },
+      {
+        "audioSeconds": 6.72675,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 6.5,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      }
+    ]
   }
 }

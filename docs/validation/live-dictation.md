@@ -200,3 +200,31 @@ History-only suspension pass. Those scenarios and the full current-cutoff workfl
 remain pending usable input. All owned apps/playback exited and resources were
 released promptly; no device, grant or preference was changed. Physical tap disable,
 sleep/revocation, speech accuracy and performance acceptance remain separate.
+
+
+The subsequent explicit DJI MIC MINI run passed the prepared short workflow.
+Executing metadata confirmed clean source `3baeb86fb1f46fb74cf71897218d9d921e3dac76`,
+modified=false, debug, built 2026-10-13 20:18:21 UTC, build ID
+00AE25E1-401B-4E00-AA98-CAC74A910B9A. The private invocation selected the current
+DJI UID in its isolated suite; the actual resolved input matched, with no fallback
+or system/persistent preference change. Existing shared preview measured positive
+raw native RMS (maximum 0.0054481). The short saved 16 kHz mono WAV had 3,200
+samples, 3,199 nonzero, peak 0.0228495. The full workflow began only after this gate.
+
+Observed passes: automatic monitoring suspension retained final text/original audio
+in History, with unchanged target and clipboard; denied private final rename
+retained a readable failure entry/audio, last successful transcript and timings;
+failed pending retry retained its owned source, successful retry removed it, and
+borrowed History audio survived. Existing current-cutoff startup, real recognition,
+acknowledged paste/clipboard restoration, dictionary/tone, Settings cancellation,
+capture during reload, two overlapping leases, overlay/finalization, shared preview,
+Escape and finalization cancellation checks passed. Target focus stayed stable.
+Original assertions were retained; private preflight and recovery-first ordering
+added no product implementation changes. Detailed aggregate outcomes are in JSON.
+
+Release to published postprocessed text was **246.4 ms**, failing the 150 ms target.
+First text was 592.3 ms from keydown; this includes the hold threshold and possible
+warm speech, not a controlled fresh-onset metric. Exact batch comparisons are only
+diagnostic; no checked human accuracy/compute/energy or physical tap-disable,
+sleep/revocation/unplug acceptance is claimed. All owned apps/playback exited,
+resources were released, and the reservation ended immediately after the run.
