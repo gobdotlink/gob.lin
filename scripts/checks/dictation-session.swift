@@ -20,7 +20,11 @@ struct DictationSessionCheck {
         do { try cancelled.checkCancellation(); preconditionFailure("Cancelled output was accepted") }
         catch is CancellationError {}
         catch { preconditionFailure("Unexpected cancellation error") }
-        while !queue.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 {
+            if queue.isEmpty { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        precondition(queue.isEmpty, "The processing queue did not drain")
         precondition(events == [1, 2, 3], "Output order or cancelled output changed: \(events)")
         precondition(completions == 3, "A processing count was not released exactly once")
         queue.enqueue(DictationSession(target: nil), operation: { events.append(-2) }, completed: { completions += 1 })
