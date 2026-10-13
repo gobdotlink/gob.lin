@@ -46,3 +46,24 @@ public protocol PCMSpeechEngine: SpeechEngine {
     func unload() async
     func transcribe(samples: [Float]) async throws -> TranscriptionResult
 }
+
+public struct SpeechModelPreparationProgress: Sendable, Equatable {
+    public enum Phase: Sendable { case checkingCache, downloading, compiling, loading }
+    public let phase: Phase
+    public let fractionCompleted: Double?
+    public let component: String?
+
+    public init(phase: Phase, fractionCompleted: Double? = nil, component: String? = nil) {
+        self.phase = phase
+        self.fractionCompleted = fractionCompleted
+        self.component = component
+    }
+}
+
+public protocol ManagedSpeechEngine: PCMSpeechEngine {
+    func prepare(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws
+}
+
+extension ManagedSpeechEngine {
+    public func prepare() async throws { try await prepare(progress: { _ in }) }
+}
