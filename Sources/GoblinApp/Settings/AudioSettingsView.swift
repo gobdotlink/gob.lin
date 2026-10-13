@@ -63,7 +63,8 @@ final class AudioPreviewModel: ObservableObject {
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else { error = "Microphone has no usable input stream."; return }
         let session = sessionID
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // Sendable prevents this audio-thread callback from inheriting MainActor isolation.
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { @Sendable [weak self] buffer, _ in
             guard buffer.frameLength > 0, buffer.floatChannelData != nil else { return }
             let value = Self.deviceInputLevel(buffer)
             Task { @MainActor in
@@ -73,11 +74,12 @@ final class AudioPreviewModel: ObservableObject {
         }
         do {
             try engine.start(); self.engine = engine; running = true
-            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { @Sendable [weak self] _ in
                 Task { @MainActor in
                     guard let self, self.sessionID == session, self.running else { return }
                     self.stop()
-                    self.error = "Input device changed; preview stopped. Start the preview again to check the new input."
+                    self.refresh()
+                    self.error = "Audio configuration changed; preview stopped. Start the preview again to reconnect."
                 }
             }
         }
