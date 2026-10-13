@@ -3,6 +3,7 @@ import ApplicationServices
 
 final class HotkeyEventTap: @unchecked Sendable {
     enum Input: Sendable { case press, release, chord, escape, reset }
+    enum StartFailure: String, Error, Sendable { case creationFailed, runLoopSourceFailed }
     private let lock = NSLock()
     private var runLoop: CFRunLoop?
     private var port: CFMachPort?
@@ -13,9 +14,9 @@ final class HotkeyEventTap: @unchecked Sendable {
     private var suspended = false
     private var keyedFallback = false
     private let input: @Sendable (Input) -> Void
-    private let result: @Sendable (Bool) -> Void
+    private let result: @Sendable (Result<Void, StartFailure>) -> Void
 
-    init(shortcut: HotkeyShortcut, input: @escaping @Sendable (Input) -> Void, result: @escaping @Sendable (Bool) -> Void) {
+    init(shortcut: HotkeyShortcut, input: @escaping @Sendable (Input) -> Void, result: @escaping @Sendable (Result<Void, StartFailure>) -> Void) {
         self.shortcut = shortcut
         self.input = input
         self.result = result
@@ -53,9 +54,9 @@ final class HotkeyEventTap: @unchecked Sendable {
         }
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                            eventsOfInterest: mask, callback: callback,
-                                           userInfo: Unmanaged.passUnretained(self).toOpaque()) else { result(false); return }
+                                           userInfo: Unmanaged.passUnretained(self).toOpaque()) else { result(.failure(.creationFailed)); return }
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            CFMachPortInvalidate(tap); result(false); return
+            CFMachPortInvalidate(tap); result(.failure(.runLoopSourceFailed)); return
         }
         let loop = CFRunLoopGetCurrent()
         lock.lock()
@@ -65,7 +66,7 @@ final class HotkeyEventTap: @unchecked Sendable {
         lock.unlock()
         CFRunLoopAddSource(loop, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        result(true)
+        result(.success(()))
         CFRunLoopRun()
         CGEvent.tapEnable(tap: tap, enable: false)
         CFRunLoopRemoveSource(loop, source, .commonModes)

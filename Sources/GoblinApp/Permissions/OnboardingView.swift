@@ -15,14 +15,17 @@ struct OnboardingView: View {
                               granted: permissions.snapshot.accessibility, icon: "hand.raised")
                 permissionRow(.inputMonitoring, title: "Input Monitoring", detail: "Recognize Fn and modifier-only shortcuts.",
                               granted: permissions.snapshot.inputMonitoring, icon: "keyboard")
-                if permissions.staleAccessibility {
+                if let failure = permissions.tapFailure {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Accessibility needs a refresh", systemImage: "exclamationmark.triangle")
+                        Label("Shortcut unavailable", systemImage: "exclamationmark.triangle")
                             .font(.headline).foregroundStyle(.orange)
-                        Text("The shortcut tap could not start even though access appears enabled. Toggle gob.lin off and on in System Settings, then relaunch. If that fails, reset its grant in Terminal:")
-                        Text("tccutil reset Accessibility app.goblin.dictation")
-                            .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        Text("Reopen gob.lin and grant Accessibility again. A reset removes only gob.lin’s grant.")
+                        if failure == .runLoopSourceFailed {
+                            Text("The shortcut tap was created, but its run-loop source could not be prepared. Quit and reopen gob.lin. If it persists, collect development diagnostics.")
+                        } else if !permissions.snapshot.accessibility {
+                            Text("macOS currently reports Accessibility as not allowed. Allow the running app in System Settings, return here, and choose Check again.")
+                        } else {
+                            Text("macOS reports Accessibility allowed, but the shortcut tap could not be created. Choose Check again to retry. If it still fails, quit and reopen the same signed app and collect development diagnostics. This failure alone does not establish a stale grant.")
+                        }
                     }
                     .padding(14).background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
                 }
@@ -36,9 +39,27 @@ struct OnboardingView: View {
                     .foregroundStyle(permissions.snapshot.ready ? .green : .secondary)
                 Text("Speech engine setup follows the benchmark. This window checks grants live; no recording starts here.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Check again") { permissions.refresh() }
+                Text("If a System Settings toggle is on but its row is not Allowed, quit and reopen the same signed app. Check that the entry belongs to this app rather than an older build. Some permission changes require a relaunch.")
+                    .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Running app") {
+                    Text(PermissionModel.launchIdentity["bundle_path"] ?? "Unknown bundle")
+                        .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                }
+                Button("Check again") { permissions.checkAgain() }
             }
             .padding(28)
+        }
+    }
+
+    private func statusLabel(_ permission: PermissionModel.Permission) -> String {
+        if permissions.snapshot.isGranted(permission) { return "Allowed" }
+        guard permission == .microphone else { return "Not allowed" }
+        switch permissions.snapshot.microphone {
+        case .notDetermined: return "Not requested"
+        case .denied: return "Denied"
+        case .restricted: return "Restricted"
+        case .authorized: return "Allowed"
+        @unknown default: return "Unknown"
         }
     }
 
@@ -49,16 +70,17 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(title).font(.headline)
-                    Label(granted ? "Allowed" : "Required", systemImage: granted ? "checkmark.circle.fill" : "circle")
+                    Label(statusLabel(permission), systemImage: granted ? "checkmark.circle.fill" : "circle")
                         .font(.caption).foregroundStyle(granted ? .green : .secondary)
                 }
                 Text(detail).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            Button(granted ? "Settings" : "Allow") {
-                if granted { permissions.openSettings(permission) } else { permissions.request(permission) }
+            let opensSettings = granted || (permission == .microphone && permissions.snapshot.microphone != .notDetermined)
+            Button(opensSettings ? "Settings" : "Allow") {
+                if opensSettings { permissions.openSettings(permission) } else { permissions.request(permission) }
             }
-            .accessibilityLabel("\(granted ? "Open settings for" : "Allow") \(title)")
+            .accessibilityLabel("\(opensSettings ? "Open settings for" : "Allow") \(title)")
         }
         .padding(14).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
     }

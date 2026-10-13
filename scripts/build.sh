@@ -49,4 +49,4 @@ codesign --force --options runtime --timestamp=none \
     --entitlements Resources/Goblin.entitlements --sign "$certificate" \
     --requirements "=$requirement" "$app"
 codesign --verify --strict --verbose=2 "$app"
-printf '\nBuilt %s\nRun: open "%s"\n' "$app" "$app"
+printf '\nBuilt %s\nRun: scripts/launch.sh\n' "$app"

@@ -16,7 +16,7 @@ The signing scripts use the tools included with macOS; Homebrew is not required.
 
 ```sh
 scripts/build.sh
-open .build/app/gob.lin.app
+scripts/launch.sh
 ```
 
 The first build creates a dedicated `gob.lin Local Development` signing
@@ -26,10 +26,21 @@ identifier and certificate-based designated requirement stay stable, so macOS
 can preserve microphone and Accessibility grants. The app runs without a Dock
 icon; its menu contains Settings, History, Paste last transcript, and Quit.
 
-If an Accessibility grant becomes stale, quit gob.lin, run
-`tccutil reset Accessibility app.goblin.dictation`, then grant it again in
-System Settings → Privacy & Security → Accessibility. This resets only gob.lin's
-grant. Build scripts never reset or request privacy permissions.
+`scripts/launch.sh` verifies the exact bundle and its certificate signature,
+prints its absolute path and designated requirement, and refuses to launch
+while another `GoblinApp` process is running. It does not select an app by name
+or bundle identifier. Use `scripts/launch.sh --check` to inspect without launching.
+Quit your current app before rebuilding/relaunching; do not grant permissions
+to unsigned SwiftPM executables or ad-hoc validation bundles.
+
+If a System Settings toggle is on but gob.lin reports a permission unavailable,
+check the individual row in Permissions & onboarding and its **Running app**
+path. Return from Settings or choose **Check again** to refresh statuses and
+retry an unavailable shortcut. If needed, quit and reopen the same signed
+bundle: some permission changes require a process restart. A shortcut-tap
+failure alone is not evidence of a stale Accessibility grant. See
+[permissions and recovery](docs/permissions.md) before changing any grants.
+Build and launch scripts never reset or request privacy permissions.
 
 For an existing local or Developer ID certificate:
 
@@ -48,9 +59,22 @@ Accessibility. Hardened runtime and the microphone entitlement are enabled.
 
 To inspect or work in Xcode, open `Goblin.xcodeproj`; run
 `scripts/setup-signing.sh` first. The committed project builds without generators.
-If its structure changes, `project.yml` is the XcodeGen source of truth.
+For a deterministic signed Xcode launch outside the debugger:
+
+```sh
+xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release \
+  -derivedDataPath .build/xcode build
+scripts/launch.sh .build/xcode/Build/Products/Release/gob.lin.app
+```
+
+Inspect either Xcode configuration with `scripts/launch.sh --check <bundle>`.
+Do not use `CODE_SIGNING_ALLOWED=NO` or `CODE_SIGN_IDENTITY=-` for a permission
+check. If its structure changes, `project.yml` is the XcodeGen source of truth.
 
 Debug builds include Xcode's debugger entitlement; Release builds exclude it.
+Xcode Debug uses a normal executable so the local certificate works with
+hardened-runtime library validation; debug-dylib-dependent SwiftUI previews
+are unavailable in that configuration.
 
 ```sh
 swift build                       # unsigned binaries for development and CI

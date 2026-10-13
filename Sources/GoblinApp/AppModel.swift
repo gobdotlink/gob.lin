@@ -162,7 +162,8 @@ final class AppModel: ObservableObject {
         case .beginRecording:
             hotkeys.cancelRecording()
             if permissions.snapshot.microphone != .authorized { showFailure(.microphonePermissionMissing) }
-            else if !permissions.snapshot.accessibility || !permissions.snapshot.inputMonitoring || permissions.staleAccessibility { showFailure(.requiredPermissionsMissing) }
+            else if !permissions.snapshot.accessibility || !permissions.snapshot.inputMonitoring { showFailure(.requiredPermissionsMissing) }
+            else if permissions.tapFailure != nil { showFailure(.hotkeyUnavailable) }
             else if hotkeys.secureInput { showFailure(.secureInputEnabled) }
             else { showFailure(.modelUnavailable) }
         case .finishRecording:
@@ -199,7 +200,6 @@ final class AppModel: ObservableObject {
     private func refreshDiagnostics(snapshot: PermissionModel.Snapshot) {
         guard !shuttingDown else { return }
         diagnostics.refresh(permissions: snapshot, secureInput: hotkeys.secureInput, engineStatus: .awaitingSelection)
-        if permissions.staleAccessibility { showFailure(.requiredPermissionsMissing) }
     }
 
     private func synchronizeMascot() {
