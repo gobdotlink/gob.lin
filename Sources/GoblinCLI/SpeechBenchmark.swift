@@ -26,11 +26,12 @@ enum SpeechBenchmark {
         let unloaded = SystemInfo.currentResidentMemoryBytes()
         let reloadStart = ContinuousClock.now
         try await engine.prepare()
+        let cachedReload = milliseconds(since: reloadStart)
         try write(["recordType": "preparation", "model": engine.identifier, "cacheExistedBefore": existed,
                    "prepareMilliseconds": preparation, "acquisitionMilliseconds": acquisition, "loadMilliseconds": load,
                    "auxiliaryAcquisitionMilliseconds": auxiliaryAcquisition, "vocabularySupport": vocabularySupport,
                    "auxiliaryCacheBytes": vocabularySupport ? try directoryBytes(engine.modelDirectory.deletingLastPathComponent().appendingPathComponent(Repo.parakeetCtc110m.folderName)) : 0,
-                   "cachedReloadMilliseconds": milliseconds(since: reloadStart),
+                   "cachedReloadMilliseconds": cachedReload,
                    "residentBytesBefore": before.map { $0 as Any } ?? NSNull(), "residentBytesLoaded": loaded.map { $0 as Any } ?? NSNull(),
                    "residentBytesUnloaded": unloaded.map { $0 as Any } ?? NSNull(), "cacheBytes": try directoryBytes(engine.modelDirectory)])
     }
