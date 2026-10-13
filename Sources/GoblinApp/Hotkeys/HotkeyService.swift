@@ -14,6 +14,8 @@ final class HotkeyService: ObservableObject {
     @Published private(set) var lastFailure: DiagnosticFailure?
     var onAction: ((HotkeyStateMachine.Action) -> Void)?
     var engineConnected = false { didSet { updateStatus() } }
+    // Cancellation cause is available during synchronous onAction delivery.
+    private(set) var isSuspending = false
     private let permissions: PermissionModel
     private var state = HotkeyStateMachine()
     private var tap: HotkeyEventTap?
@@ -117,7 +119,7 @@ final class HotkeyService: ObservableObject {
         releaseTask?.cancel()
         releasePending = false
         carbonPressed = false
-        apply(state.cancel())
+        suspendRecording()
         unregisterCarbonShortcut()
         setCarbonEscape(false)
         status = "Waiting for permissions"
@@ -159,6 +161,12 @@ final class HotkeyService: ObservableObject {
         releaseTask?.cancel()
         releasePending = false
         apply(state.cancel())
+    }
+
+    private func suspendRecording() {
+        isSuspending = true
+        defer { isSuspending = false }
+        cancelRecording()
     }
 
     private func restart() { stop(); permissions.refresh(); start() }
@@ -215,7 +223,7 @@ final class HotkeyService: ObservableObject {
         let current = IsSecureEventInputEnabled()
         guard current != secureInput else { return }
         secureInput = current
-        if current && (shortcut.keyCode == nil || (!carbonPressed && state.recording != .handsFree)) { cancelRecording() }
+        if current && (shortcut.keyCode == nil || (!carbonPressed && state.recording != .handsFree)) { suspendRecording() }
         configureTap()
         setCarbonEscape(recording != nil && current && shortcut.keyCode != nil)
         updateStatus()

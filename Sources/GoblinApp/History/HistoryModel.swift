@@ -15,6 +15,7 @@ struct HistoryReprocessResult {
 struct PendingHistoryEntry: Identifiable {
     var entry: HistoryEntry
     var audioURL: URL?
+    var ownsAudioSource: Bool
     var id: UUID { entry.id }
 }
 
@@ -52,7 +53,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     /// A failed save keeps its text and original capture available for copy/retry.
     @discardableResult
-    func record(_ entry: HistoryEntry, untrimmedAudioURL: URL? = nil) async -> Bool {
+    func record(_ entry: HistoryEntry, untrimmedAudioURL: URL? = nil, ownsAudioSource: Bool = false) async -> Bool {
         do {
             if store == nil { store = try HistoryStore(directory: directory) }
             guard let store else { return false }
@@ -67,7 +68,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             return true
         } catch {
             if !pending.contains(where: { $0.id == entry.id }) {
-                pending.append(PendingHistoryEntry(entry: entry, audioURL: untrimmedAudioURL))
+                pending.append(PendingHistoryEntry(entry: entry, audioURL: untrimmedAudioURL, ownsAudioSource: ownsAudioSource))
             }
             errorMessage = "History could not save this dictation. Your raw text is still available below. \(error.localizedDescription)"
             lastFailure = .historySaveFailed
@@ -76,7 +77,10 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func retryPending() async {
-        for item in pending { _ = await record(item.entry, untrimmedAudioURL: item.audioURL) }
+        for item in pending {
+            let saved = await record(item.entry, untrimmedAudioURL: item.audioURL, ownsAudioSource: item.ownsAudioSource)
+            if saved, item.ownsAudioSource, let source = item.audioURL { try? FileManager.default.removeItem(at: source) }
+        }
     }
 
     func reload() async {

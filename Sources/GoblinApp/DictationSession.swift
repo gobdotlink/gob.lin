@@ -8,6 +8,7 @@ final class DictationSession {
     let target: NSRunningApplication?
     var overlayID: UUID?
     var audioOwnedByHistory = false
+    var historyOnly = false
     private(set) var cancelled = false
 
     init(target: NSRunningApplication? = NSWorkspace.shared.frontmostApplication) {

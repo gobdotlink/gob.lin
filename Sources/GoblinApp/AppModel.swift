@@ -59,7 +59,6 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.refreshDiagnostics(snapshot: snapshot)
-                if snapshot.microphone != .authorized, let active = self.activeCapture { self.cancelDictation(active) }
                 self.applyWarmMicrophone()
             }
         }.store(in: &subscriptions)
@@ -117,7 +116,7 @@ final class AppModel: ObservableObject {
         insertion.lastTranscript = { [weak self] in self?.lastTranscript }
         insertion.onPasteRequested = { [weak self] in self?.pasteLastTranscript() }
         history.onRecorded = { [weak self] entry in
-            self?.lastTranscript = entry.finalText
+            if !entry.finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { self?.lastTranscript = entry.finalText }
             self?.diagnostics.recordTimings(entry.latencies)
         }
         refreshConfiguration()
@@ -240,7 +239,10 @@ final class AppModel: ObservableObject {
             else { hotkeys.processingCompleted() }
         case .cancelRecording:
             diagnostics.developmentLog.record(.hotkeyCancel, area: .hotkeys)
-            if let active = activeCapture { cancelDictation(active) }
+            if let active = activeCapture {
+                if hotkeys.isSuspending { suspendDictation(active) }
+                else { cancelDictation(active) }
+            }
         }
     }
 
@@ -288,7 +290,7 @@ final class AppModel: ObservableObject {
             } catch {
                 active.failure = error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed)
                 active.eventContinuation.finish()
-                if !active.stopping && !session.cancelled { self.finishDictation(active, counted: false) }
+                if !active.stopping && !session.cancelled { self.suspendDictation(active) }
             }
         }
     }
@@ -311,11 +313,17 @@ final class AppModel: ObservableObject {
         case .failed(let id, let failure):
             guard id == active.captureID else { return }
             active.failure = failure
-            if !active.stopping { finishDictation(active, counted: false) }
+            if !active.stopping { suspendDictation(active) }
         case .finished(let audio):
             if audio.sessionID == active.captureID { active.audio = audio }
         case .cancelled: break
         }
+    }
+
+    private func suspendDictation(_ active: ActiveDictation) {
+        guard !shuttingDown else { return }
+        active.session.historyOnly = true
+        finishDictation(active, counted: false)
     }
 
     private func finishDictation(_ active: ActiveDictation, counted: Bool) {
@@ -375,6 +383,7 @@ final class AppModel: ObservableObject {
                     duration: audio.duration, timings: timings, session: active.session)
             } catch is CancellationError {
             } catch {
+                await active.frameTask?.value
                 guard !active.session.cancelled else { return }
                 await self.recordFailedDictation(active, failure: active.failure == nil ? .transcriptionFailed : Self.diagnostic(active.failure!))
             }
@@ -436,7 +445,7 @@ final class AppModel: ObservableObject {
             latencies: DictationTimings(captureMilliseconds: active.captureMilliseconds,
                                        asrMilliseconds: await active.live.computeMilliseconds),
             processingWarning: failure.message)
-        let saved = await history.record(entry, untrimmedAudioURL: url)
+        let saved = await history.record(entry, untrimmedAudioURL: url, ownsAudioSource: true)
         session.audioOwnedByHistory = true
         if saved { try? FileManager.default.removeItem(at: url) }
     }
@@ -510,24 +519,26 @@ final class AppModel: ObservableObject {
             if let overlayID = session.overlayID {
                 overlay.update(.transcribing, committed: result.finalText, tentative: "", session: overlayID)
             }
-            let insertionStart = ContinuousClock.now
-            if session.targetIsFocused && !insertion.busy && insertionTask == nil {
-                insertionAttempted = true
-                diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
-                await insertion.insert(result.finalText)
-                var details = DevelopmentDetails()
-                if case .failure(let failure) = insertion.outcome {
-                    details.failure = failure
-                    details.succeeded = false
+            if !session.historyOnly {
+                let insertionStart = ContinuousClock.now
+                if session.targetIsFocused && !insertion.busy && insertionTask == nil {
+                    insertionAttempted = true
+                    diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
+                    await insertion.insert(result.finalText)
+                    var details = DevelopmentDetails()
+                    if case .failure(let failure) = insertion.outcome {
+                        details.failure = failure
+                        details.succeeded = false
+                        warning = warning ?? failure.message
+                    } else if case .success = insertion.outcome { details.succeeded = true }
+                    diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: session.id, details: details)
+                } else {
+                    let failure: DiagnosticFailure = session.targetIsFocused ? .insertionNotAcknowledged : .insertionTargetChanged
+                    diagnostics.report(failure, operation: session.id)
                     warning = warning ?? failure.message
-                } else if case .success = insertion.outcome { details.succeeded = true }
-                diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: session.id, details: details)
-            } else {
-                let failure: DiagnosticFailure = session.targetIsFocused ? .insertionNotAcknowledged : .insertionTargetChanged
-                diagnostics.report(failure, operation: session.id)
-                warning = warning ?? failure.message
+                }
+                timings.insertionMilliseconds = Self.milliseconds(since: insertionStart)
             }
-            timings.insertionMilliseconds = Self.milliseconds(since: insertionStart)
         } else {
             warning = warning ?? DiagnosticFailure.noTranscriptAvailable.message
         }
@@ -539,7 +550,7 @@ final class AppModel: ObservableObject {
             targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,
             completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
             processingWarning: warning)
-        let saved = await history.record(entry, untrimmedAudioURL: audioURL)
+        let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
         session.audioOwnedByHistory = true
         if saved { try? FileManager.default.removeItem(at: audioURL) }
         if let overlayID = session.overlayID {

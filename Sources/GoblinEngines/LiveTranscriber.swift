@@ -132,12 +132,14 @@ public actor LiveTranscriber {
 
     private func remainingWords(_ words: [Word]) -> [Word]? {
         let overlap = committed.filter { $0.end > origin }
-        var index = 0
+        guard let first = overlap.first else { return words }
+        guard var index = words.indices.first(where: {
+            words[$0].text == first.text && abs(words[$0].end - first.end) <= 4_000
+        }) else { return nil }
         for old in overlap {
-            guard let match = words.indices.dropFirst(index).first(where: {
-                words[$0].text == old.text && abs(words[$0].end - old.end) <= 4_000
-            }) else { return nil }
-            index = match + 1
+            guard index < words.count, words[index].text == old.text,
+                  abs(words[index].end - old.end) <= 4_000 else { return nil }
+            index += 1
         }
         return Array(words.dropFirst(index))
     }

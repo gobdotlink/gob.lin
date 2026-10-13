@@ -29,8 +29,13 @@ The SDK can revise a word after two matching hypotheses and the trailing margin.
 The actual merger detected this on long examples. Conservative batch recovery
 preserves complete final text but makes release cost depend on recording length.
 This candidate does **not** establish the requested flat 150 ms release bound,
-0.5-second first text across recordings, or batch-equivalent bounded-prefix accuracy.
+0.5-second first text across recordings, or checked-transcript accuracy.
 Native streaming is not advertised by the model catalog.
+
+Accuracy is judged against checked recordings. Exact offline batch wording is a
+diagnostic comparison, not an acceptance gate; neither output alone establishes
+accuracy. Trusted reference transcripts remain needed. Speed and compute targets
+are unchanged.
 
 Actual accelerated merger replay on Apple M4 Pro / macOS 26.6.2, 2026-10-13:
 
@@ -134,3 +139,36 @@ isolated target afterward. Optional `durations.json` beside the bundles, contain
 `[3,60,300]`, enables actual timed captures and writes private progress. These
 checks use the granted microphone and clipboard, so run them in a reserved native
 session. An unsigned Xcode product is compile-only and must not request grants.
+
+## Integrated correction checks
+
+Automatic monitoring suspension and capture interruption now stop, drain and save
+through the existing session flow. The affected session is History-only, so it
+cannot paste later when the original app is still focused. Explicit cancellation
+and intentional shutdown keep their existing deletion/output-suppression behavior.
+The exceptional stop path drains terminal capture events before selecting recovery
+audio. Saving an empty failed entry records its timings without erasing the last
+successful transcript.
+
+Pending History entries carry capture-source ownership. A successful retry removes
+an owned capture source after the durable copy/save; failed retries retain it, and
+borrowed History sources are never deleted. Retained overlap matches consecutively
+after the first retained word: an interior revision requires full-file recovery,
+while leading-fragment tolerance remains. This can increase release latency; its
+frequency is unmeasured. Native bottom anchors follow newly appended overlay text
+without changing its height cap. The overlapping-capture native wait now describes
+only the count and lease drain that it checks.
+
+Focused hotkey, session and live checks passed, including interior-word rejection
+and leading-fragment retention. The unsigned Xcode app, signed SwiftPM app and
+signed production-linked native harness compiled. The harness adds short scenarios
+for History-only monitoring suspension, a denied final rename in its private
+capture directory, and owned versus borrowed History retry sources. A file-only
+run of the existing harness's ownership scenario against the production History
+model passed: failed retry retained its owned source, successful retry removed it,
+borrowed History audio survived, and both saved copies were readable. It opened
+no microphone or UI. The new suspension and failed-stop native scenarios have
+not yet run; final integration awaits the capture cutoff
+correction and its producer's desktop slot. Compile success does not prove their
+hardware behavior. Physical sleep/session switching/revocation and the normal
+SwiftUI application shell remain unverified.

@@ -189,7 +189,7 @@ struct NativeDictationCheck {
                 }
                 try await play(source)
                 await tap()
-                try await wait("ordered overlapping history", seconds: 15) { model.history.entries.count == count + 2 && model.speechModels.activeSessionCount == 0 }
+                try await wait("both overlapping captures saved", seconds: 15) { model.history.entries.count == count + 2 && model.speechModels.activeSessionCount == 0 }
                 loadingSubscription.cancel()
                 report["captureBeforeModelReady"] = capturedBeforeReady
                 report["maximumOverlappingLeases"] = overlappingLeases
@@ -230,6 +230,10 @@ struct NativeDictationCheck {
                 try await wait("finalization cancel drain", seconds: 5) { model.speechModels.activeSessionCount == 0 && model.overlay.model.phase == .hidden }
                 guard model.history.entries.count == beforeFinalCancel else { throw CheckFailure("Cancel before final recognition produced output") }
                 report["finalizationCancelSuppressedOutput"] = true
+
+                report["automaticSuspension"] = try await checkSuspension(model, source: source, targetTextURL: targetTextURL)
+                report["stopFailureRecovery"] = try await checkStopFailure(model, source: source)
+                report["pendingSourceOwnership"] = try await checkHistoryOwnership(model.history, original: audio)
 
                 let configuration = directory.deletingLastPathComponent().appendingPathComponent("durations.json")
                 let durations = (try? JSONDecoder().decode([Double].self, from: Data(contentsOf: configuration))) ?? []
@@ -300,6 +304,112 @@ struct NativeDictationCheck {
             app.terminate(nil)
         }
         app.run()
+    }
+
+    @MainActor static func checkSuspension(_ model: AppModel, source: URL, targetTextURL: URL) async throws -> [String: Any] {
+        try await wait("idle before automatic suspension", seconds: 5) { model.overlay.model.phase == .hidden }
+        let count = model.history.entries.count
+        let targetBefore = try String(contentsOf: targetTextURL, encoding: .utf8)
+        let clipboardCount = NSPasteboard.general.changeCount
+        post(down: true)
+        try await wait("automatic suspension capture", seconds: 5) { model.overlay.model.phase == .listening }
+        try await play(source)
+        model.hotkeys.stop()
+        post(down: false)
+        try await wait("automatic suspension History", seconds: 15) {
+            model.history.entries.count == count + 1 && model.speechModels.activeSessionCount == 0
+        }
+        guard let saved = model.history.entries.first, !saved.rawText.isEmpty, !saved.finalText.isEmpty,
+              saved.latencies.insertionMilliseconds == 0,
+              let audio = try await model.history.store?.audioFileURL(for: saved.id),
+              try AVAudioFile(forReading: audio).length > 0,
+              try String(contentsOf: targetTextURL, encoding: .utf8) == targetBefore,
+              NSPasteboard.general.changeCount == clipboardCount else {
+            throw CheckFailure("Automatic monitoring suspension lost audio/text or pasted into the target")
+        }
+        let beforeTap = (try? model.diagnostics.developmentLog.recentText()) ?? ""
+        model.hotkeys.start()
+        try await wait("monitoring restored after suspension", seconds: 5) {
+            guard let log = try? model.diagnostics.developmentLog.recentText(), log.hasPrefix(beforeTap) else { return false }
+            return log.dropFirst(beforeTap.count).split(separator: "\n").contains { line in
+                guard let event = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                      let details = event["details"] as? [String: Any] else { return false }
+                return event["event"] as? String == "hotkeyReady" && details["succeeded"] as? Bool == true
+            }
+        }
+        return ["historyOnly": true, "originalAudioReadable": true, "finalTextRetained": true,
+                "targetAndClipboardUnchanged": true, "monitoringRestored": true]
+    }
+
+    @MainActor static func checkStopFailure(_ model: AppModel, source: URL) async throws -> [String: Any] {
+        try await wait("idle before stop failure", seconds: 5) { model.overlay.model.phase == .hidden }
+        guard let store = model.history.store else { throw CheckFailure("Missing isolated History store") }
+        let captures = store.directory.appendingPathComponent("Captures", isDirectory: true)
+        let permissions = try FileManager.default.attributesOfItem(atPath: captures.path)[.posixPermissions]!
+        defer { try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: captures.path) }
+        let count = model.history.entries.count
+        let previousTranscript = model.lastTranscript
+        post(down: true)
+        try await wait("stop failure capture", seconds: 5) { model.overlay.model.phase == .listening }
+        try await play(source)
+        // Existing file writes remain valid; only the private test directory's final rename is denied.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: captures.path)
+        post(down: false)
+        try await wait("failed stop recovery History", seconds: 10) {
+            model.history.entries.count == count + 1 && model.speechModels.activeSessionCount == 0
+        }
+        guard let failed = model.history.entries.first, failed.rawText.isEmpty, failed.finalText.isEmpty,
+              failed.processingWarning != nil, failed.audioDuration > 0,
+              let audio = try await store.audioFileURL(for: failed.id), try AVAudioFile(forReading: audio).length > 0,
+              model.lastTranscript == previousTranscript, model.canPasteLastTranscript,
+              model.diagnostics.latestTimings == failed.latencies else {
+            throw CheckFailure("Stop failure lost readable recovery or erased the last successful transcript/timings")
+        }
+        try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: captures.path)
+        for url in try FileManager.default.contentsOfDirectory(at: captures, includingPropertiesForKeys: nil)
+            where url.lastPathComponent.hasSuffix(".partial.wav") {
+            try FileManager.default.removeItem(at: url)
+        }
+        return ["failedEntryAndAudioRetained": true, "lastTranscriptPreserved": true, "failureTimingsRecorded": true]
+    }
+
+    @MainActor static func checkHistoryOwnership(_ history: HistoryModel, original: URL) async throws -> [String: Any] {
+        guard let store = history.store, history.pending.isEmpty else { throw CheckFailure("Missing clean isolated History store") }
+        let owned = store.directory.appendingPathComponent(UUID().uuidString + ".wav")
+        try FileManager.default.copyItem(at: original, to: owned)
+        let audioDirectory = store.directory.appendingPathComponent("audio", isDirectory: true)
+        let heldDirectory = store.directory.appendingPathComponent("audio-held", isDirectory: true)
+        try FileManager.default.moveItem(at: audioDirectory, to: heldDirectory)
+        defer {
+            if FileManager.default.fileExists(atPath: heldDirectory.path) {
+                try? FileManager.default.moveItem(at: heldDirectory, to: audioDirectory)
+            }
+        }
+        let finalText = history.entries.first(where: { !$0.finalText.isEmpty })?.finalText ?? ""
+        let ownedEntry = HistoryEntry(rawText: finalText, finalText: finalText)
+        let borrowedEntry = HistoryEntry(rawText: finalText, finalText: finalText)
+        let ownedSaved = await history.record(ownedEntry, untrimmedAudioURL: owned, ownsAudioSource: true)
+        let borrowedSaved = await history.record(borrowedEntry, untrimmedAudioURL: original)
+        guard !ownedSaved, !borrowedSaved, history.pending.count == 2,
+              history.pending.first(where: { $0.id == ownedEntry.id })?.ownsAudioSource == true,
+              history.pending.first(where: { $0.id == borrowedEntry.id })?.ownsAudioSource == false else {
+            throw CheckFailure("Failed saves did not retain capture source ownership")
+        }
+        await history.retryPending()
+        guard history.pending.count == 2, FileManager.default.isReadableFile(atPath: owned.path) else {
+            throw CheckFailure("Failed retry deleted its owned audio source")
+        }
+        try FileManager.default.moveItem(at: heldDirectory, to: audioDirectory)
+        await history.retryPending()
+        guard history.pending.isEmpty, !FileManager.default.fileExists(atPath: owned.path),
+              FileManager.default.isReadableFile(atPath: original.path),
+              let ownedCopy = try await store.audioFileURL(for: ownedEntry.id),
+              let borrowedCopy = try await store.audioFileURL(for: borrowedEntry.id),
+              try AVAudioFile(forReading: ownedCopy).length > 0, try AVAudioFile(forReading: borrowedCopy).length > 0 else {
+            throw CheckFailure("Successful retry leaked capture audio or deleted a borrowed History source")
+        }
+        return ["retryFailureKeptOwnedSource": true, "retrySuccessRemovedOwnedSource": true,
+                "borrowedHistorySourcePreserved": true, "savedCopiesReadable": true]
     }
 
     @MainActor static func post(down: Bool) {

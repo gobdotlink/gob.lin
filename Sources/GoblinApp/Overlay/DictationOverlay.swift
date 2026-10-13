@@ -38,7 +38,10 @@ struct DictationOverlay: View {
                         Text("\(Text(model.committedText).foregroundStyle(.white))\(Text(model.tentativeText).foregroundStyle(.secondary))")
                             .font(.system(size: 15)).frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.disabled)
-                    }.frame(height: model.textHeight)
+                    }
+                    .defaultScrollAnchor(.bottom, for: .initialOffset)
+                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                    .frame(height: model.textHeight)
                 }
             }
             .padding(.horizontal, 18).padding(.vertical, 16)
