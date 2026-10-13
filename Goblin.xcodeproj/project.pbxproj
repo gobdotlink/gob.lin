@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		380000000000000000000001 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 380000000000000000000002 /* DirectInsertionVerification.swift */; };
 		F90900000000000000000001 /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000003 /* SpeechModelService.swift */; };
 		F90900000000000000000002 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000004 /* ModelSettingsView.swift */; };
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
@@ -46,6 +47,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		380000000000000000000002 /* DirectInsertionVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectInsertionVerification.swift; sourceTree = "<group>"; };
 		F90900000000000000000003 /* SpeechModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelService.swift; sourceTree = "<group>"; };
 		F90900000000000000000004 /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
@@ -216,6 +218,7 @@
 		FB558193443617ABD3750FC0 /* Insertion */ = {
 			isa = PBXGroup;
 			children = (
+				380000000000000000000002 /* DirectInsertionVerification.swift */,
 				C2A854E8221704C177743D7C /* FocusedText.swift */,
 				207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */,
 				86CA786E7971062A617DCC40 /* KeyboardLayout.swift */,
@@ -324,6 +327,7 @@
 				1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */,
 				04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */,
 				12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */,
+				380000000000000000000001 /* DirectInsertionVerification.swift in Sources */,
 				45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 				90BA4272E95E7192F6993A4E /* GoblinApplicationDelegate.swift in Sources */,
