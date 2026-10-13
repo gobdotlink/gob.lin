@@ -20,45 +20,15 @@ struct GoblinApp: App {
         }
 
         Window("gob.lin Settings", id: "settings") {
-            SettingsShell()
+            SettingsView(model: model)
         }
-        .defaultSize(width: 640, height: 440)
-
-        Window("gob.lin Dictionary", id: "dictionary") {
-            DictionarySettingsView()
-        }
-        .defaultSize(width: 720, height: 460)
-
-        Window("gob.lin Tone", id: "tone") {
-            ToneSettingsView()
-        }
-        .defaultSize(width: 600, height: 480)
-
-        Window("gob.lin AI Cleanup", id: "rewrite") {
-            RewriteSettingsView()
-        }
-        .defaultSize(width: 640, height: 620)
-        Window("gob.lin Overlay", id: "overlay-settings") {
-            OverlaySettingsView(overlay: model.overlay)
-        }
-        .defaultSize(width: 520, height: 260)
+        .defaultSize(width: 940, height: 720)
 
         Window("gob.lin History", id: "history") {
             HistoryView(model: model.history)
         }
-        .defaultSize(width: 720, height: 480)
+        .defaultSize(width: 820, height: 620)
 
-        Window("gob.lin Shortcuts", id: "shortcuts") {
-            ShortcutSettingsView(service: model.hotkeys)
-        }
-        .defaultSize(width: 620, height: 520)
-        .windowResizability(.contentSize)
-
-        Window("gob.lin Text insertion", id: "insertion") {
-            InsertionSettingsView(service: model.insertion)
-        }
-        .defaultSize(width: 620, height: 450)
-        .windowResizability(.contentSize)
     }
 }
 
@@ -70,13 +40,7 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
-        Button("Dictionary…") { show("dictionary") }
-        Button("Tone…") { show("tone") }
-        Button("AI cleanup…") { show("rewrite") }
-        Button("Overlay…") { show("overlay-settings") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
-        Button("Shortcuts…") { show("shortcuts") }
-        Button("Text insertion…") { show("insertion") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
@@ -98,24 +62,5 @@ private struct ClipboardRecoveryMenu: View {
         if service.hasRecoveryClipboard {
             Button("Restore previous clipboard") { service.restorePreviousClipboard() }.disabled(service.busy)
         }
-    }
-}
-
-private struct SettingsShell: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            GoblinWordmark()
-            Text("Native dictation for your Mac.").foregroundStyle(.secondary)
-            Divider()
-            LabeledContent("Version", value: GoblinMetadata.version)
-            LabeledContent("Speech engine", value: "Awaiting benchmark selection")
-            Text("Dictation becomes available after microphone, accessibility, and engine setup.")
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(28)
-        .background(GoblinBrand.background)
-        .tint(GoblinBrand.accent)
-        .preferredColorScheme(.dark)
     }
 }
