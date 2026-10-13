@@ -106,7 +106,7 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
                 detectorValidated = true
                 return false
             } catch is CancellationError { throw CancellationError() }
-            catch { /* Invalid inventory must re-enter the resumable acquisition owner. */ }
+            catch { throw SpeechModelStoreError.invalidCache }
         }
         progress(.init(phase: .downloading, component: "Preparing speech detection"))
         _ = Self.configureDetectorRevision

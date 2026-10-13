@@ -224,7 +224,7 @@ private actor CheckStore: SpeechModelAcquiring {
         do {
             _ = try await ParakeetModelStore(directory: directory).ensureAvailable(progress: { _ in })
             throw CheckFailure(message: "A corrupted detector was reported ready")
-        } catch DownloadError.networkDisabled { }
+        } catch SpeechModelStoreError.invalidCache { }
         try Data("fixture".utf8).write(to: detectorFile)
         let changed = directory.appendingPathComponent(required[0]).appendingPathComponent("coremldata.bin")
         try Data("changed".utf8).write(to: changed)
