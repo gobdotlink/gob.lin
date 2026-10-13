@@ -87,7 +87,29 @@ final class TextInsertionService: ObservableObject {
         let expected = target.value.flatMap { before in
             target.selection.flatMap { InsertionPolicy.expectedValue(before: before, selectedRange: $0, inserted: text) }
         }
-        if !quirks.preferPaste && !target.applicationFallback, let expected, expected != target.value {
+        if !quirks.remoteDesktop, let expected, expected == target.value, let selection = target.selection {
+            let fresh = FocusedText.read(pid: target.pid, element: target.element)
+            guard fresh.value == expected, fresh.selection == selection, !fresh.secure,
+                  target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+                setStatus("The target changed before confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
+            }
+            // expectedValue validated this UTF-16 replacement endpoint against the unchanged value.
+            var caret = CFRange(location: selection.location + (text as NSString).length, length: 0)
+            if let range = AXValueCreate(.cfRange, &caret) {
+                _ = AXUIElementSetAttributeValue(target.element, kAXSelectedTextRangeAttribute as CFString, range)
+            }
+            let observed = FocusedText.read(pid: target.pid, element: target.element)
+            guard observed.value == expected, !observed.secure, target.isStillFocused(),
+                  !Task.isCancelled, !IsSecureEventInputEnabled() else {
+                setStatus("The target changed while confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
+            }
+            let caretConfirmed = observed.selection == NSRange(location: caret.location, length: 0)
+            setStatus(caretConfirmed
+                ? "Text already matched the dictation · clipboard preserved; caret at replacement end"
+                : "Text already matched the dictation · clipboard preserved; caret placement was not confirmed", outcome: .success)
+            return
+        }
+        if !quirks.preferPaste && !target.applicationFallback, let expected {
             var settable = DarwinBoolean(false)
             if AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success, settable.boolValue {
                 guard target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
