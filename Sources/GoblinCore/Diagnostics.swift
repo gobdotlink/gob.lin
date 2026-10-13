@@ -44,7 +44,7 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .requiredPermissionsMissing: "Accessibility access is missing. Complete Permissions & onboarding."
         case .hotkeyUnavailable: "The dictation shortcut is unavailable. Check shortcut settings and permissions."
         case .secureInputEnabled: "Secure Input is enabled. Modifier-only shortcuts are paused, and protected fields cannot receive dictation."
-        case .modelUnavailable: "Speech engine selection is pending the benchmark. Dictation is not available yet."
+        case .modelUnavailable: "The speech model is unavailable. Check Model settings and retry preparation."
         case .modelLoadFailed: "The speech model could not load. Check engine setup and try again."
         case .transcriptionFailed: "Speech recognition failed. Your dictation could not be transcribed."
         case .silenceTrimmingFailed: "Silence trimming failed. The audio could not be prepared for recognition."

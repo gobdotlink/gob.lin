@@ -1,0 +1,197 @@
+{
+  "baseline": {
+    "clockStatistics": {
+      "bufferDurationsMs": [
+        100
+      ],
+      "callbackLagMaxMs": 110.75133333333333,
+      "callbackLagMinMs": 101.06379166666666,
+      "hostTimeValid": true,
+      "sampleTimeValid": true
+    },
+    "cutoffObservation": "Immediately before calling stop",
+    "head": "ff68c356e10f94229c1451e44f0ed06ef068c735",
+    "perRecordingNonzeroVerified": true,
+    "runs": [
+      {
+        "cutoffCovered": false,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.06273823231458664,
+        "postCutoffMilliseconds": 0,
+        "samples": 11586,
+        "savedInputBuffers": 2,
+        "stopMilliseconds": 7.177041666666668,
+        "uncoveredMilliseconds": 70.453625
+      },
+      {
+        "cutoffCovered": false,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.05132913216948509,
+        "postCutoffMilliseconds": 0,
+        "samples": 6400,
+        "savedInputBuffers": 2,
+        "stopMilliseconds": 2.2448333333333337,
+        "uncoveredMilliseconds": 96.93145833333334
+      },
+      {
+        "cutoffCovered": false,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.030599651858210564,
+        "postCutoffMilliseconds": 0,
+        "samples": 8000,
+        "savedInputBuffers": 3,
+        "stopMilliseconds": 1.2855833333333335,
+        "uncoveredMilliseconds": 55.55016666666667
+      },
+      {
+        "cutoffCovered": false,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.02609672024846077,
+        "postCutoffMilliseconds": 0,
+        "samples": 8000,
+        "savedInputBuffers": 4,
+        "stopMilliseconds": 1.8643750000000001,
+        "uncoveredMilliseconds": 52.046125
+      },
+      {
+        "cutoffCovered": false,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.040770795196294785,
+        "postCutoffMilliseconds": 0,
+        "samples": 8000,
+        "savedInputBuffers": 4,
+        "stopMilliseconds": 1.6090000000000002,
+        "uncoveredMilliseconds": 82.43283333333335
+      },
+      {
+        "cutoffCovered": false,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.056773841381073,
+        "postCutoffMilliseconds": 0,
+        "samples": 9600,
+        "savedInputBuffers": 4,
+        "stopMilliseconds": 2.0355,
+        "uncoveredMilliseconds": 66.12683333333334
+      }
+    ]
+  },
+  "corrected": {
+    "base": "ff68c356e10f94229c1451e44f0ed06ef068c735",
+    "clockStatistics": {
+      "bufferDurationsMs": [
+        100
+      ],
+      "callbackLagMaxMs": 110.629125,
+      "callbackLagMinMs": 101.00229166666668,
+      "hostGapMaxMicroseconds": 0.375,
+      "hostTimeValid": true,
+      "sampleTimeValid": true
+    },
+    "cutoffObservation": "Inside capture.stop",
+    "perRecordingNonzeroVerified": true,
+    "runs": [
+      {
+        "cutoffCovered": true,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.03771265223622322,
+        "postCutoffMilliseconds": 16.939000000000004,
+        "samples": 13186,
+        "savedInputBuffers": 3,
+        "stopMilliseconds": 25.11895833333333,
+        "uncoveredMilliseconds": 0
+      },
+      {
+        "cutoffCovered": true,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.039133816957473755,
+        "postCutoffMilliseconds": 83.684875,
+        "samples": 8000,
+        "savedInputBuffers": 4,
+        "stopMilliseconds": 93.02195833333333,
+        "uncoveredMilliseconds": 0
+      },
+      {
+        "cutoffCovered": true,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.06275331228971481,
+        "postCutoffMilliseconds": 38.29829166666667,
+        "samples": 8000,
+        "savedInputBuffers": 4,
+        "stopMilliseconds": 51.51658333333334,
+        "uncoveredMilliseconds": 0
+      },
+      {
+        "cutoffCovered": true,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.04167364537715912,
+        "postCutoffMilliseconds": 89.10695833333334,
+        "samples": 9600,
+        "savedInputBuffers": 5,
+        "stopMilliseconds": 96.87187500000002,
+        "uncoveredMilliseconds": 0
+      },
+      {
+        "cutoffCovered": true,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.03648222237825394,
+        "postCutoffMilliseconds": 56.133500000000005,
+        "samples": 9600,
+        "savedInputBuffers": 5,
+        "stopMilliseconds": 73.93470833333333,
+        "uncoveredMilliseconds": 0
+      },
+      {
+        "cutoffCovered": true,
+        "failure": "none",
+        "latePreCutoffCallbacks": 1,
+        "peak": 0.028232110664248466,
+        "postCutoffMilliseconds": 7.478416666666667,
+        "samples": 9600,
+        "savedInputBuffers": 5,
+        "stopMilliseconds": 19.164083333333334,
+        "uncoveredMilliseconds": 0
+      }
+    ],
+    "stage": "Final cutoff deadline guard included"
+  },
+  "earlierCorrectedObservation": {
+    "cutoffCoveredRuns": 6,
+    "cutoffObservation": "Inside capture.stop",
+    "runs": 6,
+    "stage": "Before explicit late-acknowledgement deadline guard; timer deadline already enforced",
+    "stopMaxMilliseconds": 109.44920833333335,
+    "stopMinMilliseconds": 11.639
+  },
+  "input": "Current system default; selected external unavailable",
+  "limits": [
+    "No full hotkey release-to-text latency measurement",
+    "No causal attribution to earlier recognition-ending mismatches",
+    "No physical word-preservation proof",
+    "No external-device timing, sleep, unplug or 30-minute rerun"
+  ],
+  "pendingStopCancellation": {
+    "finalizedAndPartialFilesAbsent": true,
+    "milliseconds": 2.2747083333333333,
+    "stopThrewCancellation": true
+  },
+  "requestedCaptureMilliseconds": [
+    220,
+    257,
+    291,
+    335,
+    371,
+    410
+  ],
+  "scenario": "Short signed native capture with a warm input and varied stop phases"
+}

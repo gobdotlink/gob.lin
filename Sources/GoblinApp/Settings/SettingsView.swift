@@ -25,6 +25,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
+    var speechModels: SpeechModelService? = nil
 
     var body: some View {
         NavigationSplitView {
@@ -56,14 +57,13 @@ struct SettingsView: View {
         case .general: GeneralSettingsView(model: model)
         case .audio: AudioSettingsView(permissions: model.permissions, preview: model.audioPreview)
         case .model:
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Speech model").font(.largeTitle.bold())
-                LabeledContent("Candidate", value: "Parakeet TDT v3")
-                Label("Engine selection follows the benchmark", systemImage: "clock")
-                Text("No speech model is downloaded or loaded yet. Dictation will become available after the speech-engine benchmark and audio-capture integration.")
-                    .foregroundStyle(.secondary)
-                Picker("Model", selection: .constant("Parakeet TDT v3")) { Text("Parakeet TDT v3").tag("Parakeet TDT v3") }.disabled(true)
-            }.padding(28)
+            if let speechModels { ModelSettingsView(service: speechModels) }
+            else {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Speech model").font(.largeTitle.bold())
+                    Text("The speech model service is not connected.").foregroundStyle(.secondary)
+                }.padding(28)
+            }
         case .dictionary: DictionarySettingsView(model: model.dictionary)
         case .rewrite: RewriteSettingsView(defaults: model.defaults, inspectKeychain: model.servicesEnabled,
                                                onSaved: { model.refreshConfiguration(); model.diagnostics.resolve(.settings) },

@@ -1,0 +1,230 @@
+# Integrated live dictation
+
+The app now connects its actual hotkey, shared microphone owner, local Parakeet
+runtime and model leases. Capture opens while preparation runs. One ordered,
+bounded frame consumer feeds live recognition; original audio is written to disk.
+Release drains capture and that consumer before finalizing the retained tail.
+Failed, discontinuous, overflowing or empty live output recovers through the
+shared full-file pipeline. Explicit cancellation suppresses that fallback.
+
+Completed captures process in order while another capture can run. Each owns its
+model lease, target app, cancellation and overlay token. Earlier completion cannot
+replace a newer overlay. Finalization retains visible text and its text area.
+Final output uses the shared dictionary, tone and optional rewrite processor,
+existing insertion acknowledgement and clipboard recovery, and History's durable
+original audio, raw/final text, model, target and timings. Cancellation after an
+insertion attempt retains recovery because already-inserted text cannot be retracted.
+
+## Candidate and measured limits
+
+Live recognition retains at most six seconds of normalized mono 16 kHz PCM.
+It schedules one decode at a time, every 400 ms until nonempty output, then every
+600 ms. Timestamped words matching consecutive hypotheses commit outside a
+two-second trailing margin; retained audio starts at a whole word and includes
+about 1.5 seconds of overlap. Tokens can use word markers, leading spaces or
+separate whitespace pieces. Changed overlap requires original-audio recovery.
+There are no growing-full-recording live redecodes.
+
+The SDK can revise a word after two matching hypotheses and the trailing margin.
+The actual merger detected this on long examples. Conservative batch recovery
+preserves complete final text but makes release cost depend on recording length.
+This candidate does **not** establish the requested flat 150 ms release bound,
+0.5-second first text across recordings, or checked-transcript accuracy.
+Native streaming is not advertised by the model catalog.
+
+Accuracy is judged against checked recordings. Exact offline batch wording is a
+diagnostic comparison, not an acceptance gate; neither output alone establishes
+accuracy. Trusted reference transcripts remain needed. Speed and compute targets
+are unchanged.
+
+Actual accelerated merger replay on Apple M4 Pro / macOS 26.6.2, 2026-10-13:
+
+| Audio | Tail finish | Full-file decode | Result |
+|---|---:|---:|---|
+| 3 s | 49.8 ms | 46.7 ms | Live final exactly matched batch |
+| 60 s | Required batch | 351.0 ms | Changed committed hypothesis detected |
+| 300 s | Required batch | 1,237.0 ms | Changed committed hypothesis detected |
+
+The 60-second input was completed by repeating a shorter local source; the
+300-second input was an excerpt of a composite. These are recognition/merger
+measurements, not native microphone-release measurements. A nil tail finish is
+not successful finalization. Low live work after failure does not establish a
+working continuous-stream compute budget. No human-labeled corpus accuracy or
+Neural Engine energy result is claimed.
+
+## Native checks
+
+A certificate-signed app-context probe links the production AppModel, services,
+overlay and engine. It uses a separate data directory and preferences, actual
+microphone input and OS Option-Space events, a neutral spoken playback fixture,
+and an isolated native text target with ordinary Edit/Paste support. It launches
+through the supported exact-bundle launcher. It neither resets grants nor changes
+the system microphone. Test instances close after validation; raw audio, text and
+unsanitized captures remain outside Git.
+
+Observed checks passed: live text, a non-key overlay preserving target focus,
+model reload with capture ready before model readiness, two overlapping leases,
+a new capture surviving earlier insertion/history completion, visible text and
+stable text-area height during finalization, acknowledged paste and original
+clipboard restoration, saved original audio/text/timings, shared dictionary/tone,
+Escape suppressing canceled output, shared Settings preview joining/leaving capture,
+and cancellation during finalization suppressing output. Three saved utterances retained the
+ending and exactly matched independent full-file recognition. These observations
+are fixture evidence, not general recognition accuracy.
+
+Short native runs varied: release to final recognition text was 143.3 ms and
+177.4 ms; first text from keydown was 792.7 ms and 437.6 ms. Keydown includes the
+hold threshold. Warm pre-roll can contain earlier speech, so a first update from
+capture readiness is not automatically a fresh speech-onset measurement.
+Timed native capture observations:
+
+| Held capture | Saved original incl. pre-roll/tail | Release to final recognition text | Release to acknowledged/saved History | Independent batch match |
+|---|---:|---:|---:|---|
+| 3 s | 3.625 s | 129.4 ms | 325.1 ms | Yes |
+| 60 s | 60.511 s | 405.8 ms | 581.8 ms | Yes |
+| 300 s | 300.623 s | 1,424.8 ms | 1,595.6 ms | Yes |
+
+These use actual microphone capture with repeated neutral spoken playback,
+not prerecorded PCM injected into the app. The one- and five-minute release
+targets failed. First text from readiness was 43.4 / 432.7 / 1,631.0 ms;
+the earliest case contains previous warm speech. All three inserted output and
+retained original audio with raw text matching independent batch. Full aggregate
+results are in `live-dictation-results.json`.
+The overlay observation includes key-release handling, capture/frame drain,
+recognition and queueing; acknowledged insertion and History finish are measured
+separately. The final probe revision measures postprocessed text through AppModel's published
+transcript rather than tentative-tail clearing; the long observations above used
+the earlier recognition-text endpoint. After the readiness and notice follow-ups,
+the final native recheck passed and measured **140.2 ms** release to postprocessed
+text, with **2,074.5 ms** first text from keydown. The variable first-text and release
+results remain acceptance limits.
+
+Builds and focused checks cover frame ordering, word-piece parsing, commitment,
+final tail, bounds, empty recovery, canceled streams, ordered processing, model
+lifecycle and app Xcode membership. Actual CLI recognition of saved native audio
+matched the app's raw text and final dictionary/tone output; a missing local model
+returned pure structured JSON error output. Simulated assertions do not prove recognition.
+Physical Fn, speech before a cold microphone opens, permission revocation,
+device unplug/sleep, provider-backed rewriting, and a trusted accuracy subset
+remain separate acceptance work. The capture correction checkpoint for partial-write
+preservation, gated silence and preview/warm/sleep ordering is integrated. The short
+native recheck passed the workflow and observed a valid session joining an actual
+Settings preparation cancellation. It measured 161.1 ms release to postprocessed
+text and 785.3 ms first text from keydown. All four saved utterances matched independent
+batch, but the exact spoken fixture ending matched only two. The physical/acoustic
+cause was not isolated; batch equality does not establish exact speech accuracy.
+Physical sleep, physical gated silence and actual disk filling remain unverified.
+
+The probe now waits for the current event tap's success callback, uses a separate
+Control-Option-Shift-Grave shortcut in its private preferences, and cancels if its
+reserved target loses focus. Earlier Option-Space probe attempts encountered a
+target change and unacknowledged insertion; their transcripts/audio stayed in
+History and those overall runs were failed. Probe-only clipboard recovery restores
+only while its recorded pasteboard change count remains owned. These constraints
+keep validation confined to its isolated target.
+
+## Running the native probe
+
+Build only after existing app/check instances close, using the project's existing
+signing identity. Hold the shared build/inference and native desktop resources.
+
+```sh
+scripts/build-native-dictation-check.sh /path/to/private-check-output
+open -n '/path/to/private-check-output/Native Target.app'
+scripts/launch.sh /path/to/private-check-output/gob.lin.app
+```
+
+The probe writes private `results/native-result.json` and terminates. Close the
+isolated target afterward. Optional `durations.json` beside the bundles, containing
+`[3,60,300]`, enables actual timed captures and writes private progress. These
+checks use the granted microphone and clipboard, so run them in a reserved native
+session. An unsigned Xcode product is compile-only and must not request grants.
+
+## Integrated correction checks
+
+Automatic monitoring suspension and capture interruption now stop, drain and save
+through the existing session flow. The affected session is History-only, so it
+cannot paste later when the original app is still focused. Explicit cancellation
+and intentional shutdown keep their existing deletion/output-suppression behavior.
+System-disabled event-tap reset also uses suspension; Escape remains explicit
+cancellation. The disabled-tap event has source coverage, not physical reproduction.
+The exceptional stop path drains terminal capture events before selecting recovery
+audio. Saving an empty failed entry records its timings without erasing the last
+successful transcript.
+
+Pending History entries carry capture-source ownership. A successful retry removes
+an owned capture source after the durable copy/save; failed retries retain it, and
+borrowed History sources are never deleted. Retained overlap matches consecutively
+after the first retained word: an interior revision requires full-file recovery,
+while leading-fragment tolerance remains. This can increase release latency; its
+frequency is unmeasured. Native bottom anchors follow newly appended overlay text
+without changing its height cap. The overlapping-capture native wait now describes
+only the count and lease drain that it checks.
+
+Focused hotkey, session and live checks passed, including interior-word rejection
+and leading-fragment retention. The unsigned Xcode app, signed SwiftPM app and
+signed production-linked native harness compiled. The harness adds short scenarios
+for History-only monitoring suspension, a denied final rename in its private
+capture directory, and owned versus borrowed History retry sources. A file-only
+run of the existing harness's ownership scenario against the production History
+model passed: failed retry retained its owned source, successful retry removed it,
+borrowed History audio survived, and both saved copies were readable. It opened
+no microphone or UI. The new suspension and failed-stop native scenarios have
+not yet run. The capture cutoff correction is integrated; two short signed attempts
+were safely canceled when another app became frontmost. The first completed initial
+recognition/paste/History and Settings preparation-cancellation joining before that
+abort. Its release to postprocessed text was 224.6 ms, first text 6,177.3 ms from
+keydown, using the available MacBook Pro microphone as the system default. Live
+text did not appear before release in that initial capture. These observations
+fail the requested short latency target and do not establish a whole-workflow pass.
+The selected external-device case was not exercised. Final integration awaits a
+stable target-focus window. Compile success does not prove the pending scenarios'
+hardware behavior. A separate normal SwiftUI entry-point launch through the exact
+signed bundle passed granted microphone/Accessibility snapshots, hotkey readiness,
+and graceful termination through AppModel's shutdown-requested/app-stopped events.
+The owned app exited without keyboard input, microphone capture or settings changes.
+Normal-shell menu/window navigation and dictation, physical sleep/session switching,
+and revocation remain unverified.
+
+The subsequent reserved-focus attempt rebuilt from reviewed commit
+`dc4efcb8cf9a9be4bbaeb28749a1712fc785c3e0` using the existing build machinery.
+Executing lifecycle metadata confirmed modified=false, debug, built at
+2026-10-13 20:01:43 UTC (build ID C5948906-9622-41CC-A4E1-8630502BB135).
+Focus stayed on the isolated target, but the initial built-in system-default input
+delivered exactly zero in all 76,515 saved samples (4.782 seconds). Permissions were
+granted and recognition was ready. The app retained a warning History entry with
+readable mono 16 kHz Float32 recovery, failure timings and zero insertion time.
+No recognized final text existed, so no release-to-text timing is reported.
+This is observed zero-input failure recovery, not the planned final-rename or
+History-only suspension pass. Those scenarios and the full current-cutoff workflow
+remain pending usable input. All owned apps/playback exited and resources were
+released promptly; no device, grant or preference was changed. Physical tap disable,
+sleep/revocation, speech accuracy and performance acceptance remain separate.
+
+
+The subsequent explicit DJI MIC MINI run passed the prepared short workflow.
+Executing metadata confirmed clean source `3baeb86fb1f46fb74cf71897218d9d921e3dac76`,
+modified=false, debug, built 2026-10-13 20:18:21 UTC, build ID
+00AE25E1-401B-4E00-AA98-CAC74A910B9A. The private invocation selected the current
+DJI UID in its isolated suite; the actual resolved input matched, with no fallback
+or system/persistent preference change. Existing shared preview measured positive
+raw native RMS (maximum 0.0054481). The short saved 16 kHz mono WAV had 3,200
+samples, 3,199 nonzero, peak 0.0228495. The full workflow began only after this gate.
+
+Observed passes: automatic monitoring suspension retained final text/original audio
+in History, with unchanged target and clipboard; denied private final rename
+retained a readable failure entry/audio, last successful transcript and timings;
+failed pending retry retained its owned source, successful retry removed it, and
+borrowed History audio survived. Existing current-cutoff startup, real recognition,
+acknowledged paste/clipboard restoration, dictionary/tone, Settings cancellation,
+capture during reload, two overlapping leases, overlay/finalization, shared preview,
+Escape and finalization cancellation checks passed. Target focus stayed stable.
+Original assertions were retained; private preflight and recovery-first ordering
+added no product implementation changes. Detailed aggregate outcomes are in JSON.
+
+Release to published postprocessed text was **246.4 ms**, failing the 150 ms target.
+First text was 592.3 ms from keydown; this includes the hold threshold and possible
+warm speech, not a controlled fresh-onset metric. Exact batch comparisons are only
+diagnostic; no checked human accuracy/compute/energy or physical tap-disable,
+sleep/revocation/unplug acceptance is claimed. All owned apps/playback exited,
+resources were released, and the reservation ended immediately after the run.

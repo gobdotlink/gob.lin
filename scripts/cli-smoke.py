@@ -58,9 +58,13 @@ with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
         writer.setsampwidth(2)
         writer.setframerate(16000)
         writer.writeframes(bytes(640))
-    unavailable = run("transcribe", audio, status=3)
-    assert unavailable.stdout == "" and json.loads(unavailable.stderr)["error"]["code"] == "engine_not_configured"
-    assert json.loads(run("replay", scratch, status=3).stderr)["error"]["code"] == "engine_not_configured"
+    unavailable = run("transcribe", audio, "--model-dir", scratch / "missing-model", status=3)
+    assert unavailable.stdout == "" and json.loads(unavailable.stderr)["error"]["code"] == "model_not_installed"
+    assert json.loads(run("replay", scratch, "--model-dir", scratch / "missing-model", status=3).stderr)["error"]["code"] == "model_not_installed"
+
+    for flags in [("--repeat", "0"), ("--windows", "NaN"), ("--windows", "16"), ("--cadence-ms", "inf")]:
+        assert json.loads(run("benchmark", audio, *flags, status=2).stderr)["error"]["code"] == "usage"
+    assert json.loads(run("--model-dir", "--help", status=2).stderr)["error"]["code"] == "usage"
 
     invalid = scratch / "invalid.jsonl"
     invalid.write_text("{not json}\n")
@@ -68,4 +72,4 @@ with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
     assert "line 1" in failure["error"]["message"]
 
 assert json.loads(run("--unknown", status=2).stderr)["error"]["code"] == "usage"
-print("CLI smoke passed: JSON/JSONL, recorded replay, isolated history export, ID-aligned eval, structured failures, honest missing-engine result.")
+print("CLI smoke passed: JSON/JSONL, recorded replay, isolated history export, ID-aligned eval, structured failures, local-only missing-model result.")
