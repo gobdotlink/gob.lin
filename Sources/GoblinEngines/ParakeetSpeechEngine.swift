@@ -16,52 +16,33 @@ public enum SpeechRuntimeError: Error, LocalizedError {
 }
 
 /// One model and one serialized inference owner, shared by file and bounded-tail recognition.
-public actor ParakeetSpeechEngine: ManagedSpeechEngine {
+public actor ParakeetSpeechEngine: PCMSpeechEngine {
     public nonisolated let identifier = "parakeet-tdt-v3"
     public nonisolated let maximumWindowSamples = 240_000
     public nonisolated let modelDirectory: URL
-    private let allowsDownload: Bool
     private var manager: AsrManager?
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
     public static var defaultModelDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("app.goblin.dictation/models/parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
+            .appendingPathComponent("gob.lin/models/parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
     }
 
-    public init(modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory, allowsDownload: Bool = true) {
+    public init(modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory) {
         self.modelDirectory = modelDirectory
-        self.allowsDownload = allowsDownload
     }
 
-    public func prepare(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws {
+    public func prepare() async throws {
         await acquire()
         defer { release() }
         try Task.checkCancellation()
         if manager != nil { return }
-        progress(.init(phase: .checkingCache))
-        let models: AsrModels
-        if !allowsDownload {
-            guard AsrModels.modelsExist(at: modelDirectory, version: .v3) else {
-                throw SpeechRuntimeError.modelNotInstalled
-            }
-            progress(.init(phase: .loading))
-            models = try AsrModels.loadLocal(from: modelDirectory, version: .v3, encoderPrecision: .int8)
-        } else {
-            models = try await AsrModels.downloadAndLoad(to: modelDirectory, version: .v3, encoderPrecision: .int8) { update in
-                switch update.phase {
-                case .listing:
-                    progress(.init(phase: .checkingCache))
-                case .downloading:
-                    progress(.init(phase: .downloading, fractionCompleted: update.fractionCompleted))
-                case .compiling(let name):
-                    progress(.init(phase: .compiling, component: name.isEmpty ? nil : name))
-                }
-            }
+        guard AsrModels.modelsExist(at: modelDirectory, version: .v3) else {
+            throw SpeechRuntimeError.modelNotInstalled
         }
+        let models = try AsrModels.loadLocal(from: modelDirectory, version: .v3, encoderPrecision: .int8)
         try Task.checkCancellation()
-        progress(.init(phase: .loading))
         let loadedManager = AsrManager(config: .default)
         try await loadedManager.loadModels(models)
         if Task.isCancelled {

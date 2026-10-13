@@ -60,10 +60,3 @@ public struct SpeechModelPreparationProgress: Sendable, Equatable {
     }
 }
 
-public protocol ManagedSpeechEngine: PCMSpeechEngine {
-    func prepare(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws
-}
-
-extension ManagedSpeechEngine {
-    public func prepare() async throws { try await prepare(progress: { _ in }) }
-}
