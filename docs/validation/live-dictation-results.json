@@ -198,5 +198,46 @@
     "captureCheckpoint": "ff68c356e10f94229c1451e44f0ed06ef068c735",
     "timingEndpoint": "Published final postprocessed transcript",
     "exactFixtureEndingCount": 2
+  },
+  "integratedCutoffRecheck": {
+    "captureCheckpoint": "c10ae32b1cf58103d8501bb3d5824890943c14df",
+    "complete": false,
+    "focusAbortedAttempts": 2,
+    "failure": "Isolated target lost focus; checks canceled safely",
+    "inputClass": "Built-in MacBook microphone",
+    "inputFollowsSystemDefault": true,
+    "selectedExternalDeviceExercised": false,
+    "initialCompletedScenario": {
+      "insertionAcknowledged": true,
+      "clipboardRestored": true,
+      "cancelSuppressedOutput": true,
+      "settingsPreparationCancellationIssued": true,
+      "validLeaseJoinedCancellation": true,
+      "dictationSurvivedSettingsCancellation": true,
+      "hadLiveText": false,
+      "releaseToFinalTextMilliseconds": 224.579625,
+      "firstTextMilliseconds": 6177.293375
+    },
+    "timingEndpoint": "Published final postprocessed transcript; observations from the first completed capture in an overall aborted run",
+    "pendingNativeScenarios": [
+      "History-only automatic suspension",
+      "Failed private final rename and paste-last/timings",
+      "Current-cutoff full overlap/preview/finalization-cancel workflow"
+    ],
+    "normalShellLifecycle": {
+      "normalEntryPoint": true,
+      "appStarted": true,
+      "hotkeyReady": true,
+      "microphoneGranted": true,
+      "accessibilityGranted": true,
+      "shutdownRequested": true,
+      "appStopped": true,
+      "ownAppExited": true
+    },
+    "normalShellKeyboardInput": false,
+    "normalShellMenuWindowDictationExercised": false,
+    "checkedTruthAccuracyEstablished": false,
+    "releaseTargetEstablished": false,
+    "continuousComputeBudgetEstablished": false
   }
 }

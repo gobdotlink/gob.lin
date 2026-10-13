@@ -179,5 +179,9 @@ text did not appear before release in that initial capture. These observations
 fail the requested short latency target and do not establish a whole-workflow pass.
 The selected external-device case was not exercised. Final integration awaits a
 stable target-focus window. Compile success does not prove the pending scenarios'
-hardware behavior. Physical sleep/session switching/revocation and the normal
-SwiftUI application shell remain unverified.
+hardware behavior. A separate normal SwiftUI entry-point launch through the exact
+signed bundle passed granted microphone/Accessibility snapshots, hotkey readiness,
+and graceful termination through AppModel's shutdown-requested/app-stopped events.
+The owned app exited without keyboard input, microphone capture or settings changes.
+Normal-shell menu/window navigation and dictation, physical sleep/session switching,
+and revocation remain unverified.
