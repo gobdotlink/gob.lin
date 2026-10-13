@@ -1,6 +1,11 @@
 import CryptoKit
 import Foundation
 import os
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 public struct DevelopmentBuildIdentity: Encodable, Sendable {
     public let app = GoblinMetadata.name
@@ -130,6 +135,11 @@ public final class DevelopmentLog {
             data.append(10)
             guard data.count <= maximumFileBytes else { throw CocoaError(.fileWriteOutOfSpace) }
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let lock = open(directory.appendingPathComponent("events.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+            guard lock >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            defer { close(lock) }
+            // Serialize file creation, repair, rotation and synced appends across app processes.
+            guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
             let current = fileURL(0)
             if !fileManager.fileExists(atPath: current.path) {
                 guard fileManager.createFile(atPath: current.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw CocoaError(.fileWriteUnknown) }
@@ -183,10 +193,11 @@ public final class DevelopmentLog {
     private func fileURL(_ index: Int) -> URL { directory.appendingPathComponent(index == 0 ? "events.jsonl" : "events.\(index).jsonl") }
     private func rotate() throws {
         for index in stride(from: Self.fileCount - 1, through: 1, by: -1) {
+            let source = fileURL(index - 1)
+            guard fileManager.fileExists(atPath: source.path) else { continue }
             let destination = fileURL(index)
             if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
-            let source = fileURL(index - 1)
-            if fileManager.fileExists(atPath: source.path) { try fileManager.moveItem(at: source, to: destination) }
+            try fileManager.moveItem(at: source, to: destination)
         }
     }
 }

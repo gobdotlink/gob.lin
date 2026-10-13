@@ -5,8 +5,8 @@ swift build --product GoblinApp
 binary_directory=$(swift build --show-bin-path)
 mkdir -p .build/development-log-check
 sources=()
-while IFS= read -r source; do sources+=("$source"); done < <(rg --files Sources/GoblinApp -g '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
-swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx26.0 \
+while IFS= read -r source; do sources+=("$source"); done < <(find Sources/GoblinApp -name '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
+swiftc -parse-as-library -swift-version 6 -target "$(uname -m)-apple-macosx26.0" \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
     "${sources[@]}" scripts/checks/development-logs.swift \
     "$binary_directory"/GoblinCore.build/*.swift.o "$binary_directory"/GoblinEngines.build/*.swift.o \

@@ -34,7 +34,7 @@ case "$certificate" in
         ;;
 esac
 
-swift build -c "$configuration"
+swift build -c "$configuration" --disable-build-manifest-caching
 binary_directory=$(swift build -c "$configuration" --show-bin-path)
 app='.build/app/gob.lin.app'
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

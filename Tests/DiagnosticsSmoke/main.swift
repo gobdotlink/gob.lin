@@ -78,6 +78,8 @@ precondition((identity["sourceRevision"] as! String).count == 40 && UUID(uuidStr
 precondition((records[9]["details"] as! [String: Any])["errors"] != nil)
 let mode = try FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent("events.jsonl").path)[.posixPermissions] as! NSNumber
 precondition(mode.intValue == 0o600)
+let lockMode = try FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent("events.lock").path)[.posixPermissions] as! NSNumber
+precondition(lockMode.intValue == 0o600)
 let sameLaunch = relaunched.deviceID("private-device-uid")
 var tokens = DevelopmentDetails(); tokens.selectedDevice = sameLaunch; tokens.resolvedDevice = relaunched.deviceID("private-device-uid")
 precondition(relaunched.record(.deviceResolved, area: .microphone, details: tokens))
@@ -94,7 +96,7 @@ precondition(!repaired.contains("incomplete"))
 
 let rotating = DevelopmentLog(directory: directory.appendingPathComponent("rotation"), maximumFileBytes: 4096)
 for _ in 0..<40 { precondition(rotating.record(.appStarted, area: .application)) }
-let files = try FileManager.default.contentsOfDirectory(at: rotating.directory, includingPropertiesForKeys: [.fileSizeKey])
+let files = try FileManager.default.contentsOfDirectory(at: rotating.directory, includingPropertiesForKeys: [.fileSizeKey]).filter { $0.pathExtension == "jsonl" }
 precondition(files.count == DevelopmentLog.fileCount)
 for file in files {
     let bytes = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize!
@@ -104,6 +106,19 @@ let rotated = try rotating.recentText()
 precondition(rotated.utf8.count <= 4096 * DevelopmentLog.fileCount)
 let sequences = try rotated.split(separator: "\n").map { (try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any])["sequence"] as! Int }
 precondition(sequences == sequences.sorted() && sequences.last == 40 && sequences.first! > 1)
+// Reproduce a rotation interrupted after archive 1 moved to archive 2.
+let archive1 = rotating.directory.appendingPathComponent("events.1.jsonl")
+let archive2 = rotating.directory.appendingPathComponent("events.2.jsonl")
+try FileManager.default.removeItem(at: archive2)
+try FileManager.default.moveItem(at: archive1, to: archive2)
+let retainedArchive = try Data(contentsOf: archive2)
+let fullEvent = String(rotated.split(separator: "\n").last!)
+try (fullEvent + String(repeating: " ", count: 4095 - fullEvent.utf8.count) + "\n")
+    .write(to: rotating.directory.appendingPathComponent("events.jsonl"), atomically: false, encoding: .utf8)
+precondition(rotating.record(.appStarted, area: .application))
+precondition(FileManager.default.fileExists(atPath: archive1.path))
+let recoveredArchive = try Data(contentsOf: archive2)
+precondition(recoveredArchive == retainedArchive)
 let blocked = directory.appendingPathComponent("blocked")
 try Data().write(to: blocked)
 let unwritable = DevelopmentLog(directory: blocked)
@@ -113,4 +128,4 @@ if let index = CommandLine.arguments.firstIndex(of: "--evidence"), CommandLine.a
     try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
     try ("Synthetic console lifecycle reproduction, SIGKILL then relaunch. No hardware/TCC assertions.\n" + trail).write(to: evidence.appendingPathComponent("persistence-trail.txt"), atomically: true, encoding: .utf8)
 }
-print("Development log probe passed: SIGKILL/relaunch trail, correlation/build identity, UID/error redaction, private files, torn-write recovery, rotation bound, and visible I/O failure.")
+print("Development log probe passed: SIGKILL/relaunch trail, correlation/build identity, UID/error redaction, private files, torn-write recovery, rotation bound/interruption recovery, and visible I/O failure.")
