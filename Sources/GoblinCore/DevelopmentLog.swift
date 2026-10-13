@@ -52,6 +52,10 @@ public struct DevelopmentDetails {
     public var sampleRate: Double?
     public var osStatus: Int32?
     public var engineRunning: Bool?
+    public var inputMatchesTap: Bool?
+    public var deviceMatchesStart: Bool?
+    public var deviceAlive: Bool?
+    public var unitRunning: Bool?
     public var microphone: DiagnosticPermissionStatus?
     public var accessibility: DiagnosticPermissionStatus?
     public var inputMonitoring: DiagnosticPermissionStatus?
@@ -72,6 +76,10 @@ public struct DevelopmentDetails {
         if let sampleRate, sampleRate.isFinite { fields["sampleRate"] = sampleRate }
         fields["osStatus"] = osStatus
         fields["engineRunning"] = engineRunning
+        fields["inputMatchesTap"] = inputMatchesTap
+        fields["deviceMatchesStart"] = deviceMatchesStart
+        fields["deviceAlive"] = deviceAlive
+        fields["unitRunning"] = unitRunning
         fields["microphone"] = microphone?.rawValue
         fields["accessibility"] = accessibility?.rawValue
         fields["inputMonitoring"] = inputMonitoring?.rawValue
