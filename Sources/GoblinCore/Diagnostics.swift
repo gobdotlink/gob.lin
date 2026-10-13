@@ -41,7 +41,7 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .microphonePermissionMissing: "Microphone access is missing. Complete microphone setup in Permissions & onboarding."
         case .microphoneUnavailable: "No microphone is available. Connect a microphone and try again."
         case .microphoneCaptureFailed: "Microphone recording failed. Check your audio device and try again."
-        case .requiredPermissionsMissing: "Accessibility or Input Monitoring access is missing. Complete Permissions & onboarding."
+        case .requiredPermissionsMissing: "Accessibility access is missing. Complete Permissions & onboarding."
         case .hotkeyUnavailable: "The dictation shortcut is unavailable. Check shortcut settings and permissions."
         case .secureInputEnabled: "Secure Input is enabled. Modifier-only shortcuts are paused, and protected fields cannot receive dictation."
         case .modelUnavailable: "Speech engine selection is pending the benchmark. Dictation is not available yet."
@@ -150,7 +150,7 @@ public enum DiagnosticsReport {
                      "OS: \(version.majorVersion).\(version.minorVersion).\(version.patchVersion) (\(architecture))",
                      "Microphone permission: \(environment.microphonePermission.rawValue)",
                      "Accessibility permission: \(environment.accessibilityPermission.rawValue)",
-                     "Input Monitoring permission: \(environment.inputMonitoringPermission.rawValue)",
+                     "Input Monitoring permission (not required): \(environment.inputMonitoringPermission.rawValue)",
                      "Secure Input: \(environment.secureInput ? "enabled" : "disabled")",
                      "Speech engine: \(environment.engineStatus.rawValue)",
                      "Microphones available: \(environment.microphoneNames.count)"]
