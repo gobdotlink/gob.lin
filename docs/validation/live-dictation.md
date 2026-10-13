@@ -146,6 +146,8 @@ Automatic monitoring suspension and capture interruption now stop, drain and sav
 through the existing session flow. The affected session is History-only, so it
 cannot paste later when the original app is still focused. Explicit cancellation
 and intentional shutdown keep their existing deletion/output-suppression behavior.
+System-disabled event-tap reset also uses suspension; Escape remains explicit
+cancellation. The disabled-tap event has source coverage, not physical reproduction.
 The exceptional stop path drains terminal capture events before selecting recovery
 audio. Saving an empty failed entry records its timings without erasing the last
 successful transcript.
@@ -168,7 +170,14 @@ run of the existing harness's ownership scenario against the production History
 model passed: failed retry retained its owned source, successful retry removed it,
 borrowed History audio survived, and both saved copies were readable. It opened
 no microphone or UI. The new suspension and failed-stop native scenarios have
-not yet run; final integration awaits the capture cutoff
-correction and its producer's desktop slot. Compile success does not prove their
+not yet run. The capture cutoff correction is integrated; two short signed attempts
+were safely canceled when another app became frontmost. The first completed initial
+recognition/paste/History and Settings preparation-cancellation joining before that
+abort. Its release to postprocessed text was 224.6 ms, first text 6,177.3 ms from
+keydown, using the available MacBook Pro microphone as the system default. Live
+text did not appear before release in that initial capture. These observations
+fail the requested short latency target and do not establish a whole-workflow pass.
+The selected external-device case was not exercised. Final integration awaits a
+stable target-focus window. Compile success does not prove the pending scenarios'
 hardware behavior. Physical sleep/session switching/revocation and the normal
 SwiftUI application shell remain unverified.

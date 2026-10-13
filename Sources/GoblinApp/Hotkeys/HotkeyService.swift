@@ -199,11 +199,12 @@ final class HotkeyService: ObservableObject {
                 self.releasePending = false
             }
         case .chord: apply(state.chord())
-        case .escape, .reset:
+        case .escape:
             holdTimer?.invalidate()
             releaseTask?.cancel()
             releasePending = false
             apply(state.cancel())
+        case .reset: suspendRecording()
         }
     }
 

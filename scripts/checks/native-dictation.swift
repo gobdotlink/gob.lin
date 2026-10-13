@@ -86,6 +86,11 @@ struct NativeDictationCheck {
                 }
                 post(down: true)
                 try await wait("native hotkey capture readiness", seconds: 5) { model.overlay.model.phase == .listening }
+                if let input = AudioCaptureService.shared.inputResolution {
+                    report["inputDevice"] = input.device.name
+                    report["inputUsedFallback"] = input.usedFallback
+                    report["inputFollowsSystemDefault"] = input.requestedUID.isEmpty
+                }
                 try await play(source)
                 let hadLiveText = !model.overlay.model.committedText.isEmpty || !model.overlay.model.tentativeText.isEmpty
                 if let view = app.windows.first(where: { $0.title == "gob.lin Dictation" })?.contentView,
