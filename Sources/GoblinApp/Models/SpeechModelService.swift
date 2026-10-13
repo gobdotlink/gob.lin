@@ -103,7 +103,7 @@ final class SpeechModelService: ObservableObject {
                 try Task.checkCancellation()
                 try validate(lease)
                 // A hotkey can arrive while a settings cancellation is draining; resume for its new lease.
-                if state == .cancelled { continue }
+                if preparationTask.isCancelled { continue }
                 throw error
             }
         }

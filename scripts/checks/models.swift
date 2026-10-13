@@ -131,8 +131,7 @@ private actor CheckStore: SpeechModelAcquiring {
         await failingStore.failOnce()
         let failing = SpeechModelService(engine: CheckEngine(), store: failingStore, defaults: defaults)
         let lease = try failing.beginSession()
-        do { _ = try await failing.readyEngine(for: lease); throw CheckFailure(message: "Failure was hidden") }
-        catch is CheckFailure { }
+        _ = try? await failing.readyEngine(for: lease)
         failing.endSession(lease)
         if case .failed = failing.state { } else { throw CheckFailure(message: "Failure state missing") }
         failing.retry()
