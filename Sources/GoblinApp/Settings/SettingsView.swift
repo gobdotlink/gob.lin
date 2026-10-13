@@ -5,7 +5,7 @@ import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
-    case rewrite = "Post-processing", tone = "Tone", history = "History", overlay = "Overlay", about = "About"
+    case rewrite = "Post-processing", tone = "Tone", history = "History", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -17,6 +17,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tone: "textformat"
         case .history: "clock"
         case .overlay: "rectangle.on.rectangle"
+        case .diagnostics: "exclamationmark.bubble"
         case .about: "info.circle"
         }
     }
@@ -37,7 +38,7 @@ struct SettingsView: View {
         } detail: {
             Group {
                 switch model.settingsSelection ?? .general {
-                case .dictionary, .rewrite, .overlay: sectionContents
+                case .dictionary, .rewrite, .overlay, .diagnostics: sectionContents
                 default: ScrollView { sectionContents }
                 }
             }
@@ -46,13 +47,14 @@ struct SettingsView: View {
         }
         .tint(GoblinBrand.accent).preferredColorScheme(.dark)
         .frame(minWidth: 820, minHeight: 620)
+        .defaultAppStorage(model.defaults)
     }
 
     @ViewBuilder
     private var sectionContents: some View {
         switch model.settingsSelection ?? .general {
         case .general: GeneralSettingsView(model: model)
-        case .audio: AudioSettingsView(permissions: model.permissions)
+        case .audio: AudioSettingsView(permissions: model.permissions, preview: model.audioPreview)
         case .model:
             VStack(alignment: .leading, spacing: 18) {
                 Text("Speech model").font(.largeTitle.bold())
@@ -62,11 +64,14 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 Picker("Model", selection: .constant("Parakeet TDT v3")) { Text("Parakeet TDT v3").tag("Parakeet TDT v3") }.disabled(true)
             }.padding(28)
-        case .dictionary: DictionarySettingsView()
-        case .rewrite: RewriteSettingsView()
+        case .dictionary: DictionarySettingsView(model: model.dictionary)
+        case .rewrite: RewriteSettingsView(defaults: model.defaults, inspectKeychain: model.servicesEnabled,
+                                               onSaved: { model.refreshConfiguration(); model.diagnostics.resolve(.settings) },
+                                               onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
         case .history: HistorySettingsView(history: model.history)
         case .overlay: OverlaySettingsView(overlay: model.overlay)
+        case .diagnostics: DiagnosticsView(model: model.diagnostics)
         case .about: AboutSettingsView()
         }
     }
@@ -101,7 +106,7 @@ private struct GeneralSettingsView: View {
                         refreshLoginStatus()
                     } catch { refreshLoginStatus(error: error) }
                 }
-            }))
+            })).disabled(!model.servicesEnabled)
             if let loginError { Text(loginError).foregroundStyle(.orange) }
             if SMAppService.mainApp.status == .requiresApproval { Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() } }
             Toggle("Feedback sounds", isOn: $sounds)

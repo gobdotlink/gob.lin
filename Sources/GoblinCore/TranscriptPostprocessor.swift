@@ -1,0 +1,52 @@
+import Foundation
+
+public struct TranscriptProcessingResult: Sendable {
+    public let rawText: String
+    public let finalText: String
+    public let tone: DictationTone
+    public let polished: Bool
+    public let warning: DiagnosticFailure?
+    public let timings: DictationTimings
+
+    public init(rawText: String, finalText: String, tone: DictationTone, polished: Bool,
+                warning: DiagnosticFailure? = nil, timings: DictationTimings = DictationTimings()) {
+        self.rawText = rawText; self.finalText = finalText; self.tone = tone
+        self.polished = polished; self.warning = warning; self.timings = timings
+    }
+}
+
+/// Shared by the app and CLI; credentials are supplied by their platform shells.
+public actor TranscriptPostprocessor {
+    private let rewriteClient: RewriteClient
+
+    public init(rewriteClient: RewriteClient = RewriteClient()) { self.rewriteClient = rewriteClient }
+
+    public func process(_ rawText: String, dictionaryEntries: [DictionaryEntry], tone: DictationTone,
+                        rewriteSettings: RewriteSettings, apiKey: String = "") async -> TranscriptProcessingResult {
+        let start = ContinuousClock.now
+        let entries: [DictionaryEntry]
+        do { entries = try DictionaryRepository.validated(dictionaryEntries) }
+        catch { return result(rawText, final: rawText, tone: tone, polished: false, warning: .dictionaryUnavailable, start: start) }
+        let corrected = DictionaryCorrector.correct(rawText, entries: entries, allowFuzzy: false).text
+        let preferred = entries.map(\.spelling)
+        if rewriteSettings.enabled && rewriteSettings.cleanup != .none {
+            let rewritten = await rewriteClient.rewrite(corrected, settings: rewriteSettings, apiKey: apiKey,
+                                                        tone: tone, preferredSpellings: preferred)
+            if let failure = rewritten.failure {
+                // A failed rewrite must recover the original ASR output, before dictionary or tone edits.
+                return result(rawText, final: rawText, tone: tone, polished: false, warning: .rewrite(failure), start: start)
+            }
+            return result(rawText, final: ToneFormatter.format(rewritten.outputText, tone: tone, protectedTerms: preferred),
+                          tone: tone, polished: rewritten.wasRewritten, warning: nil, start: start)
+        }
+        return result(rawText, final: ToneFormatter.format(corrected, tone: tone, protectedTerms: preferred),
+                      tone: tone, polished: false, warning: nil, start: start)
+    }
+
+    private func result(_ raw: String, final: String, tone: DictationTone, polished: Bool,
+                        warning: DiagnosticFailure?, start: ContinuousClock.Instant) -> TranscriptProcessingResult {
+        let elapsed = start.duration(to: .now).components
+        return TranscriptProcessingResult(rawText: raw, finalText: final, tone: tone, polished: polished, warning: warning,
+            timings: DictationTimings(rewriteMilliseconds: Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15))
+    }
+}

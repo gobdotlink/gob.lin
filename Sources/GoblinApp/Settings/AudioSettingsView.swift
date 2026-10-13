@@ -20,8 +20,15 @@ final class AudioPreviewModel: ObservableObject {
     private var engine: AVAudioEngine?
     private var configurationObserver: NSObjectProtocol?
     private var sessionID = UUID()
+    private let monitorSystem: Bool
+
+    init(devices: [InputDevice]? = nil) {
+        monitorSystem = devices == nil
+        if let devices { self.devices = devices }
+    }
 
     func refresh() {
+        guard monitorSystem else { return }
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { error = "Could not enumerate microphones."; return }
@@ -41,6 +48,7 @@ final class AudioPreviewModel: ObservableObject {
 
     func start(uid: String) {
         stop()
+        guard monitorSystem else { return }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { error = "Allow Microphone in onboarding before previewing audio."; return }
         refresh()
         let engine = AVAudioEngine()
@@ -104,17 +112,21 @@ final class AudioPreviewModel: ObservableObject {
 
     private static func string(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var value: CFString?
-        var size = UInt32(MemoryLayout<CFString?>.size)
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
-        return value as String?
+        return value?.takeRetainedValue() as String?
     }
 }
 
 struct AudioSettingsView: View {
     @ObservedObject var permissions: PermissionModel
-    @StateObject private var preview = AudioPreviewModel()
+    @ObservedObject var preview: AudioPreviewModel
     @AppStorage("audio.inputDeviceUID") private var selectedUID = ""
+
+    init(permissions: PermissionModel, preview: AudioPreviewModel = AudioPreviewModel()) {
+        self.permissions = permissions; self.preview = preview
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {

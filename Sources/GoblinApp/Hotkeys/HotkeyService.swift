@@ -11,6 +11,7 @@ final class HotkeyService: ObservableObject {
     @Published private(set) var recording: HotkeyStateMachine.Recording?
     @Published private(set) var processingCount = 0
     @Published private(set) var recorderActive = false
+    @Published private(set) var lastFailure: DiagnosticFailure?
     var onAction: ((HotkeyStateMachine.Action) -> Void)?
     private let permissions: PermissionModel
     private var state = HotkeyStateMachine()
@@ -27,10 +28,14 @@ final class HotkeyService: ObservableObject {
     private var carbonModifiedEscape: EventHotKeyRef?
     private var carbonPressed = false
     private var sessionObservers: [NSObjectProtocol] = []
+    private let monitorSystem: Bool
+    private let defaults: UserDefaults
 
-    init(permissions: PermissionModel) {
+    init(permissions: PermissionModel, defaults: UserDefaults = .standard, monitorSystem: Bool = true) {
         self.permissions = permissions
-        if let data = UserDefaults.standard.data(forKey: "goblin.dictationShortcut"),
+        self.defaults = defaults
+        self.monitorSystem = monitorSystem
+        if let data = defaults.data(forKey: "goblin.dictationShortcut"),
            let stored = try? JSONDecoder().decode(HotkeyShortcut.self, from: data), stored.isValid { shortcut = stored }
         else { shortcut = .fn }
         permissions.onRevocation = { [weak self] _ in self?.stop() }
@@ -38,6 +43,7 @@ final class HotkeyService: ObservableObject {
             guard let self else { return }
             if new.accessibility && new.inputMonitoring { self.start() } else { self.stop() }
         }
+        guard monitorSystem else { return }
         secureTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkSecureInput() }
         }
@@ -55,7 +61,7 @@ final class HotkeyService: ObservableObject {
     }
 
     func start() {
-        guard tap == nil, permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
+        guard monitorSystem, tap == nil, permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
         checkSecureInput()
         installCarbonHandler()
         registerCarbonShortcut()
@@ -69,8 +75,8 @@ final class HotkeyService: ObservableObject {
         }, result: { [weak self] succeeded in
             Task { @MainActor in
                 guard let self, self.tap != nil, self.tapGeneration == generation else { return }
-                if succeeded { self.permissions.reportTapWorking(); self.updateStatus() }
-                else { self.stop(); self.status = "Shortcut access needs a refresh"; self.permissions.reportTapFailure() }
+                if succeeded { self.lastFailure = self.carbonIssue == nil ? nil : .hotkeyUnavailable; self.permissions.reportTapWorking(); self.updateStatus() }
+                else { self.stop(); self.lastFailure = .hotkeyUnavailable; self.status = "Shortcut access needs a refresh"; self.permissions.reportTapFailure() }
             }
         })
         tap = created
@@ -101,11 +107,11 @@ final class HotkeyService: ObservableObject {
     }
 
     func setShortcut(_ value: HotkeyShortcut) {
-        guard value.isValid else { status = "Choose a supported shortcut"; return }
+        guard value.isValid else { lastFailure = .hotkeyUnavailable; status = "Choose a supported shortcut"; return }
         stop()
         shortcut = value
         carbonIssue = nil
-        if let encoded = try? JSONEncoder().encode(value) { UserDefaults.standard.set(encoded, forKey: "goblin.dictationShortcut") }
+        if let encoded = try? JSONEncoder().encode(value) { defaults.set(encoded, forKey: "goblin.dictationShortcut") }
         recorderActive = false
         start()
     }
@@ -218,7 +224,7 @@ final class HotkeyService: ObservableObject {
             return noErr
         }
         let result = InstallEventHandler(GetApplicationEventTarget(), callback, events.count, &events, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        if result != noErr { carbonIssue = "Secure Input fallback unavailable (\(result))"; updateStatus() }
+        if result != noErr { lastFailure = .hotkeyUnavailable; carbonIssue = "Secure Input fallback unavailable (\(result))"; updateStatus() }
     }
 
     private func receiveCarbon(id: UInt32, pressed: Bool) {
@@ -237,11 +243,12 @@ final class HotkeyService: ObservableObject {
     }
 
     private func registerCarbonShortcut() {
-        guard carbonShortcut == nil, !recorderActive, let code = shortcut.keyCode,
+        guard monitorSystem, carbonShortcut == nil, !recorderActive, let code = shortcut.keyCode,
               permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
         let id = EventHotKeyID(signature: 0x474F424C, id: 1)
         let result = RegisterEventHotKey(UInt32(code), shortcut.carbonModifiers, id, GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &carbonShortcut)
         carbonIssue = result == noErr ? nil : "Secure Input fallback: shortcut already in use (\(result))"
+        lastFailure = result == noErr ? nil : .hotkeyUnavailable
         updateStatus()
     }
 

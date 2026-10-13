@@ -6,13 +6,14 @@ import UniformTypeIdentifiers
 final class DictionaryModel: ObservableObject {
     @Published private(set) var entries: [DictionaryEntry] = []
     @Published var error: String?
+    @Published private(set) var lastFailure: DiagnosticFailure?
     private let repository: DictionaryRepository
     private(set) var available = false
 
     init(repository: DictionaryRepository = .applicationDefault) {
         self.repository = repository
         do { entries = try repository.load(); available = true }
-        catch { self.error = "Could not load your dictionary: \(error.localizedDescription)" }
+        catch { lastFailure = .dictionaryUnavailable; self.error = "Could not load your dictionary: \(error.localizedDescription)" }
     }
 
     func put(_ entry: DictionaryEntry) -> Bool {
@@ -27,23 +28,26 @@ final class DictionaryModel: ObservableObject {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do { _ = persist(try DictionaryRepository.importing(String(contentsOf: url, encoding: .utf8), into: entries)) }
-        catch { self.error = "Could not import the word list: \(error.localizedDescription)" }
+        catch { lastFailure = .dictionaryUnavailable; self.error = "Could not import the word list: \(error.localizedDescription)" }
     }
 
     private func persist(_ next: [DictionaryEntry]) -> Bool {
         guard available else {
+            lastFailure = .dictionaryUnavailable
             error = "Your dictionary could not be loaded. Fix the file before saving to avoid losing existing entries."
             return false
         }
-        do { try repository.save(next); entries = try DictionaryRepository.validated(next); return true }
-        catch { self.error = error.localizedDescription; return false }
+        do { try repository.save(next); entries = try DictionaryRepository.validated(next); error = nil; lastFailure = nil; return true }
+        catch { lastFailure = .dictionaryUnavailable; self.error = error.localizedDescription; return false }
     }
 }
 
 struct DictionarySettingsView: View {
-    @StateObject private var model = DictionaryModel()
+    @ObservedObject var model: DictionaryModel
     @State private var editing: DictionaryEntry?
     @State private var importing = false
+
+    init(model: DictionaryModel = DictionaryModel()) { self.model = model }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

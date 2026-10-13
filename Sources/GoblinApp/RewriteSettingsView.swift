@@ -2,11 +2,22 @@ import GoblinCore
 import SwiftUI
 
 struct RewriteSettingsView: View {
-    @State private var settings = RewriteSettingsStore.load()
+    @State private var settings: RewriteSettings
+    private let defaults: UserDefaults
+    private let inspectKeychain: Bool
+    private let onSaved: () -> Void
+    private let onFailure: (DiagnosticFailure) -> Void
     @State private var apiKey = ""
     @State private var keySaved = false
     @State private var message: String?
     @State private var failed = false
+
+    init(defaults: UserDefaults = .standard, inspectKeychain: Bool = true, onSaved: @escaping () -> Void = {},
+         onFailure: @escaping (DiagnosticFailure) -> Void = { _ in }) {
+        self.defaults = defaults; self.inspectKeychain = inspectKeychain
+        self.onSaved = onSaved; self.onFailure = onFailure
+        _settings = State(initialValue: RewriteSettingsStore.load(defaults: defaults))
+    }
 
     var body: some View {
         Form {
@@ -56,6 +67,7 @@ struct RewriteSettingsView: View {
     }
 
     private func refreshKeyStatus() {
+        guard inspectKeychain else { keySaved = false; return }
         do { keySaved = try RewriteKeychain.containsKey(for: settings) }
         catch { keySaved = false }
     }
@@ -70,19 +82,20 @@ struct RewriteSettingsView: View {
                 }
                 let local = ["localhost", "127.0.0.1", "[::1]", "::1"].contains(endpoint.host ?? "")
                 if !local, key.isEmpty {
-                    guard try RewriteKeychain.containsKey(for: settings) else {
+                    guard inspectKeychain, try RewriteKeychain.containsKey(for: settings) else {
                         throw RewriteFailure.configuration("Enter an API key before enabling AI cleanup.")
                     }
                 }
             }
-            if !key.isEmpty { try RewriteKeychain.save(key, for: settings) }
-            try RewriteSettingsStore.save(settings)
+            if !key.isEmpty, inspectKeychain { try RewriteKeychain.save(key, for: settings) }
+            try RewriteSettingsStore.save(settings, defaults: defaults)
             apiKey = ""
             refreshKeyStatus()
             message = "Settings saved."
             failed = false
+            onSaved()
         } catch { show(error) }
     }
 
-    private func show(_ error: Error) { message = error.localizedDescription; failed = true }
+    private func show(_ error: Error) { message = error.localizedDescription; failed = true; onFailure(.settingsSaveFailed) }
 }
