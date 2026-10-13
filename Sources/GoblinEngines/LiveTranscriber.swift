@@ -231,10 +231,10 @@ public actor LiveTranscriber {
         let overlap = committed.filter { $0.end > origin }
         guard let first = overlap.first else { return words }
         guard var index = words.indices.first(where: {
-            words[$0].text == first.text && abs(words[$0].end - first.end) <= 4_000
+            words[$0].text.caseInsensitiveCompare(first.text) == .orderedSame && abs(words[$0].end - first.end) <= 4_000
         }) else { return nil }
         for old in overlap {
-            guard index < words.count, words[index].text == old.text,
+            guard index < words.count, words[index].text.caseInsensitiveCompare(old.text) == .orderedSame,
                   abs(words[index].end - old.end) <= 4_000 else { return nil }
             index += 1
         }

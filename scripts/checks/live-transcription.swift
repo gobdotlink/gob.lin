@@ -59,7 +59,7 @@ actor SlowUntimedPCM: PCMSpeechEngine {
 }
 
 actor ScriptedPCM: PCMSpeechEngine {
-    enum FinalOverlap: Sendable { case unchanged, interiorWord, leadingFragment }
+    enum FinalOverlap: Sendable { case unchanged, caseOnly, interiorWord, leadingFragment }
     nonisolated let identifier = "check"
     nonisolated let maximumWindowSamples = 240_000
     private let empty: Bool
@@ -79,11 +79,15 @@ actor ScriptedPCM: PCMSpeechEngine {
             .init(text: "lo", startSeconds: 0.2, endSeconds: 0.5, confidence: 1),
             .init(text: " ", startSeconds: 0.5, endSeconds: 0.6, confidence: 1),
             .init(text: "world", startSeconds: 0.6, endSeconds: 1, confidence: 1),
-            .init(text: " tail", startSeconds: 2.5, endSeconds: 3, confidence: 1)
+            .init(text: " tail", startSeconds: 2.5, endSeconds: finalOverlap == .caseOnly ? 4 : 3, confidence: 1)
         ]
         if calls >= 3 {
             switch finalOverlap {
             case .unchanged: break
+            case .caseOnly:
+                text = "Hello WORLD tail"
+                tokens[0] = .init(text: "▁Hel", startSeconds: 0, endSeconds: 0.2, confidence: 1)
+                tokens[3] = .init(text: "WORLD", startSeconds: 0.6, endSeconds: 1, confidence: 1)
             case .interiorWord:
                 text = "hello extra world tail"
                 tokens.insert(.init(text: " extra", startSeconds: 0.52, endSeconds: 0.58, confidence: 1), at: 2)
@@ -159,15 +163,28 @@ struct LiveTranscriptionCheck {
         verify(sequenceResult?.text == (1...80).map { "word" + String($0) }.joined(separator: " "), "Continuous speech lost or duplicated words at retained boundaries")
         verify(!(await sequence.requiresFinalRecovery), "Continuous timed speech fell back instead of advancing")
 
-        for variation in [ScriptedPCM.FinalOverlap.unchanged, .interiorWord, .leadingFragment] {
+        for variation in [ScriptedPCM.FinalOverlap.unchanged, .caseOnly, .interiorWord, .leadingFragment] {
             let revised = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { ScriptedPCM(finalOverlap: variation) })
+            let revisedValues = Values()
+            let revisedCollector = Task { for await value in revised.updates { await revisedValues.add(value) } }
             await revised.append([Float](repeating: 0.1, count: 64_000), at: 0)
             try await Task.sleep(for: .milliseconds(20))
             await revised.append([Float](repeating: 0.1, count: 9_600), at: 64_000)
             try await Task.sleep(for: .milliseconds(20))
+            if variation == .caseOnly {
+                await revised.append([Float](repeating: 0.1, count: 9_600), at: 73_600)
+                try await Task.sleep(for: .milliseconds(20))
+            }
             let final = try await revised.finish()
+            await revisedCollector.value
             if variation == .interiorWord { verify(final == nil, "Interior overlap mismatch did not preserve original-file recovery") }
             else { verify(final?.text == "hello world tail", "Consecutive overlap or leading-fragment handling regressed") }
+            if variation == .caseOnly {
+                let snapshots = await revisedValues.values
+                verify(snapshots.last?.committedText == "hello world", "Case-only overlap regressed or recased committed text")
+                verify(snapshots.allSatisfy { $0.recoveryReason == nil }, "Case-only overlap needlessly required recovery")
+                verify(!(await revised.requiresFinalRecovery), "Case-only overlap required original-file recovery")
+            }
         }
 
         // Whole-hypothesis agreement can settle at an endpoint without invented token timings.
