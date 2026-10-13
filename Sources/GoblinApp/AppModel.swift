@@ -2,9 +2,23 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
+    let overlay = OverlayController()
     @Published var mascotState: MascotState = .idle
+    let permissions = PermissionModel()
+    let hotkeys: HotkeyService
+    let insertion = TextInsertionService()
+    let history = HistoryModel()
     @Published var lastTranscript: String?
     var pasteTranscript: ((String) -> Void)?
+
+    init() {
+        hotkeys = HotkeyService(permissions: permissions)
+        insertion.lastTranscript = { [weak self] in self?.lastTranscript }
+        pasteTranscript = { [weak self] text in
+            guard let self else { return }
+            Task { @MainActor in await self.insertion.insert(text) }
+        }
+    }
 
     var canPasteLastTranscript: Bool {
         guard let lastTranscript else { return false }

@@ -24,10 +24,42 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 640, height: 440)
 
+        Window("gob.lin Overlay", id: "overlay-settings") {
+            OverlaySettingsView(overlay: model.overlay)
+        }
+        .defaultSize(width: 520, height: 260)
+
+        Window("gob.lin Dictionary", id: "dictionary") {
+            DictionarySettingsView()
+        }
+        .defaultSize(width: 720, height: 460)
+
+        Window("gob.lin Tone", id: "tone") {
+            ToneSettingsView()
+        }
+        .defaultSize(width: 600, height: 480)
+
+        Window("gob.lin AI Cleanup", id: "rewrite") {
+            RewriteSettingsView()
+        }
+        .defaultSize(width: 640, height: 620)
+
         Window("gob.lin History", id: "history") {
-            HistoryShell()
+            HistoryView(model: model.history)
         }
         .defaultSize(width: 720, height: 480)
+
+        Window("gob.lin Shortcuts", id: "shortcuts") {
+            ShortcutSettingsView(service: model.hotkeys)
+        }
+        .defaultSize(width: 620, height: 520)
+        .windowResizability(.contentSize)
+
+        Window("gob.lin Text insertion", id: "insertion") {
+            InsertionSettingsView(service: model.insertion)
+        }
+        .defaultSize(width: 620, height: 450)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -39,9 +71,17 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
+        Button("Overlay…") { show("overlay-settings") }
+        Button("Dictionary…") { show("dictionary") }
+        Button("Tone…") { show("tone") }
+        Button("AI cleanup…") { show("rewrite") }
+        Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
+        Button("Shortcuts…") { show("shortcuts") }
+        Button("Text insertion…") { show("insertion") }
         Divider()
         Button("Paste last transcript") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
+        ClipboardRecoveryMenu(service: model.insertion)
         Divider()
         Button("Quit gob.lin") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
@@ -50,6 +90,15 @@ private struct GoblinMenu: View {
     private func show(_ id: String) {
         openWindow(id: id)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+private struct ClipboardRecoveryMenu: View {
+    @ObservedObject var service: TextInsertionService
+    var body: some View {
+        if service.hasRecoveryClipboard {
+            Button("Restore previous clipboard") { service.restorePreviousClipboard() }.disabled(service.busy)
+        }
     }
 }
 
@@ -69,12 +118,5 @@ private struct SettingsShell: View {
         .background(GoblinBrand.background)
         .tint(GoblinBrand.accent)
         .preferredColorScheme(.dark)
-    }
-}
-
-private struct HistoryShell: View {
-    var body: some View {
-        ContentUnavailableView("No dictations yet", systemImage: "text.bubble", description: Text("Your completed dictations will appear here."))
-            .padding(28)
     }
 }
