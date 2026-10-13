@@ -2,6 +2,7 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
+    let overlay = OverlayController()
     @Published var mascotState: MascotState = .idle
     let permissions = PermissionModel()
     let hotkeys: HotkeyService
