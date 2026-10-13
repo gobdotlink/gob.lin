@@ -6,7 +6,7 @@ The capture service produces ordered 16 kHz mono Float32 frames and writes them 
 
 `scripts/check-audio-capture.sh` compiles the capture code with Swift 6 and warnings as errors. It uses the actual platform converter at 16,000, 44,100 and 48,000 Hz with stereo input and a nonzero final tail. It checks contiguous sample positions, readiness before frames, finite samples, mono 16 kHz WAV lengths, and converted sample counts within one rounding sample. The awkward boundaries produced 1,677, 1,628 and 1,626 samples respectively, all nonzero.
 
-The same focused check verifies that recovery skips an active writer, incremental-file recovery after an incomplete trailing sample, explicit cancellation deletion, preservation of 1,600 samples when the input configuration is interrupted, the bounded 8,000-sample pre-roll, no pre-roll leakage into the next session, overload failure, real-clock all-zero/no-callback watchdogs, and invalid storage rejection. These checks address audio loss and storage correctness; they do not simulate hardware acceptance or a long recording.
+The same focused check verifies that recovery skips an active writer, incremental-file recovery of complete samples beyond a stale header while truncating an incomplete trailing sample, explicit cancellation deletion, preservation of 1,600 samples when the input configuration is interrupted, the bounded 8,000-sample pre-roll, no pre-roll leakage into the next session, overload failure, real-clock all-zero/no-callback watchdogs, and invalid storage rejection. These checks address audio loss and storage correctness; they do not simulate hardware acceptance or a long recording.
 
 The app builds with the capture service and the settings preview adapter. No dependency or Xcode project membership changes are needed: Xcode uses the GoblinEngines package product.
 
@@ -20,9 +20,11 @@ Selected DJI capture passed twice with contiguous frame positions and readable m
 
 The built-in microphone was attempted with the laptop lid closed. It delivered 82,764 exact-zero samples and the watchdog reported `allZeroStream`; a later open was unavailable. Built-in speech acceptance remains unverified in this hardware setup. The UI error now includes the laptop lid among the checks for digital silence.
 
-An actual 1,800-second native DJI capture has started. Its result will be recorded after the full wall-clock run and final durable-file check. No simulated duration is counted as long-recording acceptance.
+The actual 30-minute DJI capture passed: 1,800.1977 seconds of wall-clock capture, 28,801,600 samples delivered across 18,002 ordered frames, and a finalized WAV duration of 1,800.1 seconds. The 115,206,444-byte file was reopened successfully; its Float32/16 kHz/mono header, exact byte/sample length, private 0600 mode, and nonzero windows near the beginning, middle, and end were checked. The final converter drain added 270 real samples after the last progress checkpoint. No capture errors or sample-position gaps were reported. Observed resident memory stayed between 17,520 and 21,184 KiB (17.1–20.7 MiB), independently of file growth.
 
-Still untested: physical first-word preservation on built-in/AirPods, AirPods capture, selected-device unplug, actual computer sleep, and the final result of the ongoing 30-minute run. The signed probe uses no inference and releases its engine on completion.
+The timed native executable used commit `e43f0614dede488fff9d35a31e3d9ca61bec9a19`; subsequent advisory-lock hardening in `ceac1be704e2af7731f98145ca52d2c35f7c534f` was verified separately against real file handles, including active-writer exclusion, finalization, cancellation, and stale-header recovery. The running bundle was never overwritten. The final app build, certificate signing, and launcher verification passed. Sanitized numeric evidence is in `audio-capture-results.json`; raw audio remains outside Git.
+
+The probe closed its engine and exited normally, releasing the desktop lock. Still untested: physical first-word preservation on built-in/AirPods, built-in speech with the lid open, AirPods capture, selected-device unplug, and actual computer sleep. The full ticket acceptance remains open for these physical scenarios; the 30-minute DJI capture itself is observed and passed.
 
 ## Recovery and cancellation
 

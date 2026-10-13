@@ -1,0 +1,35 @@
+{
+  "nativeRunHead": "e43f0614dede488fff9d35a31e3d9ca61bec9a19",
+  "laterStorageLockHead": "ceac1be704e2af7731f98145ca52d2c35f7c534f",
+  "wallClockSeconds": 1800.197713334,
+  "sampleCount": 28801600,
+  "wavDurationSeconds": 1800.1,
+  "wavBytes": 115206444,
+  "sampleRateHz": 16000,
+  "channels": 1,
+  "encoding": "Float32",
+  "firstBufferMilliseconds": 228.723125,
+  "framesDelivered": 18002,
+  "streamPeak": 0.45163482427597046,
+  "streamRMS": 0.0025075962672603406,
+  "diskWindowPeaks": [
+    0.006532629020512104,
+    0.006313418969511986,
+    0.015204581432044506
+  ],
+  "privateFileMode": "0600",
+  "observedResidentKiBRange": [
+    17520,
+    21184
+  ],
+  "reportedFailures": 0,
+  "probeExited": true,
+  "desktopReleased": true,
+  "untested": [
+    "physical first-word on built-in/AirPods",
+    "built-in speech with lid open",
+    "AirPods",
+    "physical device unplug",
+    "actual computer sleep"
+  ]
+}

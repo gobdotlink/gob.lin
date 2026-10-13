@@ -109,11 +109,14 @@ struct AudioCaptureCheck {
         precondition(whileWriting.isEmpty && FileManager.default.fileExists(atPath: file.partialURL.path))
         file.preserve()
         let brokenTail = try FileHandle(forWritingTo: file.partialURL)
-        try brokenTail.seekToEnd(); try brokenTail.write(contentsOf: Data([1, 2])); try brokenTail.close()
+        try brokenTail.seekToEnd()
+        var uncheckpointedSample: Float = 0.75
+        try withUnsafeBytes(of: &uncheckpointedSample) { try brokenTail.write(contentsOf: Data($0)) }
+        try brokenTail.write(contentsOf: Data([1, 2])); try brokenTail.close()
         let recovered = try CaptureFile.recover(in: directory)
         precondition(recovered.count == 1)
         let recoveredFile = try AVAudioFile(forReading: recovered[0])
-        precondition(recoveredFile.length == 3)
+        precondition(recoveredFile.length == 4)
         let cancelled = try CaptureFile(sessionID: UUID(), directory: directory)
         try cancelled.append([1, 2, 3]); try cancelled.cancel()
         precondition(!FileManager.default.fileExists(atPath: cancelled.partialURL.path))
