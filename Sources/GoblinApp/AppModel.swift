@@ -27,13 +27,13 @@ final class AppModel: ObservableObject {
          diagnosticEnvironment: DiagnosticEnvironment? = nil) {
         self.defaults = defaults
         self.servicesEnabled = servicesEnabled
+        diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
         dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault)
         permissions = PermissionModel(snapshot: servicesEnabled ? nil : .init(microphone: .notDetermined, accessibility: false, inputMonitoring: false), monitorSystem: servicesEnabled)
-        hotkeys = HotkeyService(permissions: permissions, defaults: defaults, monitorSystem: servicesEnabled)
+        hotkeys = HotkeyService(permissions: permissions, defaults: defaults, monitorSystem: servicesEnabled, diagnostics: diagnostics)
         insertion = TextInsertionService(pasteboard: servicesEnabled ? .general : .withUniqueName(), defaults: defaults, registerShortcuts: servicesEnabled)
-        diagnostics = DiagnosticsModel(environment: diagnosticEnvironment)
-        audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")])
+        audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")], diagnostics: diagnostics)
         for child in [permissions.objectWillChange, hotkeys.objectWillChange, insertion.objectWillChange,
                       history.objectWillChange, dictionary.objectWillChange, audioPreview.objectWillChange, diagnostics.objectWillChange, overlay.model.objectWillChange] {
             child.sink { [weak self] _ in
@@ -108,7 +108,13 @@ final class AppModel: ObservableObject {
         guard insertionTask == nil else { showFailure(.insertionNotAcknowledged); return }
         insertionTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            let operation = UUID()
+            self.diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: operation)
             await self.insertion.insert(text)
+            var details = DevelopmentDetails()
+            if case .failure(let failure) = self.insertion.outcome { details.failure = failure; details.succeeded = false }
+            else if case .success = self.insertion.outcome { details.succeeded = true }
+            self.diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: operation, details: details)
             self.insertionTask = nil
         }
     }
@@ -131,26 +137,39 @@ final class AppModel: ObservableObject {
     }
 
     func processTranscript(_ raw: String) async -> TranscriptProcessingResult {
+        let operation = UUID()
+        diagnostics.developmentLog.record(.processingStarted, area: .application, operation: operation)
+        var completed = DevelopmentDetails()
+        defer { diagnostics.developmentLog.record(.processingFinished, area: .application, severity: completed.failure == nil ? .info : .warning, operation: operation, details: completed) }
         let settings = RewriteSettingsStore.load(defaults: defaults)
         let tone = DictationTone(rawValue: defaults.string(forKey: DictationTone.preferenceKey) ?? "") ?? .formal
         guard dictionary.available else {
+            completed.failure = .dictionaryUnavailable
             showFailure(.dictionaryUnavailable)
             return TranscriptProcessingResult(rawText: raw, finalText: raw, tone: tone, polished: false, warning: .dictionaryUnavailable)
         }
         var key = ""
         if settings.enabled, settings.cleanup != .none, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard servicesEnabled else {
+                completed.failure = .rewriteConfiguration
                 showFailure(.rewriteConfiguration)
                 return TranscriptProcessingResult(rawText: raw, finalText: raw, tone: tone, polished: false, warning: .rewriteConfiguration)
             }
             do { key = try RewriteKeychain.load(for: settings) }
             catch {
                 let failure = DiagnosticFailure.rewriteConfiguration
+                completed.failure = failure
                 showFailure(failure)
                 return TranscriptProcessingResult(rawText: raw, finalText: raw, tone: tone, polished: false, warning: failure)
             }
         }
+        let rewriting = settings.enabled && settings.cleanup != .none && !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if rewriting { diagnostics.developmentLog.record(.rewriteStarted, area: .rewrite, operation: operation) }
         let result = await processor.process(raw, dictionaryEntries: dictionary.entries, tone: tone, rewriteSettings: settings, apiKey: key)
+        completed.failure = result.warning
+        completed.timings = result.timings
+        completed.succeeded = result.warning == nil
+        if rewriting { diagnostics.developmentLog.record(.rewriteFinished, area: .rewrite, severity: result.warning == nil ? .info : .warning, operation: operation, details: completed) }
         if let warning = result.warning { showFailure(warning) }
         else { diagnostics.resolve(.rewrite) }
         return result
@@ -160,14 +179,17 @@ final class AppModel: ObservableObject {
         guard !shuttingDown else { return }
         switch action {
         case .beginRecording:
+            diagnostics.developmentLog.record(.hotkeyBegin, area: .hotkeys, operation: UUID())
             hotkeys.cancelRecording()
             if permissions.snapshot.microphone != .authorized { showFailure(.microphonePermissionMissing) }
             else if !permissions.snapshot.accessibility || !permissions.snapshot.inputMonitoring || permissions.staleAccessibility { showFailure(.requiredPermissionsMissing) }
             else if hotkeys.secureInput { showFailure(.secureInputEnabled) }
             else { showFailure(.modelUnavailable) }
         case .finishRecording:
+            diagnostics.developmentLog.record(.hotkeyFinish, area: .hotkeys)
             hotkeys.processingCompleted()
         case .cancelRecording:
+            diagnostics.developmentLog.record(.hotkeyCancel, area: .hotkeys)
             overlay.hide()
         }
     }
@@ -184,6 +206,7 @@ final class AppModel: ObservableObject {
     func shutdown() async {
         guard !shuttingDown else { return }
         shuttingDown = true
+        diagnostics.developmentLog.record(.shutdownRequested, area: .application)
         hotkeys.shutdown()
         permissions.stop()
         insertionTask?.cancel()
@@ -191,9 +214,10 @@ final class AppModel: ObservableObject {
         insertionTask = nil
         insertion.shutdown()
         history.stopAudio()
-        audioPreview.stop()
+        audioPreview.stop(reason: .shutdown)
         overlay.shutdown()
         subscriptions.removeAll()
+        diagnostics.developmentLog.record(.appStopped, area: .application)
     }
 
     private func refreshDiagnostics(snapshot: PermissionModel.Snapshot) {

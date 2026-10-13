@@ -30,8 +30,10 @@ final class HotkeyService: ObservableObject {
     private var sessionObservers: [NSObjectProtocol] = []
     private let monitorSystem: Bool
     private let defaults: UserDefaults
+    private weak var diagnostics: DiagnosticsModel?
 
-    init(permissions: PermissionModel, defaults: UserDefaults = .standard, monitorSystem: Bool = true) {
+    init(permissions: PermissionModel, defaults: UserDefaults = .standard, monitorSystem: Bool = true, diagnostics: DiagnosticsModel? = nil) {
+        self.diagnostics = diagnostics
         self.permissions = permissions
         self.defaults = defaults
         self.monitorSystem = monitorSystem
@@ -62,6 +64,7 @@ final class HotkeyService: ObservableObject {
 
     func start() {
         guard monitorSystem, tap == nil, permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
+        diagnostics?.developmentLog.record(.hotkeyStarting, area: .hotkeys)
         checkSecureInput()
         installCarbonHandler()
         registerCarbonShortcut()
@@ -75,6 +78,8 @@ final class HotkeyService: ObservableObject {
         }, result: { [weak self] succeeded in
             Task { @MainActor in
                 guard let self, self.tap != nil, self.tapGeneration == generation else { return }
+                var details = DevelopmentDetails(); details.succeeded = succeeded && self.carbonIssue == nil
+                self.diagnostics?.developmentLog.record(.hotkeyReady, area: .hotkeys, severity: details.succeeded == true ? .info : .warning, details: details)
                 if succeeded { self.lastFailure = self.carbonIssue == nil ? nil : .hotkeyUnavailable; self.permissions.reportTapWorking(); self.updateStatus() }
                 else { self.stop(); self.lastFailure = .hotkeyUnavailable; self.status = "Shortcut access needs a refresh"; self.permissions.reportTapFailure() }
             }
@@ -85,6 +90,7 @@ final class HotkeyService: ObservableObject {
     }
 
     func stop() {
+        if tap != nil { diagnostics?.developmentLog.record(.hotkeyStopped, area: .hotkeys) }
         tap?.stop()
         tap = nil
         tapGeneration = UUID()

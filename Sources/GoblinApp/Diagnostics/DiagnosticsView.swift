@@ -61,8 +61,21 @@ struct DiagnosticsView: View {
                         }
                     }
                 }
+                GroupBox("Development logs") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(model.logStatus).font(.callout)
+                        Text("~/Library/Logs/gob.lin").font(.caption).textSelection(.enabled)
+                        Text("Events include build, launch, operation, and process IDs. Audio, transcripts, keys, credentials, clipboard contents, and device names are excluded. Crash reports are listed for matching and shared separately.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Reveal logs", systemImage: "folder") { model.revealLogs() }
+                            Button("Export recent logs…", systemImage: "square.and.arrow.up") { model.exportLogs(includeDeviceNames: includeDeviceNames) }
+                            Button("Reveal crash reports") { model.revealCrashReports() }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                }
                 Divider()
-                Toggle("Include microphone names in copied diagnostics", isOn: $includeDeviceNames)
+                Toggle("Include microphone names in copied / exported diagnostics", isOn: $includeDeviceNames)
                 Text("Copied diagnostics contain versions, permissions, stage timings, and typed errors. Transcript text, keys, request bodies, and file paths are excluded.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
