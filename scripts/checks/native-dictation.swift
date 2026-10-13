@@ -8,6 +8,10 @@ import GoblinEngines
 
 @main
 struct NativeDictationCheck {
+    @MainActor private static var targetFocusLost = false
+    private static let checkShortcut = HotkeyShortcut(keyCode: 50,
+        modifiers: CGEventFlags.maskControl.union(.maskAlternate).union(.maskShift).rawValue,
+        modifier: nil, keyLabel: "Grave")
     @MainActor static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -22,6 +26,11 @@ struct NativeDictationCheck {
             var report: [String: Any] = ["pid": getpid(), "executable": Bundle.main.executableURL!.path,
                 "microphone": model.permissions.snapshot.microphone.rawValue,
                 "accessibility": model.permissions.snapshot.accessibility]
+            var focusSubscription: AnyCancellable?
+            var ownedClipboardCount: Int?
+            let clipboardSubscription = model.insertion.$hasRecoveryClipboard.sink { ownsClipboard in
+                ownedClipboardCount = ownsClipboard ? NSPasteboard.general.changeCount : nil
+            }
             do {
                 guard model.permissions.snapshot.microphone == .authorized, model.permissions.snapshot.accessibility else {
                     throw CheckFailure("Signed app context does not have microphone and Accessibility permission")
@@ -31,13 +40,35 @@ struct NativeDictationCheck {
                     throw CheckFailure("Isolated dictionary could not be saved")
                 }
                 model.refreshConfiguration()
-                model.hotkeys.setShortcut(.optionSpace)
-                try await wait("hotkey event tap", seconds: 5) { model.permissions.tapFailure == nil && model.hotkeys.lastFailure == nil }
+                let beforeTap = (try? model.diagnostics.developmentLog.recentText()) ?? ""
+                model.hotkeys.setShortcut(checkShortcut)
+                try await wait("confirmed hotkey event tap", seconds: 5) {
+                    guard model.hotkeys.lastFailure == nil,
+                          let log = try? model.diagnostics.developmentLog.recentText(), log.hasPrefix(beforeTap) else { return false }
+                    return log.dropFirst(beforeTap.count).split(separator: "\n").contains { line in
+                        guard let event = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                              let details = event["details"] as? [String: Any] else { return false }
+                        return event["event"] as? String == "hotkeyReady" && details["succeeded"] as? Bool == true
+                    }
+                }
+                report["nativeShortcut"] = checkShortcut.label
                 try await wait("actual model preparation", seconds: 90) { model.speechModels.state == .ready }
                 let target = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == "app.goblin.native-dictation-target" }
                 guard let target else { throw CheckFailure("Isolated target app is missing") }
                 target.activate()
                 try await wait("target focus", seconds: 5) { NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier }
+                focusSubscription = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+                    .receive(on: DispatchQueue.main).sink { notification in
+                        guard let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                              activated.processIdentifier != target.processIdentifier,
+                              NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier else { return }
+                        report["focusLossPhase"] = String(describing: model.overlay.model.phase)
+                        report["focusLossAppWasProbe"] = NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid()
+                        report["focusLossApplication"] = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+                        targetFocusLost = true
+                        model.hotkeys.cancelRecording()
+                        model.overlay.model.cancel()
+                    }
                 let source = Bundle.main.resourceURL!.appendingPathComponent("speech.aiff")
                 let audioDuration = try AVAudioFile(forReading: source).length
                 report["sourceFrames"] = audioDuration
@@ -93,7 +124,7 @@ struct NativeDictationCheck {
                 report["rawText"] = entry.rawText
                 report["finalText"] = entry.finalText
 
-                let count = model.history.entries.count
+                var count = model.history.entries.count
                 post(down: true)
                 try await wait("cancel capture readiness", seconds: 5) { model.overlay.model.phase == .listening }
                 try await Task.sleep(for: .milliseconds(450))
@@ -104,6 +135,32 @@ struct NativeDictationCheck {
                 try await wait("cancel drain", seconds: 5) { model.speechModels.activeSessionCount == 0 && model.overlay.model.phase == .hidden }
                 guard model.history.entries.count == count else { throw CheckFailure("Cancelled capture wrote a transcript") }
                 report["cancelSuppressedOutput"] = true
+
+                // A valid capture can join a Settings cancellation while the real load drains.
+                model.speechModels.unloadIfIdle(now: .now.advanced(by: .seconds(3_601)))
+                try await wait("model unload before preparation cancellation", seconds: 10) { model.speechModels.state == .unloaded }
+                model.speechModels.preload()
+                try await wait("real runtime preparation", seconds: 5) {
+                    if case .preparing(let progress) = model.speechModels.state { return progress.phase == .compiling || progress.phase == .loading }
+                    return model.speechModels.state == .ready
+                }
+                let cancellationIssued = model.speechModels.isPreparing
+                model.speechModels.cancelPreparation()
+                var joinedCancellation = false
+                let cancellationSubscription = model.speechModels.$activeSessionCount.sink { leases in
+                    if leases > 0 && model.speechModels.state == .cancelling { joinedCancellation = true }
+                }
+                await tap()
+                try await wait("valid capture after Settings cancel", seconds: 5) { model.overlay.model.phase == .listening }
+                try await play(source)
+                await tap()
+                try await wait("valid output after Settings cancel", seconds: 15) { model.history.entries.count == count + 1 && model.speechModels.activeSessionCount == 0 }
+                cancellationSubscription.cancel()
+                guard case .success = model.insertion.outcome else { throw CheckFailure("Settings cancellation disrupted the new dictation") }
+                report["settingsPreparationCancellationIssued"] = cancellationIssued
+                report["validLeaseJoinedCancellation"] = joinedCancellation
+                report["dictationSurvivedSettingsCancellation"] = true
+                count = model.history.entries.count
 
                 // Real unload/reload, with capture opening before recognition becomes ready.
                 model.speechModels.unloadIfIdle(now: .now.advanced(by: .seconds(3_601)))
@@ -230,7 +287,13 @@ struct NativeDictationCheck {
                 report["failure"] = String(describing: error)
                 report["diagnostics"] = DiagnosticsReport.render(environment: model.diagnostics.environment, activeFailures: model.diagnostics.warnings, events: model.diagnostics.events, timings: model.diagnostics.latestTimings)
             }
+            focusSubscription?.cancel()
+            report["isolatedTargetFocusLost"] = targetFocusLost
             await model.shutdown()
+            clipboardSubscription.cancel()
+            if model.insertion.hasRecoveryClipboard, ownedClipboardCount == NSPasteboard.general.changeCount {
+                model.insertion.restorePreviousClipboard()
+            }
             defaults.removePersistentDomain(forName: suite)
             try! JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
                 .write(to: directory.appendingPathComponent("native-result.json"))
@@ -240,8 +303,9 @@ struct NativeDictationCheck {
     }
 
     @MainActor static func post(down: Bool) {
-        let event = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: down)!
-        event.flags = down ? .maskAlternate : []
+        guard !down || !targetFocusLost else { return }
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: checkShortcut.keyCode!, keyDown: down)!
+        event.flags = down ? CGEventFlags(rawValue: checkShortcut.modifiers) : []
         event.post(tap: .cghidEventTap)
     }
 
@@ -265,6 +329,7 @@ struct NativeDictationCheck {
         let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
         while !condition() {
             try Task.checkCancellation()
+            guard !targetFocusLost else { throw CheckFailure("Reserved native target lost focus; check canceled") }
             guard ContinuousClock.now < deadline else { throw CheckFailure("Timed out waiting for " + name) }
             try await Task.sleep(for: .milliseconds(10))
         }

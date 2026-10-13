@@ -125,7 +125,8 @@
     "Two-hypothesis commitment is not a batch-equivalence proof; changed overlaps require full-file recovery",
     "No human-labeled corpus accuracy or Neural Engine energy measurement",
     "Physical Fn and cold first-word capture not checked",
-    "Capture-owner review fixes for partial writes, gated silence and preview/warm/sleep are pending an explicit published checkpoint"
+    "Latest short native run matched the exact spoken fixture ending in two of four utterances, while all four matched independent batch; physical/acoustic cause not isolated",
+    "Physical sleep and physical gated-silence scenarios remain unverified after capture corrections"
   ],
   "finalNativeRecheck": {
     "captureBeforeModelReady": true,
@@ -148,5 +149,54 @@
     "rawMatchesSavedNative": true,
     "finalMatchesDictionaryTone": true,
     "structuredMissingModelError": true
+  },
+  "captureFixesNativeRecheck": {
+    "success": true,
+    "nativeShortcut": "\u2303\u2325\u21e7Grave",
+    "settingsPreparationCancellationIssued": true,
+    "validLeaseJoinedCancellation": true,
+    "dictationSurvivedSettingsCancellation": true,
+    "isolatedTargetFocusLost": false,
+    "captureBeforeModelReady": true,
+    "maximumOverlappingLeases": 2,
+    "newCaptureSurvivedPriorCompletion": true,
+    "finalizationPreservedTextArea": true,
+    "cancelSuppressedOutput": true,
+    "clipboardRestored": true,
+    "dictionaryAndToneApplied": true,
+    "sharedPreviewPreservedCapture": true,
+    "finalizationCancelSuppressedOutput": true,
+    "releaseToFinalTextMilliseconds": 161.05725,
+    "firstTextMilliseconds": 785.34975,
+    "insertionAcknowledged": true,
+    "batchComparisons": [
+      {
+        "audioSeconds": 6.4,
+        "endingPreserved": false,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 6.12675,
+        "endingPreserved": false,
+        "liveEqualsBatch": true,
+        "wordCount": 13
+      },
+      {
+        "audioSeconds": 5.7,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      },
+      {
+        "audioSeconds": 6.6094375,
+        "endingPreserved": true,
+        "liveEqualsBatch": true,
+        "wordCount": 15
+      }
+    ],
+    "captureCheckpoint": "ff68c356e10f94229c1451e44f0ed06ef068c735",
+    "timingEndpoint": "Published final postprocessed transcript",
+    "exactFixtureEndingCount": 2
   }
 }

@@ -101,9 +101,22 @@ matched the app's raw text and final dictionary/tone output; a missing local mod
 returned pure structured JSON error output. Simulated assertions do not prove recognition.
 Physical Fn, speech before a cold microphone opens, permission revocation,
 device unplug/sleep, provider-backed rewriting, and a trusted accuracy subset
-remain separate acceptance work. Capture-owner review follow-ups for partial-write
-preservation, gated silence and preview/warm/sleep behavior are pending integration;
-the observed native successes do not validate those fault scenarios.
+remain separate acceptance work. The capture correction checkpoint for partial-write
+preservation, gated silence and preview/warm/sleep ordering is integrated. The short
+native recheck passed the workflow and observed a valid session joining an actual
+Settings preparation cancellation. It measured 161.1 ms release to postprocessed
+text and 785.3 ms first text from keydown. All four saved utterances matched independent
+batch, but the exact spoken fixture ending matched only two. The physical/acoustic
+cause was not isolated; batch equality does not establish exact speech accuracy.
+Physical sleep, physical gated silence and actual disk filling remain unverified.
+
+The probe now waits for the current event tap's success callback, uses a separate
+Control-Option-Shift-Grave shortcut in its private preferences, and cancels if its
+reserved target loses focus. Earlier Option-Space probe attempts encountered a
+target change and unacknowledged insertion; their transcripts/audio stayed in
+History and those overall runs were failed. Probe-only clipboard recovery restores
+only while its recorded pasteboard change count remains owned. These constraints
+keep validation confined to its isolated target.
 
 ## Running the native probe
 
