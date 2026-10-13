@@ -167,6 +167,7 @@ struct AudioCaptureCheck {
         overflow.receive(oversized)
         do { _ = try await overflow.finish(sessionID: overflowID, cancel: false); preconditionFailure("Overload must fail explicitly") }
         catch let error as AudioCaptureFailure { precondition(error.kind == .bufferOverflow && error.recoveryURL != nil) }
+        try await checkStopBoundary(directory: directory, device: device, format: format)
         let neverStarted = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
         let zeros = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
         let zeroBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
@@ -204,7 +205,114 @@ struct AudioCaptureCheck {
         try Data().write(to: badDirectory)
         do { _ = try CaptureFile(sessionID: UUID(), directory: badDirectory); preconditionFailure("Non-directory storage must fail") }
         catch { }
-        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, initial-zero/gated-pause/reset/no-callback watchdogs, invalid storage.")
+        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, stop cutoff/last samples/deadline/clock/cancellation races, initial-zero/gated-pause/reset/no-callback watchdogs, invalid storage.")
+    }
+
+    @MainActor static func checkStopBoundary(directory: URL, device: AudioInputResolution, format: AVAudioFormat) async throws {
+        let ticks = AVAudioTime.hostTime(forSeconds: 0.1)
+        func buffer(_ value: Float) -> AVAudioPCMBuffer {
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1600)!
+            buffer.frameLength = 1600
+            for i in 0..<1600 { buffer.floatChannelData![0][i] = value }
+            return buffer
+        }
+        func make() throws -> (CaptureProcessor, UUID, UInt64) {
+            let processor = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+            let id = UUID()
+            try processor.begin(sessionID: id, directory: directory, resolution: device, handler: { _ in })
+            return (processor, id, mach_absolute_time() - ticks * 4)
+        }
+        func time(_ host: UInt64, _ sample: Int64) -> AVAudioTime {
+            AVAudioTime(hostTime: host, sampleTime: sample, atRate: 16_000)
+        }
+        func retained(_ processor: CaptureProcessor, _ id: UUID, _ kind: AudioCaptureFailure.Kind, _ samples: Int64) async throws {
+            do { _ = try await processor.finish(sessionID: id, cancel: false); preconditionFailure("Uncertain stop must retain audio and fail") }
+            catch let error as AudioCaptureFailure {
+                precondition(error.kind == kind)
+                let file = try AVAudioFile(forReading: error.recoveryURL!)
+                precondition(file.length == samples)
+            }
+        }
+        // A delayed callback contains the last pre-cutoff samples. Keep its whole straddling buffer.
+        let (processor, id, base) = try make()
+        processor.receive(buffer(0.25), time: time(base, 0))
+        let cutoff = base + ticks + ticks / 2
+        let sealing = Task { await processor.seal(atHostTime: cutoff) }
+        try await Task.sleep(for: .milliseconds(5))
+        processor.receive(buffer(0.75), time: time(base + ticks, 1600))
+        await sealing.value
+        processor.receive(buffer(-0.5), time: time(base + ticks * 2, 3200))
+        let audio = try await processor.finish(sessionID: id, cancel: false)!
+        let file = try AVAudioFile(forReading: audio.fileURL)
+        let saved = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 3200)!
+        try file.read(into: saved)
+        precondition(audio.sampleCount == 3200 && saved.frameLength == 3200)
+        precondition(saved.floatChannelData![0][3199] == 0.75, "The last pre-stop samples must reach the durable file")
+        // A cancelled deadline cannot poison a resumed session, including an already-covered cutoff.
+        processor.resume()
+        let nextID = UUID(), nextBase = mach_absolute_time() - ticks * 2
+        try processor.begin(sessionID: nextID, directory: directory, resolution: device, handler: { _ in })
+        processor.receive(buffer(0.25), time: time(nextBase, 0))
+        try await Task.sleep(for: .milliseconds(130))
+        await processor.seal(atHostTime: nextBase + ticks / 2)
+        let nextAudio = try await processor.finish(sessionID: nextID, cancel: false)!
+        precondition(nextAudio.sampleCount == 1600)
+
+        let (timeout, timeoutID, timeoutBase) = try make()
+        timeout.receive(buffer(0.25), time: time(timeoutBase, 0))
+        let waitingSince = ContinuousClock.now
+        await timeout.seal(atHostTime: timeoutBase + ticks * 2)
+        let waited = waitingSince.duration(to: .now)
+        precondition(waited >= .milliseconds(100) && waited < .milliseconds(250), "The source-derived deadline must be bounded")
+        try await retained(timeout, timeoutID, .noCallbacks, 1600)
+
+        // Invalid host/sample mapping must never certify a complete stop. All accepted audio stays recoverable.
+        for mode in 0..<8 {
+            let (invalid, invalidID, invalidBase) = try make()
+            let timestamp: AVAudioTime?
+            switch mode {
+            case 0: timestamp = nil
+            case 1: timestamp = AVAudioTime(sampleTime: 0, atRate: 16_000)
+            case 2: timestamp = AVAudioTime(hostTime: invalidBase)
+            case 3: timestamp = AVAudioTime(hostTime: invalidBase, sampleTime: 0, atRate: 48_000)
+            case 4: timestamp = time(mach_absolute_time() + ticks, 0)
+            case 5: timestamp = time(UInt64.max - 1, 0)
+            default: timestamp = time(invalidBase, 0)
+            }
+            invalid.receive(buffer(0.25), time: timestamp)
+            if mode >= 6 { invalid.receive(buffer(0.75), time: time(mode == 6 ? invalidBase - ticks : invalidBase + ticks * 2, 1600)) }
+            await invalid.seal(atHostTime: invalidBase + ticks / 2)
+            try await retained(invalid, invalidID, .noCallbacks, mode >= 6 ? 3200 : 1600)
+        }
+        for invalidCutoff in [UInt64(0), mach_absolute_time() + ticks] {
+            let (invalid, invalidID, invalidBase) = try make()
+            invalid.receive(buffer(0.25), time: time(invalidBase, 0))
+            await invalid.seal(atHostTime: invalidCutoff)
+            try await retained(invalid, invalidID, .noCallbacks, 1600)
+        }
+        // Cancellation before registration, during the wait, and concurrent with acknowledgement.
+        for mode in 0..<7 {
+            let (cancelled, cancelledID, cancelledBase) = try make()
+            cancelled.receive(buffer(0.25), time: time(cancelledBase, 0))
+            if mode == 0 { cancelled.pause() }
+            let start = ContinuousClock.now
+            let wait = Task { await cancelled.seal(atHostTime: cancelledBase + ticks + ticks / 2) }
+            if mode == 6 { wait.cancel() }
+            if mode != 0 { try await Task.sleep(for: .milliseconds(5)) }
+            if mode == 2 { cancelled.receive(buffer(0.75), time: time(cancelledBase + ticks, 1600)) }
+            if mode == 3 { wait.cancel() }
+            else if mode == 4 { cancelled.interrupt(.configurationChanged) }
+            else if mode == 5 { cancelled.interrupt(.storageFailed); cancelled.pause() }
+            else if mode != 6 { cancelled.pause() }
+            await wait.value
+            precondition(start.duration(to: .now) < .milliseconds(100), "Cancellation and failure must resolve a pending cutoff immediately")
+            if mode >= 3 { try await retained(cancelled, cancelledID, mode == 3 || mode == 6 ? .noCallbacks : mode == 4 ? .configurationChanged : .storageFailed, 1600) }
+            else {
+                let discarded = try await cancelled.finish(sessionID: cancelledID, cancel: true)
+                precondition(discarded == nil && !FileManager.default.fileExists(atPath: directory.appendingPathComponent(cancelledID.uuidString + ".partial.wav").path))
+            }
+        }
+        print("Stop boundary checks: delayed straddling tail saved, subsequent input rejected, cached coverage, stale deadline reset, bounded uncertainty with retained samples, invalid clocks, immediate cancel/failure and original error passed.")
     }
 
     @MainActor static func native() async throws {

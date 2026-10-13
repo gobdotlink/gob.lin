@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 
 // Audio callbacks only copy into a bounded ingress. Converter, ring, file and event handler belong to queue.
@@ -15,6 +16,11 @@ final class CaptureProcessor: @unchecked Sendable {
     private var recordingSince: ContinuousClock.Instant?
     private var pendingFailure: AudioCaptureFailure.Kind?
     private var nextInputSample: AVAudioFramePosition?
+    private var inputHostRange: (start: UInt64, end: UInt64)?
+    private var hostTimesValid = true
+    private var inputBufferDuration = 0.12
+    private var pendingStop: (id: UUID, cutoff: UInt64, deadline: DispatchTime,
+                              reply: CheckedContinuation<Void, Never>, timer: DispatchSourceTimer)?
     private let nativeRate: Double
     private let monoFormat: AVAudioFormat
     private let outputFormat: AVAudioFormat
@@ -47,7 +53,7 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func begin(sessionID: UUID, directory: URL, resolution: AudioInputResolution,
                handler: @escaping @Sendable (AudioCaptureEvent) -> Void) throws {
-        lock.withLock { recordingSince = .now; hasNonzeroInput = false }
+        lock.withLock { recordingSince = .now; hasNonzeroInput = false; inputHostRange = nil; hostTimesValid = true }
         try queue.sync {
             guard file == nil else { throw AudioCaptureFailure(.alreadyRecording) }
             if let failure { throw failure }
@@ -67,14 +73,16 @@ final class CaptureProcessor: @unchecked Sendable {
         guard accepting else { lock.unlock(); return }
         let now = ContinuousClock.now
         if let since = recordingSince, hasCallback, max(lastCallback, since).duration(to: now) > .seconds(5) {
-            accepting = false; pendingFailure = .noCallbacks
+            pendingFailure = .noCallbacks
             queue.async { self.fail(.noCallbacks) }
+            closeIngressLocked()
             lock.unlock(); return
         }
         if let time, time.isSampleTimeValid {
             if recordingSince != nil, let nextInputSample, time.sampleTime != nextInputSample {
-                accepting = false; pendingFailure = .noCallbacks
+                pendingFailure = .noCallbacks
                 queue.async { self.fail(.noCallbacks) }
+                closeIngressLocked()
                 lock.unlock(); return
             }
             nextInputSample = time.sampleTime + AVAudioFramePosition(buffer.frameLength)
@@ -83,8 +91,9 @@ final class CaptureProcessor: @unchecked Sendable {
         let frames = Int(buffer.frameLength)
         // Stop instead of silently dropping input or allowing memory to grow with recording duration.
         guard pendingFrames + frames <= Int(nativeRate * 2) else {
-            accepting = false; overflow = true
+            overflow = true
             queue.async { self.fail(.bufferOverflow) }
+            closeIngressLocked()
             lock.unlock(); return
         }
         pendingFrames += frames
@@ -101,6 +110,22 @@ final class CaptureProcessor: @unchecked Sendable {
             }
         }
         if nonzero { hasNonzeroInput = true; zeroSince = nil } else if zeroSince == nil { zeroSince = now }
+        inputBufferDuration = Double(frames) / nativeRate
+        let durationTicks = AVAudioTime.hostTime(forSeconds: inputBufferDuration)
+        let sampleTicks = max(1, AVAudioTime.hostTime(forSeconds: 1 / nativeRate))
+        if let time, time.isHostTimeValid, time.isSampleTimeValid, time.sampleRate == nativeRate, time.hostTime > 0 {
+            let (end, overflow) = time.hostTime.addingReportingOverflow(durationTicks)
+            let now = mach_absolute_time()
+            if overflow || time.hostTime > now || (end > now && end - now > sampleTicks) {
+                hostTimesValid = false
+            } else {
+                if let previous = inputHostRange {
+                    let gap = time.hostTime >= previous.end ? time.hostTime - previous.end : previous.end - time.hostTime
+                    if time.hostTime <= previous.start || gap > sampleTicks { hostTimesValid = false }
+                }
+                inputHostRange = (time.hostTime, end)
+            }
+        } else { hostTimesValid = false }
         let rms = sqrt((sums.max() ?? 0) / Double(frames))
         let copiedSamples = mono
         queue.async {
@@ -110,7 +135,61 @@ final class CaptureProcessor: @unchecked Sendable {
             do { try self.convert(copiedSamples) }
             catch { self.fail((error as? AudioCaptureFailure)?.kind ?? .conversionFailed) }
         }
+        if let pendingStop {
+            if !hostTimesValid || DispatchTime.now() >= pendingStop.deadline {
+                queue.async { self.fail(.noCallbacks) }
+                closeIngressLocked()
+            } else if let range = inputHostRange, range.end >= pendingStop.cutoff {
+                // Publish the whole straddling buffer before acknowledging the cutoff.
+                closeIngressLocked()
+            }
+        }
         lock.unlock()
+    }
+
+    func seal(atHostTime cutoff: UInt64) async {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { reply in
+                lock.withLock {
+                    guard accepting else { reply.resume(); return }
+                    guard pendingStop == nil else {
+                        queue.async { self.fail(.staleSession) }
+                        closeIngressLocked(); reply.resume(); return
+                    }
+                    guard hostTimesValid, cutoff > 0, cutoff <= mach_absolute_time() else {
+                        queue.async { self.fail(.noCallbacks) }
+                        closeIngressLocked(); reply.resume(); return
+                    }
+                    if let range = inputHostRange, range.end >= cutoff {
+                        closeIngressLocked(); reply.resume(); return
+                    }
+                    let id = UUID()
+                    let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+                    // Allow one observed buffer plus delivery margin, with a 120 ms ceiling.
+                    let deadline = DispatchTime.now() + min(0.12, inputBufferDuration * 1.2)
+                    timer.schedule(deadline: deadline)
+                    timer.setEventHandler { [weak self] in
+                        guard let self else { return }
+                        self.lock.withLock {
+                            guard self.pendingStop?.id == id else { return }
+                            self.queue.async { self.fail(.noCallbacks) }
+                            self.closeIngressLocked()
+                        }
+                    }
+                    pendingStop = (id, cutoff, deadline, reply, timer)
+                    timer.resume()
+                }
+            }
+        } onCancel: { self.interrupt(.noCallbacks) }
+    }
+
+    private func closeIngressLocked() {
+        accepting = false
+        if let pendingStop {
+            self.pendingStop = nil
+            pendingStop.timer.cancel()
+            pendingStop.reply.resume()
+        }
     }
 
     func watchdogFailure() -> AudioCaptureFailure.Kind? {
@@ -126,7 +205,7 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func pause() {
         lock.withLock {
-            accepting = false
+            closeIngressLocked()
             if let since = recordingSince, hasCallback, max(lastCallback, since).duration(to: .now) > .seconds(5) {
                 pendingFailure = .noCallbacks
                 queue.async { self.fail(.noCallbacks) }
@@ -136,13 +215,14 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func resume() {
         queue.sync { converter.reset(); inputCount = 0; outputCount = 0; ring.removeAll(keepingCapacity: true) }
-        lock.withLock { accepting = true; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil }
+        lock.withLock { closeIngressLocked(); accepting = true; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil; inputHostRange = nil; hostTimesValid = true; inputBufferDuration = 0.12 }
     }
 
     private func fail(_ kind: AudioCaptureFailure.Kind, recoveryURL: URL? = nil) {
         // Call only on queue, or schedule via interrupt. Keep the first failure and its recoverable file.
         guard failure == nil else { return }
         failure = AudioCaptureFailure(kind, recoveryURL: recoveryURL ?? file?.partialURL)
+        lock.withLock { closeIngressLocked() }
         failedFileURL = failure?.recoveryURL
         file?.preserve()
         if let file { handler?(.failed(sessionID: file.sessionID, failure: failure!)) }
@@ -155,13 +235,14 @@ final class CaptureProcessor: @unchecked Sendable {
     }
 
     func interrupt(_ kind: AudioCaptureFailure.Kind) {
-        lock.withLock { accepting = false; queue.async { self.fail(kind) } }
+        lock.withLock { queue.async { self.fail(kind) }; closeIngressLocked() }
     }
 
     func finish(sessionID: UUID, cancel: Bool) async throws -> CapturedAudio? {
         try await withCheckedThrowingContinuation { continuation in
             lock.withLock {
-                accepting = false; recordingSince = nil
+                if pendingStop != nil && !cancel { queue.async { self.fail(.noCallbacks) } }
+                closeIngressLocked(); recordingSince = nil
                 queue.async {
                     guard let file = self.file, file.sessionID == sessionID else {
                         continuation.resume(throwing: AudioCaptureFailure(.staleSession)); return

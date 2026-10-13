@@ -48,6 +48,8 @@ final class AudioPreviewModel: ObservableObject {
                     self.ready = true; self.level = AudioInputDevices.displayLevel(rms: rms)
                     if device.usedFallback {
                         self.error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept."
+                    } else if self.error == "Selected microphone is unavailable; preview uses the system default. Your preference is kept." {
+                        self.error = nil
                     }
                 case .failed(let failure):
                     self.stop(reason: .configurationChanged)

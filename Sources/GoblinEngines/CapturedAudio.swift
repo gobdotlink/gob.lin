@@ -32,7 +32,7 @@ public struct AudioCaptureFailure: Error, LocalizedError, Sendable {
         case .startFailed: "The microphone could not start."
         case .alreadyRecording: "A recording is already active; stop it before changing microphones."
         case .staleSession: "This recording is no longer active."
-        case .noCallbacks: "The microphone stopped delivering audio. Reconnect it and try again."
+        case .noCallbacks: "Microphone audio delivery could not be confirmed. Captured audio is recoverable. Reconnect it and try again."
         case .allZeroStream: "The microphone is delivering only digital silence. Check its mute, microphone permission, and laptop lid."
         case .configurationChanged: "The microphone configuration changed. Audio captured before the change is recoverable."
         case .systemSleep: "Recording stopped because the computer slept. Audio captured before sleep is recoverable."

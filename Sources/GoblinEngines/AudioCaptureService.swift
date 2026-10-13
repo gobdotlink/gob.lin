@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Darwin
 import Foundation
 
 /// Shared by dictation and the settings level preview. Event handlers run in order on the processing queue.
@@ -68,8 +69,11 @@ public final class AudioCaptureService {
 
     public func stop(sessionID: UUID) async throws -> CapturedAudio {
         guard activeSessionID == sessionID, terminalTask == nil, let processor else { throw AudioCaptureFailure(.staleSession) }
-        processor.pause()
-        let task = Task { try await processor.finish(sessionID: sessionID, cancel: false) }
+        let cutoff = mach_absolute_time()
+        let task = Task {
+            await processor.seal(atHostTime: cutoff)
+            return try await processor.finish(sessionID: sessionID, cancel: false)
+        }
         terminalTask = task
         defer { finishOwnership() }
         do {
@@ -100,12 +104,12 @@ public final class AudioCaptureService {
         guard activeSessionID == sessionID, let processor else { throw AudioCaptureFailure(.staleSession) }
         guard !terminalCommitted else { throw AudioCaptureFailure(.staleSession) }
         cancellationRequested = true
+        processor.pause()
         if terminalTask != nil {
             // The stop owner decides the terminal event and completes deletion before releasing these waiters.
             try await withCheckedThrowingContinuation { cancellationWaiters.append($0) }
             return
         }
-        processor.pause()
         let task = Task { try await processor.finish(sessionID: sessionID, cancel: true) }
         terminalTask = task
         defer { finishOwnership() }
