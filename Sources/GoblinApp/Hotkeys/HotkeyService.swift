@@ -41,7 +41,7 @@ final class HotkeyService: ObservableObject {
         permissions.onRevocation = { [weak self] _ in self?.stop() }
         permissions.onChange = { [weak self] _, new in
             guard let self else { return }
-            if new.accessibility && new.inputMonitoring { self.start() } else { self.stop() }
+            if new.accessibility { self.start() } else { self.stop() }
         }
         guard monitorSystem else { return }
         secureTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -61,7 +61,7 @@ final class HotkeyService: ObservableObject {
     }
 
     func start() {
-        guard monitorSystem, tap == nil, permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
+        guard monitorSystem, tap == nil, permissions.snapshot.accessibility else { return }
         checkSecureInput()
         installCarbonHandler()
         registerCarbonShortcut()
@@ -139,7 +139,7 @@ final class HotkeyService: ObservableObject {
     private func restart() { stop(); permissions.refresh(); start() }
 
     private func receive(_ input: HotkeyEventTap.Input) {
-        guard tap != nil, !recorderActive, permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
+        guard tap != nil, !recorderActive, permissions.snapshot.accessibility else { return }
         let now = ProcessInfo.processInfo.systemUptime
         switch input {
         case .press:
@@ -244,7 +244,7 @@ final class HotkeyService: ObservableObject {
 
     private func registerCarbonShortcut() {
         guard monitorSystem, carbonShortcut == nil, !recorderActive, let code = shortcut.keyCode,
-              permissions.snapshot.accessibility, permissions.snapshot.inputMonitoring else { return }
+              permissions.snapshot.accessibility else { return }
         let id = EventHotKeyID(signature: 0x474F424C, id: 1)
         let result = RegisterEventHotKey(UInt32(code), shortcut.carbonModifiers, id, GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &carbonShortcut)
         carbonIssue = result == noErr ? nil : "Secure Input fallback: shortcut already in use (\(result))"

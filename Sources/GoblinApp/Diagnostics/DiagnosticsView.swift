@@ -34,7 +34,7 @@ struct DiagnosticsView: View {
                         LabeledContent("Version", value: GoblinMetadata.version)
                         LabeledContent("Microphone", value: model.environment.microphonePermission.rawValue.capitalized)
                         LabeledContent("Accessibility", value: model.environment.accessibilityPermission.rawValue.capitalized)
-                        LabeledContent("Input Monitoring", value: model.environment.inputMonitoringPermission.rawValue.capitalized)
+                        LabeledContent("Input Monitoring (not required)", value: model.environment.inputMonitoringPermission.rawValue.capitalized)
                         LabeledContent("Secure Input", value: model.environment.secureInput ? "Enabled" : "Disabled")
                         LabeledContent("Speech engine", value: model.environment.engineStatus.rawValue.capitalized)
                         LabeledContent("Microphones available", value: String(model.environment.microphoneNames.count))
