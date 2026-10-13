@@ -12,6 +12,7 @@ public final class AudioCaptureService {
     private var warmUID = ""
     private var engine: AVAudioEngine?
     private var format: AVAudioFormat?
+    private var inputFormat: AVAudioFormat?
     private var processor: CaptureProcessor?
     private var generation = UUID()
     private var configurationObserver: NSObjectProtocol?
@@ -156,8 +157,8 @@ public final class AudioCaptureService {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { throw AudioCaptureFailure(.permissionMissing) }
         // Resolve the UID and current default on every start, even when the previous engine is warm.
         let resolved = try AudioInputDevices.resolve(uid: uid)
-        if let engine, let format, resolved.device.id == inputResolution?.device.id,
-           AudioInputDevices.matchesRunningStream(engine, device: resolved.device, format: format) {
+        if let engine, let format, let inputFormat, resolved.device.id == inputResolution?.device.id,
+           AudioInputDevices.matchesRunningStream(engine, device: resolved.device, format: format, inputFormat: inputFormat) {
             inputResolution = resolved; return
         }
         closeInput()
@@ -165,6 +166,7 @@ public final class AudioCaptureService {
         let input = engine.inputNode
         try AudioInputDevices.select(resolved.device, input: input)
         let format = input.outputFormat(forBus: 0)
+        let inputFormat = input.inputFormat(forBus: 0)
         let token = UUID(); generation = token
         let previewDelivery = CapturePreviewDelivery { [weak self] rms in
             guard let self, self.generation == token, let resolution = self.inputResolution else { return }
@@ -179,13 +181,13 @@ public final class AudioCaptureService {
                 self.closeInput(keepProcessor: self.activeSessionID != nil)
             }
         })
-        self.engine = engine; self.format = format; self.processor = processor; inputResolution = resolved
+        self.engine = engine; self.format = format; self.inputFormat = inputFormat; self.processor = processor; inputResolution = resolved
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { @Sendable buffer, time in processor.receive(buffer, time: time) }
         configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { @Sendable [weak self] _ in
             Task { @MainActor in
                 guard let self, self.generation == token, let engine = self.engine else { return }
                 // Selecting a device can deliver a delayed notification after its stream is already healthy.
-                guard !AudioInputDevices.matchesRunningStream(engine, device: resolved.device, format: format) else { return }
+                guard !AudioInputDevices.matchesRunningStream(engine, device: resolved.device, format: format, inputFormat: inputFormat) else { return }
                 processor.interrupt(.configurationChanged)
             }
         }
@@ -232,7 +234,7 @@ public final class AudioCaptureService {
         if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver); self.sleepObserver = nil }
         processor?.pause()
         engine?.inputNode.removeTap(onBus: 0); engine?.stop()
-        engine = nil; format = nil; inputResolution = nil
+        engine = nil; format = nil; inputFormat = nil; inputResolution = nil
         if !keepProcessor { processor = nil }
     }
 }

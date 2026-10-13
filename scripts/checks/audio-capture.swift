@@ -2,6 +2,11 @@ import AVFoundation
 import Darwin
 import Foundation
 
+private enum CaptureCheckError: Error, LocalizedError {
+    case noNonzeroInput
+    var errorDescription: String? { "The hardware supplied no meaningful nonzero audio." }
+}
+
 final class CaptureEvidence: @unchecked Sendable {
     private let lock = NSLock()
     private var expectedPosition: Int64 = 0
@@ -36,11 +41,11 @@ final class CaptureEvidence: @unchecked Sendable {
 
     func check(_ audio: CapturedAudio, requireNonzero: Bool = false) throws {
         let file = try AVAudioFile(forReading: audio.fileURL)
-        lock.withLock {
+        try lock.withLock {
             precondition(file.length == expectedPosition && audio.sampleCount == expectedPosition)
             precondition(file.fileFormat.sampleRate == 16_000 && file.fileFormat.channelCount == 1)
             precondition(audio.sampleCount > 0 && ready && failure == nil)
-            if requireNonzero { precondition(peak > 0.00001, "The hardware supplied no meaningful nonzero audio") }
+            if requireNonzero, peak <= 0.00001 { throw CaptureCheckError.noNonzeroInput }
         }
     }
 
@@ -185,32 +190,42 @@ struct AudioCaptureCheck {
         let config = (try? JSONSerialization.jsonObject(with: Data(contentsOf: configURL))) as? [String: Double] ?? [:]
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_DIRECTORY"] ?? root.appendingPathComponent("audio").path)
         let seconds = Double(ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_SECONDS"] ?? "3") ?? 3
-        for (label, uid) in [("built-in cold", builtIn?.uid ?? ""), ("selected external", external?.uid ?? ""), ("built-in restart", builtIn?.uid ?? ""), ("missing UID fallback", "unavailable-probe-device")] {
-            if label == "selected external" && external == nil { print("Selected external: unavailable, not tested"); continue }
+        var verifiedUID: String?
+        for (label, uid) in [("built-in cold", builtIn?.uid ?? ""), ("selected external", external?.uid ?? ""), ("built-in restart", builtIn?.uid ?? ""), ("selected external restart", external?.uid ?? ""), ("missing UID fallback", "unavailable-probe-device")] {
+            if label.hasPrefix("selected external") && external == nil { print("Selected external: unavailable, not tested"); continue }
             let evidence = CaptureEvidence()
-            let id = try service.start(uid: uid, directory: directory, onEvent: evidence.record)
-            try await Task.sleep(for: .seconds(seconds))
-            let audio = try await service.stop(sessionID: id)
-            try evidence.check(audio, requireNonzero: true)
-            evidence.report(label: label, audio: audio)
+            do {
+                let id = try service.start(uid: uid, directory: directory, onEvent: evidence.record)
+                let actualUID = service.inputResolution?.device.uid
+                try await Task.sleep(for: .seconds(label.hasPrefix("built-in") ? max(seconds, 6) : seconds))
+                let audio = try await service.stop(sessionID: id)
+                evidence.report(label: label, audio: audio)
+                try evidence.check(audio, requireNonzero: true)
+                verifiedUID = actualUID
+            } catch {
+                evidence.report(label: label + " failed")
+                print("Hardware scenario \(label) unmet: \(error.localizedDescription)"); fflush(nil)
+                if let id = service.activeSessionID { try? await service.cancel(sessionID: id) }
+            }
         }
-        try service.setWarmMicrophone(enabled: true, uid: builtIn?.uid ?? "")
+        guard let verifiedUID else { await service.shutdown(); throw CaptureCheckError.noNonzeroInput }
+        try service.setWarmMicrophone(enabled: true, uid: verifiedUID)
         try await Task.sleep(for: .seconds(1))
         let evidence = CaptureEvidence()
-        let id = try service.start(uid: builtIn?.uid ?? "", directory: directory, onEvent: evidence.record)
+        let id = try service.start(uid: verifiedUID, directory: directory, onEvent: evidence.record)
         try await Task.sleep(for: .seconds(1))
         let audio = try await service.stop(sessionID: id)
         try evidence.check(audio, requireNonzero: true); precondition(audio.preRollSampleCount > 0)
-        evidence.report(label: "built-in warm", audio: audio)
+        evidence.report(label: "verified device warm", audio: audio)
         try service.setWarmMicrophone(enabled: false, uid: "")
-        let cancelledID = try service.start(uid: builtIn?.uid ?? "", directory: directory, onEvent: { _ in })
+        let cancelledID = try service.start(uid: verifiedUID, directory: directory, onEvent: { _ in })
         try await Task.sleep(for: .milliseconds(250))
         try await service.cancel(sessionID: cancelledID)
         precondition(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(cancelledID.uuidString + ".partial.wav").path))
         if let longSeconds = config["longSeconds"], longSeconds >= 1800 {
             print("Starting actual long capture: \(longSeconds) wall-clock seconds"); fflush(nil)
             let evidence = CaptureEvidence()
-            let id = try service.start(uid: builtIn?.uid ?? "", directory: directory, onEvent: evidence.record)
+            let id = try service.start(uid: verifiedUID, directory: directory, onEvent: evidence.record)
             let start = ContinuousClock.now
             var elapsed = 0.0
             while elapsed < longSeconds {

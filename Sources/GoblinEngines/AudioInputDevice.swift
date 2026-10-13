@@ -63,10 +63,11 @@ public enum AudioInputDevices {
         }
     }
 
-    static func matchesRunningStream(_ engine: AVAudioEngine, device: AudioInputDevice, format: AVAudioFormat) -> Bool {
+    static func matchesRunningStream(_ engine: AVAudioEngine, device: AudioInputDevice, format: AVAudioFormat, inputFormat: AVAudioFormat) -> Bool {
         let input = engine.inputNode
+        // Hardware and tap channel counts can differ after a device selection. Compare each with its own baseline.
         let current = input.inputFormat(forBus: 0)
-        guard engine.isRunning, current.sampleRate == format.sampleRate, current.channelCount == format.channelCount,
+        guard engine.isRunning, current.sampleRate == inputFormat.sampleRate, current.channelCount == inputFormat.channelCount,
               input.outputFormat(forBus: 0).isEqual(format), let unit = input.audioUnit else { return false }
         var id = AudioDeviceID(0)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
