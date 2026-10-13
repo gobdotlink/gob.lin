@@ -5,13 +5,14 @@ import SwiftUI
 
 @MainActor
 final class PermissionModel: ObservableObject {
-    enum Permission: String { case microphone, accessibility, inputMonitoring }
+    enum Permission: String { case microphone, accessibility }
 
     struct Snapshot: Equatable {
         var microphone: AVAuthorizationStatus
         var accessibility: Bool
+        // Informational only: the active event tap uses Accessibility, not listen-only access.
         var inputMonitoring: Bool
-        var ready: Bool { microphone == .authorized && accessibility && inputMonitoring }
+        var ready: Bool { microphone == .authorized && accessibility }
     }
 
     @Published private(set) var snapshot: Snapshot
@@ -50,7 +51,6 @@ final class PermissionModel: ObservableObject {
         let new = Self.readSnapshot()
         snapshot = new
         if old.accessibility && !new.accessibility { revoked(.accessibility) }
-        if old.inputMonitoring && !new.inputMonitoring { revoked(.inputMonitoring) }
         if old.microphone == .authorized && new.microphone != .authorized { revoked(.microphone) }
         if old != new { onChange?(old, new) }
         if awaitingSettingsReturn && old != new {
@@ -78,9 +78,6 @@ final class PermissionModel: ObservableObject {
             let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
             _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
             openSettings(permission)
-        case .inputMonitoring:
-            _ = CGRequestListenEventAccess()
-            openSettings(permission)
         }
     }
 
@@ -90,7 +87,6 @@ final class PermissionModel: ObservableObject {
         switch permission {
         case .microphone: pane = "Privacy_Microphone"
         case .accessibility: pane = "Privacy_Accessibility"
-        case .inputMonitoring: pane = "Privacy_ListenEvent"
         }
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
         awaitingSettingsReturn = true

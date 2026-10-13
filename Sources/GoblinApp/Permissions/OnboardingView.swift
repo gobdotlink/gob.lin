@@ -7,14 +7,12 @@ struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Let’s get gob.lin ready").font(.largeTitle.bold())
-                Text("Three permissions put your voice where your cursor is. Each request starts only when you choose Allow.")
+                Text("Two permissions put your voice where your cursor is. Each request starts only when you choose Allow.")
                     .foregroundStyle(.secondary)
                 permissionRow(.microphone, title: "Microphone", detail: "Capture your voice during dictation.",
                               granted: permissions.snapshot.microphone == .authorized, icon: "mic")
                 permissionRow(.accessibility, title: "Accessibility", detail: "Insert text and handle your dictation shortcut.",
                               granted: permissions.snapshot.accessibility, icon: "hand.raised")
-                permissionRow(.inputMonitoring, title: "Input Monitoring", detail: "Recognize Fn and modifier-only shortcuts.",
-                              granted: permissions.snapshot.inputMonitoring, icon: "keyboard")
                 if permissions.staleAccessibility {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Accessibility needs a refresh", systemImage: "exclamationmark.triangle")

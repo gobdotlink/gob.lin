@@ -61,7 +61,7 @@ final class DiagnosticsModel: ObservableObject {
         if microphone != .authorized { report(.microphonePermissionMissing) }
         else if environment.microphoneNames.isEmpty { report(.microphoneUnavailable) }
         else if [.microphonePermissionMissing, .microphoneUnavailable].contains(activeFailures[.microphone]) { resolve(.microphone) }
-        if !accessibility || !inputMonitoring { report(.requiredPermissionsMissing) }
+        if !accessibility { report(.requiredPermissionsMissing) }
         else if activeFailures[.permissions] == .requiredPermissionsMissing { resolve(.permissions) }
         if environment.secureInput { report(.secureInputEnabled) }
         else if activeFailures[.secureInput] == .secureInputEnabled { resolve(.secureInput) }

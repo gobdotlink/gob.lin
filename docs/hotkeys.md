@@ -1,6 +1,6 @@
 # Native hotkeys
 
-The dedicated event-tap thread owns its run loop, tap, and source. Revocation sets the stop flag, stops and wakes the run loop, then removes its source and invalidates the port. A timeout re-enables the tap in its callback. There is no enabled-state polling. Permission checks use the separate onboarding monitor.
+The dedicated event-tap thread owns its run loop, tap, and source. Revocation sets the stop flag, stops and wakes the run loop, then removes its source and invalidates the port. A timeout re-enables the tap in its callback. There is no enabled-state polling. Permission checks use the separate onboarding monitor. The modifying session tap requires Accessibility; Input Monitoring is informational and does not gate Fn, modifier-only or keyed shortcuts, including the Carbon fallback. Actual tap creation still determines availability.
 
 Fn/Globe and Right Option use event flags and the right-side Option device flag. Set Keyboard → Press Globe key to → Do Nothing. Non-Apple keyboards may consume Fn in firmware; use Right Option or Option+Space. Modifier events pass through so ordinary chords still work. A non-modifier key or extra modifier invalidates a modifier-only tap; a chord after the hold threshold cancels the recording state.
 

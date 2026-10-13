@@ -51,6 +51,7 @@ final class HotkeyEventTap: @unchecked Sendable {
             guard let context else { return Unmanaged.passUnretained(event) }
             return Unmanaged<HotkeyEventTap>.fromOpaque(context).takeUnretainedValue().handle(type, event)
         }
+        // This modifying tap requires Accessibility; listen-only preflight does not describe its access.
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                            eventsOfInterest: mask, callback: callback,
                                            userInfo: Unmanaged.passUnretained(self).toOpaque()) else { result(false); return }
