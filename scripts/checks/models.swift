@@ -178,11 +178,32 @@ private actor CheckStore: SpeechModelAcquiring {
         ModelHub.offlineMode = true
         defer { ModelHub.offlineMode = false }
         let store = ParakeetModelStore(directory: directory)
+        do {
+            _ = try await store.ensureAvailable(progress: { _ in })
+            throw CheckFailure(message: "An upgraded cache without speech detection was reported available offline")
+        } catch DownloadError.networkDisabled { }
+        do {
+            try await ParakeetSpeechEngine(modelDirectory: directory).prepare()
+            throw CheckFailure(message: "Runtime silently accepted a missing speech detector")
+        } catch SpeechRuntimeError.speechDetectorNotInstalled { }
+        let detectorDirectory = root.appendingPathComponent(Repo.vad.folderName)
+        for name in ModelNames.VAD.requiredModels {
+            let bundle = detectorDirectory.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            try Data("fixture".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+        }
         let staged = try await store.ensureAvailable(progress: { _ in })
         try expect(staged == .cached, "Staged offline cache was not adopted")
         let reopened = ParakeetModelStore(directory: directory)
         let reopenedCache = try await reopened.ensureAvailable(progress: { _ in })
         try expect(reopenedCache == .cached, "Offline inventory validation failed")
+        let detectorFile = detectorDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile).appendingPathComponent("coremldata.bin")
+        try Data("changed".utf8).write(to: detectorFile)
+        do {
+            _ = try await ParakeetModelStore(directory: directory).ensureAvailable(progress: { _ in })
+            throw CheckFailure(message: "A corrupted detector was reported ready")
+        } catch SpeechModelStoreError.invalidCache { }
+        try Data("fixture".utf8).write(to: detectorFile)
         let changed = directory.appendingPathComponent(required[0]).appendingPathComponent("coremldata.bin")
         try Data("changed".utf8).write(to: changed)
         do {
@@ -191,6 +212,7 @@ private actor CheckStore: SpeechModelAcquiring {
         } catch SpeechModelStoreError.invalidCache { }
         try await store.removeCachedModel()
         try expect(!FileManager.default.fileExists(atPath: directory.path), "Explicit repair kept corrupt cache")
+        try expect(!FileManager.default.fileExists(atPath: detectorDirectory.path), "Explicit repair kept the detector cache")
         print("PASS offline staged adoption, inventory reload and same-size corruption rejection (synthetic files, no CoreML)")
     }
 

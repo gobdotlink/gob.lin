@@ -264,9 +264,30 @@ final class AppModel: ObservableObject {
             self?.cancelDictation(active)
         }
         active.textTask = Task { @MainActor [weak self] in
+            var previousRecovery: LiveRecoveryReason?
             for await text in active.live.updates {
                 guard let self, !session.cancelled, let overlayID = session.overlayID else { continue }
-                self.overlay.update(active.stopping ? .transcribing : .listening,
+                if text.recoveryReason != previousRecovery {
+                    var details = DevelopmentDetails()
+                    switch text.recoveryReason {
+                    case .windowLimit: details.reason = .liveWindowLimit
+                    case .decodeFailed: details.reason = .liveDecodeFailed
+                    case .decodeUnavailable: details.reason = .liveDecodeUnavailable
+                    case .overlapMismatch: details.reason = .liveOverlapMismatch
+                    case .timingUnavailable: details.reason = .liveTimingUnavailable
+                    case .inputDiscontinuity: details.reason = .liveInputDiscontinuity
+                    case .invalidSamples: details.reason = .liveInvalidSamples
+                    case nil: break
+                    }
+                    self.diagnostics.developmentLog.record(text.recoveryReason == nil ? .livePreviewRecovered : .livePreviewDegraded,
+                        area: .application, severity: text.recoveryReason == nil ? .info : .warning, operation: session.id, details: details)
+                    previousRecovery = text.recoveryReason
+                }
+                let phase: OverlayPhase = text.recoveryReason == nil ? (active.stopping ? .transcribing : .listening)
+                    : .error(text.recoveryReason == .decodeUnavailable
+                        ? "Live preview is unavailable; final audio will be checked on release."
+                        : "Live preview is recovering; recording continues.")
+                self.overlay.update(phase,
                     committed: text.committedText, tentative: text.tentativeText, session: overlayID)
             }
         }
@@ -309,7 +330,7 @@ final class AppModel: ObservableObject {
             await active.live.append(frame.samples, at: frame.samplePosition)
         case .level(let id, let rms):
             guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
-            overlay.update(.listening, level: AudioInputDevices.displayLevel(rms: rms), session: overlayID)
+            overlay.update(overlay.model.phase, level: AudioInputDevices.displayLevel(rms: rms), session: overlayID)
         case .failed(let id, let failure):
             guard id == active.captureID else { return }
             active.failure = failure
@@ -371,8 +392,14 @@ final class AppModel: ObservableObject {
                 var timings = DictationTimings(captureMilliseconds: active.captureMilliseconds,
                                                asrMilliseconds: await active.live.computeMilliseconds)
                 let raw: String
-                if let result, !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { raw = result.text }
+                if let result {
+                    raw = result.text
+                    if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, result.speechPresence == .notDetected {
+                        self.diagnostics.developmentLog.record(.speechNotDetected, area: .application, operation: active.session.id)
+                    }
+                }
                 else {
+                    self.diagnostics.developmentLog.record(.liveFinalRecovery, area: .application, operation: active.session.id)
                     let engine = try await active.readiness.value
                     try active.session.checkCancellation()
                     let run = try await RecordedAudioPipeline(engine: engine).transcribe(audio.fileURL)
@@ -557,7 +584,7 @@ final class AppModel: ObservableObject {
             if let warning {
                 overlay.update(.error(warning), session: overlayID)
                 overlay.hide(after: 4, session: overlayID)
-            } else { overlay.hide(session: overlayID) }
+            } else { overlay.hide(after: 0.8, session: overlayID) }
         }
     }
 

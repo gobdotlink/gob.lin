@@ -12,11 +12,18 @@ public struct TranscriptionRequest: Sendable {
 public struct TranscriptionResult: Sendable, Equatable {
     public let text: String
     public let tokens: [TranscriptionToken]
+    public let speechPresence: SpeechPresence?
 
-    public init(text: String, tokens: [TranscriptionToken] = []) {
+    public init(text: String, tokens: [TranscriptionToken] = [], speechPresence: SpeechPresence? = nil) {
         self.text = text
         self.tokens = tokens
+        self.speechPresence = speechPresence
     }
+}
+
+public enum SpeechPresence: Sendable, Equatable {
+    case notDetected
+    case detected(endSeconds: Double)
 }
 
 /// Both the app and evaluation CLI use this boundary.
@@ -61,4 +68,3 @@ public struct SpeechModelPreparationProgress: Sendable, Equatable {
         self.component = component
     }
 }
-

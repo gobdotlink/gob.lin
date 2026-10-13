@@ -21,8 +21,14 @@ public enum SpeechModelStoreError: Error, LocalizedError {
 public actor ParakeetModelStore: SpeechModelAcquiring {
     public nonisolated let directory: URL
     private var validated = false
+    private var detectorValidated = false
     private var acquiring = false
     private static let inventoryName = ".goblin-integrity.json"
+    private static let detectorRevision = "b419383c55c110e2c9271fa6ee0ea83d03c70d96"
+    private static let configureDetectorRevision: Void = {
+        ModelRegistry.revisionOverrides[Repo.vad.remotePath] = detectorRevision
+    }()
+    private static let detectorID = "silero-vad-v6.2.1@" + detectorRevision
     private static let required = ModelNames.ASR.requiredModelsV3(precision: .int8)
         .union([ModelNames.ASR.vocabularyFile])
 
@@ -45,7 +51,9 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
         try Task.checkCancellation()
         progress(.init(phase: .checkingCache))
         // Hash once at launch; idle reloads reuse that validation and the OS's compiled cache.
-        if validated { return .cached }
+        if validated {
+            return try await ensureSpeechDetector(progress: progress) ? .installed : .cached
+        }
         let inventoryURL = directory.appendingPathComponent(Self.inventoryName)
         if FileManager.default.fileExists(atPath: inventoryURL.path) {
             let inventory: Inventory
@@ -53,7 +61,7 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
             catch { throw SpeechModelStoreError.invalidCache }
             try inventory.verify(at: directory, required: Self.required)
             validated = true
-            return .cached
+            return try await ensureSpeechDetector(progress: progress) ? .installed : .cached
         }
 
         // Adopt a complete staged SDK cache locally; missing/partial files still enter resumable download.
@@ -62,9 +70,9 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
                 let inventory = try Inventory.capture(at: directory, required: Self.required)
                 try save(inventory, to: inventoryURL)
                 validated = true
-                return .cached
             } catch is CancellationError { throw CancellationError() }
             catch SpeechModelStoreError.invalidCache { /* Incomplete SDK cache: resume below. */ }
+            if validated { return try await ensureSpeechDetector(progress: progress) ? .installed : .cached }
         }
 
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -82,7 +90,44 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
         let inventory = try Inventory.capture(at: directory, required: Self.required)
         try save(inventory, to: inventoryURL)
         validated = true
+        _ = try await ensureSpeechDetector(progress: progress)
         return .installed
+    }
+
+    private func ensureSpeechDetector(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws -> Bool {
+        if detectorValidated { return false }
+        let detectorDirectory = directory.deletingLastPathComponent().appendingPathComponent(Repo.vad.folderName, isDirectory: true)
+        let inventoryURL = detectorDirectory.appendingPathComponent(Self.inventoryName)
+        let required = ModelNames.VAD.requiredModels
+        if FileManager.default.fileExists(atPath: inventoryURL.path) {
+            do {
+                let inventory = try JSONDecoder().decode(Inventory.self, from: Data(contentsOf: inventoryURL))
+                try inventory.verify(at: detectorDirectory, required: required, modelID: Self.detectorID)
+            } catch is CancellationError { throw CancellationError() }
+            catch { throw SpeechModelStoreError.invalidCache }
+            detectorValidated = true
+            return false
+        }
+        let existed = required.allSatisfy { FileManager.default.fileExists(atPath: detectorDirectory.appendingPathComponent($0).path) }
+        if !existed {
+            progress(.init(phase: .downloading, component: "Preparing speech detection"))
+            _ = Self.configureDetectorRevision
+            try await Self.guardListing { transferStarted in
+                try await ModelHub.download(.vad, to: self.directory.deletingLastPathComponent(), progressHandler: { update in
+                    switch update.phase {
+                    case .listing: break
+                    case .downloading, .compiling: transferStarted()
+                    }
+                    progress(.init(phase: .downloading, fractionCompleted: update.fractionCompleted,
+                                   component: "Preparing speech detection"))
+                })
+            }
+        }
+        try Task.checkCancellation()
+        let inventory = try Inventory.capture(at: detectorDirectory, required: required, modelID: Self.detectorID)
+        try save(inventory, to: inventoryURL)
+        detectorValidated = true
+        return !existed
     }
 
     private func download(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws {
@@ -145,6 +190,9 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
         }
         if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
         validated = false
+        detectorValidated = false
+        let detectorDirectory = directory.deletingLastPathComponent().appendingPathComponent(Repo.vad.folderName, isDirectory: true)
+        if FileManager.default.fileExists(atPath: detectorDirectory.path) { try FileManager.default.removeItem(at: detectorDirectory) }
     }
 
     private struct Inventory: Codable {
@@ -157,7 +205,7 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
         let modelID: String
         let files: [File]
 
-        static func capture(at directory: URL, required: Set<String>) throws -> Self {
+        static func capture(at directory: URL, required: Set<String>, modelID: String = SpeechModelCatalog.parakeet.id) throws -> Self {
             let fm = FileManager.default
             var entries: [File] = []
             for name in required.sorted() {
@@ -179,12 +227,12 @@ public actor ParakeetModelStore: SpeechModelAcquiring {
                 } else { entries.append(try digest(url, relativeTo: directory)) }
             }
             guard !entries.isEmpty else { throw SpeechModelStoreError.invalidCache }
-            return Self(version: 1, modelID: SpeechModelCatalog.parakeet.id, files: entries.sorted { $0.path < $1.path })
+            return Self(version: 1, modelID: modelID, files: entries.sorted { $0.path < $1.path })
         }
 
-        func verify(at directory: URL, required: Set<String>) throws {
-            guard version == 1, modelID == SpeechModelCatalog.parakeet.id,
-                  self.files == (try Self.capture(at: directory, required: required)).files else {
+        func verify(at directory: URL, required: Set<String>, modelID expectedModelID: String = SpeechModelCatalog.parakeet.id) throws {
+            guard version == 1, modelID == expectedModelID,
+                  self.files == (try Self.capture(at: directory, required: required, modelID: expectedModelID)).files else {
                 throw SpeechModelStoreError.invalidCache
             }
         }
