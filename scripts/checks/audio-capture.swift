@@ -172,16 +172,39 @@ struct AudioCaptureCheck {
         let zeroBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
         zeroBuffer.frameLength = 160
         for i in 0..<160 { zeroBuffer.floatChannelData![0][i] = 0 }
-        for _ in 0..<53 { zeros.receive(zeroBuffer); try await Task.sleep(for: .milliseconds(100)) }
+        let gated = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        let gatedID = UUID(), gatedEvidence = CaptureEvidence()
+        try gated.begin(sessionID: gatedID, directory: directory, resolution: device, handler: gatedEvidence.record)
+        gated.receive(buffer, time: AVAudioTime(sampleTime: 0, atRate: 16_000))
+        for tick in 0..<53 {
+            zeros.receive(zeroBuffer)
+            gated.receive(zeroBuffer, time: AVAudioTime(sampleTime: 1600 + Int64(tick * 160), atRate: 16_000))
+            try await Task.sleep(for: .milliseconds(100))
+        }
         precondition(zeros.watchdogFailure() == .allZeroStream)
-        // Keep this short real-clock check separate from any long-recording hardware claim.
-        try await Task.sleep(for: .seconds(5))
+        precondition(gated.watchdogFailure() == nil, "A continuous gated pause after valid input must not end capture")
+        gated.receive(buffer, time: AVAudioTime(sampleTime: 10_080, atRate: 16_000))
+        let gatedAudio = try await gated.finish(sessionID: gatedID, cancel: false)!
+        try gatedEvidence.check(gatedAudio, requireNonzero: true)
+        precondition(gatedAudio.sampleCount == 11_680, "Later samples after the gated pause must remain captured")
+        gated.resume()
+        let beginReset = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        beginReset.receive(buffer)
+        let beginResetID = UUID()
+        try beginReset.begin(sessionID: beginResetID, directory: directory, resolution: device, handler: { _ in })
+        // Reuse the no-callback wait to verify resume and begin do not inherit earlier nonzero input.
+        for _ in 0..<53 {
+            gated.receive(zeroBuffer); beginReset.receive(zeroBuffer)
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        precondition(gated.watchdogFailure() == .allZeroStream && beginReset.watchdogFailure() == .allZeroStream)
+        _ = try await beginReset.finish(sessionID: beginResetID, cancel: true)
         precondition(neverStarted.watchdogFailure() == .noCallbacks)
         let badDirectory = directory.appendingPathComponent("regular-file")
         try Data().write(to: badDirectory)
         do { _ = try CaptureFile(sessionID: UUID(), directory: badDirectory); preconditionFailure("Non-directory storage must fail") }
         catch { }
-        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, zero-stream and no-callback watchdogs, invalid storage.")
+        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, initial-zero/gated-pause/reset/no-callback watchdogs, invalid storage.")
     }
 
     @MainActor static func native() async throws {
@@ -198,6 +221,7 @@ struct AudioCaptureCheck {
         let seconds = Double(ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_SECONDS"] ?? "3") ?? 3
         var verifiedUID: String?
         for (label, uid) in [("built-in cold", builtIn?.uid ?? ""), ("selected external", external?.uid ?? ""), ("built-in restart", builtIn?.uid ?? ""), ("selected external restart", external?.uid ?? ""), ("missing UID fallback", "unavailable-probe-device")] {
+            if label.hasPrefix("built-in") && builtIn == nil { print("Built-in: unavailable, not tested"); continue }
             if label.hasPrefix("selected external") && external == nil { print("Selected external: unavailable, not tested"); continue }
             let evidence = CaptureEvidence()
             do {

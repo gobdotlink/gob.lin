@@ -177,8 +177,8 @@ public final class AudioCaptureService {
         }, onFailure: { [weak self] failure in
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                for observer in self.previews.values { observer(.failed(failure)) }
                 self.closeInput(keepProcessor: self.activeSessionID != nil)
+                for observer in self.previews.values { observer(.failed(failure)) }
             }
         })
         self.engine = engine; self.format = format; self.inputFormat = inputFormat; self.processor = processor; inputResolution = resolved
@@ -195,7 +195,10 @@ public final class AudioCaptureService {
             Task { @MainActor in
                 guard let self, self.generation == token else { return }
                 if self.activeSessionID != nil { processor.interrupt(.systemSleep) }
-                else { self.closeInput() }
+                else {
+                    for observer in self.previews.values { observer(.failed(AudioCaptureFailure(.systemSleep))) }
+                    self.closeInput()
+                }
             }
         }
         let watchdog = DispatchSource.makeTimerSource(queue: .main)

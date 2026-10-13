@@ -66,7 +66,11 @@ final class CaptureFile {
     }
 
     func preserve() {
-        try? checkpoint()
+        if let handle, let bytes = try? handle.seekToEnd(),
+           bytes >= 44, bytes - 44 <= UInt64(UInt32.max - 36) {
+            sampleCount = max(sampleCount, Int64((bytes - 44) / 4))
+            try? checkpoint()
+        }
         try? handle?.close(); handle = nil
     }
 

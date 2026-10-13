@@ -10,6 +10,7 @@ final class CaptureProcessor: @unchecked Sendable {
     private var overflow = false
     private var lastCallback = ContinuousClock.now
     private var hasCallback = false
+    private var hasNonzeroInput = false
     private var zeroSince: ContinuousClock.Instant?
     private var recordingSince: ContinuousClock.Instant?
     private var pendingFailure: AudioCaptureFailure.Kind?
@@ -46,7 +47,7 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func begin(sessionID: UUID, directory: URL, resolution: AudioInputResolution,
                handler: @escaping @Sendable (AudioCaptureEvent) -> Void) throws {
-        lock.withLock { recordingSince = .now }
+        lock.withLock { recordingSince = .now; hasNonzeroInput = false }
         try queue.sync {
             guard file == nil else { throw AudioCaptureFailure(.alreadyRecording) }
             if let failure { throw failure }
@@ -99,7 +100,7 @@ final class CaptureProcessor: @unchecked Sendable {
                 if value != 0 { nonzero = true }
             }
         }
-        if nonzero { zeroSince = nil } else if zeroSince == nil { zeroSince = now }
+        if nonzero { hasNonzeroInput = true; zeroSince = nil } else if zeroSince == nil { zeroSince = now }
         let rms = sqrt((sums.max() ?? 0) / Double(frames))
         let copiedSamples = mono
         queue.async {
@@ -118,7 +119,7 @@ final class CaptureProcessor: @unchecked Sendable {
             if let pendingFailure { return pendingFailure }
             if overflow { return .bufferOverflow }
             if lastCallback.duration(to: now) > (hasCallback ? .seconds(5) : .seconds(10)) { return .noCallbacks }
-            if let zeroSince, zeroSince.duration(to: now) > .seconds(5) { return .allZeroStream }
+            if !hasNonzeroInput, let zeroSince, zeroSince.duration(to: now) > .seconds(5) { return .allZeroStream }
             return nil
         }
     }
@@ -135,7 +136,7 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func resume() {
         queue.sync { converter.reset(); inputCount = 0; outputCount = 0; ring.removeAll(keepingCapacity: true) }
-        lock.withLock { accepting = true; overflow = false; lastCallback = .now; hasCallback = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil }
+        lock.withLock { accepting = true; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil }
     }
 
     private func fail(_ kind: AudioCaptureFailure.Kind, recoveryURL: URL? = nil) {
