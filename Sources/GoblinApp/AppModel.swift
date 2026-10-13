@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     let hotkeys: HotkeyService
     let insertion: TextInsertionService
     let audioPreview: AudioPreviewModel
+    let speechModels: SpeechModelService
     @Published var mascotState: MascotState = .idle
     @Published var settingsSelection: SettingsSection? = .general
     @Published var lastTranscript: String?
@@ -30,6 +31,12 @@ final class AppModel: ObservableObject {
          diagnosticEnvironment: DiagnosticEnvironment? = nil) {
         self.defaults = defaults
         self.servicesEnabled = servicesEnabled
+        let modelDirectory = dataDirectory.map {
+            $0.appendingPathComponent("models", isDirectory: true)
+                .appendingPathComponent(ParakeetSpeechEngine.defaultModelDirectory.lastPathComponent, isDirectory: true)
+        } ?? ParakeetSpeechEngine.defaultModelDirectory
+        speechModels = SpeechModelService(engine: ParakeetSpeechEngine(modelDirectory: modelDirectory),
+            store: ParakeetModelStore(directory: modelDirectory), defaults: defaults)
         diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
         dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault)
@@ -38,13 +45,22 @@ final class AppModel: ObservableObject {
         insertion = TextInsertionService(pasteboard: servicesEnabled ? .general : .withUniqueName(), defaults: defaults, registerShortcuts: servicesEnabled)
         audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")], diagnostics: diagnostics)
         for child in [permissions.objectWillChange, hotkeys.objectWillChange, insertion.objectWillChange,
-                      history.objectWillChange, dictionary.objectWillChange, audioPreview.objectWillChange, diagnostics.objectWillChange, overlay.model.objectWillChange] {
+                      history.objectWillChange, dictionary.objectWillChange, audioPreview.objectWillChange, diagnostics.objectWillChange,
+                      speechModels.objectWillChange, overlay.model.objectWillChange] {
             child.sink { [weak self] _ in
                 Task { @MainActor in self?.synchronizeMascot(); self?.objectWillChange.send() }
             }.store(in: &subscriptions)
         }
         permissions.$snapshot.sink { [weak self] snapshot in
             Task { @MainActor in self?.refreshDiagnostics(snapshot: snapshot) }
+        }.store(in: &subscriptions)
+        speechModels.$state.sink { [weak self] state in
+            Task { @MainActor in
+                guard let self, !self.shuttingDown else { return }
+                self.refreshDiagnostics(snapshot: self.permissions.snapshot)
+                if case .failed = state { self.showFailure(.modelLoadFailed) }
+                else if state == .ready { self.diagnostics.resolve(.model) }
+            }
         }.store(in: &subscriptions)
         hotkeys.$secureInput.sink { [weak self] secure in
             Task { @MainActor in
@@ -96,6 +112,7 @@ final class AppModel: ObservableObject {
         }
         refreshConfiguration()
         refreshDiagnostics(snapshot: permissions.snapshot)
+        if servicesEnabled { speechModels.preload() }
         Task { [weak self] in
             guard let self else { return }
             await self.history.reload()
@@ -135,7 +152,21 @@ final class AppModel: ObservableObject {
                     latencies: result.timings, warning: result.warning?.message)
             }
         } else { history.rewriteAction = nil }
-        history.retranscribeAction = nil
+        history.retranscribeAction = servicesEnabled ? { [weak self] entry, audioURL in
+            guard let self, !self.shuttingDown, let audioURL else { throw RecordedAudioError.invalidFile }
+            let lease = try self.speechModels.beginSession()
+            defer { self.speechModels.endSession(lease) }
+            let engine = try await self.speechModels.readyEngine(for: lease)
+            let run = try await RecordedAudioPipeline(engine: engine).transcribe(audioURL)
+            try Task.checkCancellation()
+            let result = await self.processTranscript(run.rawText)
+            try Task.checkCancellation()
+            var timings = run.timings
+            timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
+            return HistoryReprocessResult(rawText: run.rawText, finalText: result.finalText,
+                tone: result.tone.rawValue, polished: result.polished, model: engine.identifier,
+                latencies: timings, warning: result.warning?.message)
+        } : nil
         objectWillChange.send()
     }
 
@@ -221,6 +252,7 @@ final class AppModel: ObservableObject {
         for session in dictationSessions.values { session.cancel() }
         await processingQueue.shutdown()
         dictationSessions.removeAll()
+        await speechModels.shutdown()
         insertion.shutdown()
         history.stopAudio()
         audioPreview.stop(reason: .shutdown)
@@ -294,7 +326,13 @@ final class AppModel: ObservableObject {
 
     private func refreshDiagnostics(snapshot: PermissionModel.Snapshot) {
         guard !shuttingDown else { return }
-        diagnostics.refresh(permissions: snapshot, secureInput: hotkeys.secureInput, engineStatus: .awaitingSelection)
+        let engineStatus: DiagnosticEngineStatus
+        switch speechModels.state {
+        case .ready: engineStatus = .ready
+        case .preparing, .unloading, .cancelling: engineStatus = .loading
+        default: engineStatus = .unavailable
+        }
+        diagnostics.refresh(permissions: snapshot, secureInput: hotkeys.secureInput, engineStatus: engineStatus)
     }
 
     private func synchronizeMascot() {

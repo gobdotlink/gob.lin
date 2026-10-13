@@ -22,7 +22,7 @@ struct GoblinApp: App {
         }
 
         Window("gob.lin Settings", id: "settings") {
-            SettingsView(model: model)
+            SettingsView(model: model, speechModels: model.speechModels)
         }
         .defaultSize(width: 940, height: 720)
 
