@@ -185,3 +185,18 @@ and graceful termination through AppModel's shutdown-requested/app-stopped event
 The owned app exited without keyboard input, microphone capture or settings changes.
 Normal-shell menu/window navigation and dictation, physical sleep/session switching,
 and revocation remain unverified.
+
+The subsequent reserved-focus attempt rebuilt from reviewed commit
+`dc4efcb8cf9a9be4bbaeb28749a1712fc785c3e0` using the existing build machinery.
+Executing lifecycle metadata confirmed modified=false, debug, built at
+2026-10-13 20:01:43 UTC (build ID C5948906-9622-41CC-A4E1-8630502BB135).
+Focus stayed on the isolated target, but the initial built-in system-default input
+delivered exactly zero in all 76,515 saved samples (4.782 seconds). Permissions were
+granted and recognition was ready. The app retained a warning History entry with
+readable mono 16 kHz Float32 recovery, failure timings and zero insertion time.
+No recognized final text existed, so no release-to-text timing is reported.
+This is observed zero-input failure recovery, not the planned final-rename or
+History-only suspension pass. Those scenarios and the full current-cutoff workflow
+remain pending usable input. All owned apps/playback exited and resources were
+released promptly; no device, grant or preference was changed. Physical tap disable,
+sleep/revocation, speech accuracy and performance acceptance remain separate.

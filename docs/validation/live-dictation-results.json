@@ -239,5 +239,52 @@
     "checkedTruthAccuracyEstablished": false,
     "releaseTargetEstablished": false,
     "continuousComputeBudgetEstablished": false
+  },
+  "finalHeadReservedNativeAttempt": {
+    "executedBuild": {
+      "sourceRevision": "dc4efcb8cf9a9be4bbaeb28749a1712fc785c3e0",
+      "sourceModified": false,
+      "builtAt": "2026-10-13T20:01:43Z",
+      "buildID": "C5948906-9622-41CC-A4E1-8630502BB135",
+      "configuration": "debug"
+    },
+    "success": false,
+    "failure": "Initial capture had no recognized text; retained input was digital zero",
+    "targetFocusLost": false,
+    "inputClass": "Built-in MacBook microphone",
+    "inputFollowsSystemDefault": true,
+    "usedFallback": false,
+    "permissionsGranted": true,
+    "engineReady": true,
+    "savedRecovery": {
+      "warningEntry": true,
+      "textEmpty": true,
+      "durationSeconds": 4.7821875,
+      "sampleCount": 76515,
+      "bytes": 306104,
+      "formatFloat32": true,
+      "channels": 1,
+      "sampleRate": 16000,
+      "nonzeroSamples": 0,
+      "timings": {
+        "trimMilliseconds": 0,
+        "rewriteMilliseconds": 0,
+        "insertionMilliseconds": 0,
+        "captureMilliseconds": 4374.747083,
+        "asrMilliseconds": 570.952333
+      },
+      "insertionMilliseconds": 0
+    },
+    "releaseToFinalTextMilliseconds": null,
+    "firstTextMilliseconds": null,
+    "shutdownRequested": true,
+    "appStopped": true,
+    "focusReservationEnded": true,
+    "pendingNativeScenarios": [
+      "History-only automatic suspension",
+      "Private failed-final-rename/paste-last/timings",
+      "Full current-cutoff overlap/preview/finalization-cancel workflow"
+    ],
+    "physicalInterruptionAndCheckedAccuracyEstablished": false
   }
 }
