@@ -35,9 +35,11 @@ to unsigned SwiftPM executables or ad-hoc validation bundles.
 
 If a System Settings toggle is on but gob.lin reports a permission unavailable,
 check the individual row in Permissions & onboarding and its **Running app**
-path. Return from Settings or choose **Check again** to refresh statuses and
-retry an unavailable shortcut. If needed, quit and reopen the same signed
-bundle: some permission changes require a process restart. A shortcut-tap
+path. After opening System Settings through gob.lin's **Settings**/**Allow**
+buttons, return to gob.lin to refresh statuses and retry an unavailable shortcut.
+If you opened System Settings independently, choose **Check again** to refresh
+and retry, even when statuses are unchanged. If needed, quit and reopen the same
+signed bundle: some permission changes require a process restart. A shortcut-tap
 failure alone is not evidence of a stale Accessibility grant. See
 [permissions and recovery](docs/permissions.md) before changing any grants.
 Build and launch scripts never reset or request privacy permissions.

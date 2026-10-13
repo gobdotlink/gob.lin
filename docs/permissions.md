@@ -7,7 +7,7 @@ Use `scripts/build.sh debug` and `scripts/launch.sh` for signed SwiftPM dogfood.
 When a toggle appears enabled but the app disagrees:
 
 1. Open Permissions & onboarding and identify **which individual permission** is unavailable. Expand **Running app** and compare its bundle with the entry in System Settings. An old app with the same display name can have a different signing identity.
-2. Return from Settings or choose **Check again**. Both refresh statuses and retry a failed shortcut even if no status changed. The retry calls the normal start path, so its existing permission gates remain enforced; a working tap is not restarted.
+2. After opening System Settings through gob.lin's **Settings**/**Allow** buttons, return to gob.lin to refresh statuses and retry a failed shortcut even if no status changed. If you opened System Settings independently, choose **Check again** to refresh and retry. The retry calls the normal start path, so its existing permission gates remain enforced; a working tap is not restarted.
 3. If the mismatch persists, quit gob.lin and reopen the same signed bundle. Some macOS permission changes require a new process. Recheck the row before changing the grant.
 4. Collect local development diagnostics with the API statuses, actual bundle path, signing identifier/designated requirement, and tap-start result. Establish whether Settings registered a different build before manually removing/re-adding any entry. Do not routinely reset TCC or replace certificates.
 

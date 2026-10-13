@@ -84,8 +84,8 @@ final class PermissionModel: ObservableObject {
 
     func updateSnapshot(_ new: Snapshot) {
         let old = snapshot
-        guard old != new else { return }
         snapshot = new
+        guard old != new else { return }
         if old.accessibility && !new.accessibility { revoked(.accessibility) }
         if old.inputMonitoring && !new.inputMonitoring { revoked(.inputMonitoring) }
         if old.microphone == .authorized && new.microphone != .authorized { revoked(.microphone) }
