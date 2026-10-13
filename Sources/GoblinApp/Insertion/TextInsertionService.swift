@@ -93,8 +93,8 @@ final class TextInsertionService: ObservableObject {
                   target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
                 setStatus("The target changed before confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
             }
-            // expectedValue validated this UTF-16 replacement endpoint against the unchanged value.
-            var caret = CFRange(location: selection.location + (text as NSString).length, length: 0)
+            // Use the unchanged, validated selection's UTF-16 end; equivalent text can have different lengths.
+            var caret = CFRange(location: selection.location + selection.length, length: 0)
             if let range = AXValueCreate(.cfRange, &caret) {
                 _ = AXUIElementSetAttributeValue(target.element, kAXSelectedTextRangeAttribute as CFString, range)
             }
