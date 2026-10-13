@@ -24,11 +24,6 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 640, height: 440)
 
-        Window("gob.lin Overlay", id: "overlay-settings") {
-            OverlaySettingsView(overlay: model.overlay)
-        }
-        .defaultSize(width: 520, height: 260)
-
         Window("gob.lin Dictionary", id: "dictionary") {
             DictionarySettingsView()
         }
@@ -43,6 +38,10 @@ struct GoblinApp: App {
             RewriteSettingsView()
         }
         .defaultSize(width: 640, height: 620)
+        Window("gob.lin Overlay", id: "overlay-settings") {
+            OverlaySettingsView(overlay: model.overlay)
+        }
+        .defaultSize(width: 520, height: 260)
 
         Window("gob.lin History", id: "history") {
             HistoryView(model: model.history)
@@ -71,10 +70,10 @@ private struct GoblinMenu: View {
         Button("Settings…") { show("settings") }
             .keyboardShortcut(",")
         Button("History") { show("history") }
-        Button("Overlay…") { show("overlay-settings") }
         Button("Dictionary…") { show("dictionary") }
         Button("Tone…") { show("tone") }
         Button("AI cleanup…") { show("rewrite") }
+        Button("Overlay…") { show("overlay-settings") }
         Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
         Button("Shortcuts…") { show("shortcuts") }
         Button("Text insertion…") { show("insertion") }
