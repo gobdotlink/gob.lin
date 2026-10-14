@@ -72,7 +72,7 @@ private struct MenuStatus: View {
     var body: some View {
         switch state {
         case .idle: Text("Ready · hold \(hotkeys.shortcut.label) to talk")
-        case .recording: Text("Listening…")
+        case .recording: Text("Dictating…")
         case .transcribing: Text("Transcribing…")
         case .warning: Text("Needs attention")
         }

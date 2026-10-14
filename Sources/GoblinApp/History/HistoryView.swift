@@ -83,7 +83,7 @@ struct HistoryView: View {
                             ContentUnavailableView("Select a dictation", systemImage: "text.alignleft")
                         }
                     }
-                    .frame(minWidth: 360, idealWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }

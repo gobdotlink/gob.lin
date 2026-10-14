@@ -39,7 +39,7 @@ struct DictationOverlay: View {
                     Button(action: model.cancel) { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }
                         .buttonStyle(OverlayIconButtonStyle())
                         .accessibilityLabel("Cancel dictation")
-                        .help("Cancel dictation (Esc)")
+                        .help(listening ? "Cancel dictation (Esc)" : "Cancel dictation")
                 }
                 if hasText {
                     ScrollView {
