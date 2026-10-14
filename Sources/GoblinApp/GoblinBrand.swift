@@ -66,11 +66,30 @@ enum GoblinBrand {
         return image
     }
 
+    static func menuArtwork() -> NSImage {
+        guard let assets = assetDirectory,
+              let data = try? Data(contentsOf: assets.appendingPathComponent("goblin-menu.png")),
+              let normal = NSBitmapImageRep(data: data) else {
+            return sprite("goblin-menu")
+        }
+        let size = NSSize(width: 22, height: 22)
+        let image = NSImage(size: size)
+        normal.size = size
+        image.addRepresentation(normal)
+        if let data = try? Data(contentsOf: assets.appendingPathComponent("goblin-menu@2x.png")),
+           let retina = NSBitmapImageRep(data: data) {
+            retina.size = size
+            image.addRepresentation(retina)
+        }
+        image.isTemplate = false
+        return image
+    }
+
     static func menuImage(_ state: MascotState) -> NSImage {
-        let goblin = Self.sprite(state == .recording ? "goblin-yap" : "goblin-shut")
+        let goblin = menuArtwork()
         let image = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { bounds in
             NSGraphicsContext.current?.imageInterpolation = .none
-            goblin.draw(in: bounds.insetBy(dx: 1, dy: 1), from: .zero, operation: .sourceOver, fraction: 1)
+            goblin.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
             if state != .idle {
                 let color: NSColor = switch state {
                 case .recording: .systemRed
