@@ -13,7 +13,7 @@ struct MascotCheck {
             model.phase = .listening
             model.audioLevel = 0.1
             let view = NSHostingView(rootView: DictationOverlay(model: model))
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 456, height: 120),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440 + 2 * DictationOverlay.shadowMargin, height: 120),
                 styleMask: .borderless, backing: .buffered, defer: false)
             window.contentView = view
             defer { window.close() }
@@ -38,9 +38,11 @@ struct MascotCheck {
                 let rep = NSBitmapImageRep(cgImage: crop)
                 return Data(bytes: rep.bitmapData!, count: rep.bytesPerRow * rep.pixelsHigh)
             }
-            let head = CGRect(x: 196, y: 8, width: 64, height: 42)
-            let hands = CGRect(x: 209, y: 70, width: 38, height: 7)
-            let waveform = CGRect(x: 24, y: 64, width: 44, height: 30)
+            let inset = DictationOverlay.shadowMargin - 8
+            let head = CGRect(x: 196 + inset, y: 8, width: 64, height: 42)
+            // Palms over the pill edge; the head sits behind the pill there, so mouth changes cannot leak in.
+            let hands = CGRect(x: 209 + inset, y: 50, width: 38, height: 4)
+            let waveform = CGRect(x: 24 + inset, y: 64, width: 44, height: 30)
             advance(0.2)
             for scale in [1, 2] {
                 model.audioLevel = 0.1

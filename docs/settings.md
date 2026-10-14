@@ -2,7 +2,7 @@
 
 One native settings window exposes General, Audio, Model, Dictionary, Post-processing, Tone, History, Overlay and About. Existing feature views share the same services as the menu bar and history. Changes persist under stable preference keys and apply without a restart; shortening retention requires Apply to prevent deletion while editing.
 
-Dictionary's List and the Post-processing/Overlay forms fill the detail pane directly. General, Audio, Model, Tone, History retention and About provide their own page scroll view, so nested scrolling does not collapse the Dictionary rows.
+Every page except History is a set of sections inside one shared grouped Form, under one shared header (title plus a one-line `//` comment), so margins, grouping and scrolling match across pages. History keeps its list/detail split with the same header and 20pt margins. The window is capped at 960pt wide: grouped Forms center a narrower column in wider windows, which would break that alignment.
 
 Microphones are stored by Core Audio UID, with a follow-system option. The explicit local level preview requires an existing microphone grant, becomes ready only after its first buffer, and stops when leaving the page or permission is revoked. A missing saved device falls back without erasing the preference. Preview callbacks are session guarded. This is a level preview, not the GOB-8 capture engine.
 

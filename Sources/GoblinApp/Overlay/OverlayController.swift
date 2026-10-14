@@ -22,11 +22,23 @@ enum OverlayPosition: String, CaseIterable {
 
 @MainActor
 final class OverlayModel: ObservableObject {
-    @Published var phase: OverlayPhase = .hidden
+    @Published var phase: OverlayPhase = .hidden {
+        didSet { if phase != .hidden { visiblePhase = phase } }
+    }
+    /// The last shown phase, so the exit animation keeps its content instead of blanking.
+    @Published private(set) var visiblePhase: OverlayPhase = .arming
+    /// Drives the enter/exit animation; layout is unaffected, so the panel never resizes mid-animation.
+    @Published var presented = true
+    @Published var edge: OverlayPosition = .bottom
     @Published var committedText = ""
     @Published var tentativeText = ""
-    @Published var audioLevel: Double = 0
+    @Published var audioLevel: Double = 0 {
+        didSet { levels = Array((levels + [audioLevel]).suffix(Self.levelHistory)) }
+    }
+    /// Recent levels, newest last; the meter ripples them outward from its center.
+    @Published var levels = Array(repeating: 0.0, count: OverlayModel.levelHistory)
     @Published var textHeight: Double = 44
+    static let levelHistory = 4
     var cancel: () -> Void = {}
     var sizeChanged: (CGSize) -> Void = { _ in }
 }
@@ -42,9 +54,10 @@ final class OverlayController {
     private let panel: DictationPanel
     private var sessionID = UUID()
     private var hideTask: Task<Void, Never>?
+    private var orderOutTask: Task<Void, Never>?
     private var screen: NSScreen?
     private var displayObserver: NSObjectProtocol?
-    var position: OverlayPosition = .bottom { didSet { reposition() } }
+    var position: OverlayPosition = .bottom { didSet { model.edge = position; reposition() } }
 
     init() {
         panel = DictationPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 120),
@@ -74,16 +87,25 @@ final class OverlayController {
     @discardableResult
     func begin(onCancel: @escaping () -> Void) -> UUID {
         hideTask?.cancel()
+        orderOutTask?.cancel()
         sessionID = UUID()
         screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
         model.committedText = ""
         model.tentativeText = ""
+        model.levels = Array(repeating: 0, count: OverlayModel.levelHistory)
         model.audioLevel = 0
         model.textHeight = 44
         model.cancel = onCancel
         model.phase = .arming
+        // Render the collapsed frame first so the spring has somewhere to start from.
+        if !panel.isVisible { model.presented = false }
+        // Settle the cleared content's size before animating: resizing the panel inside the animated
+        // update drops the animation and leaves a mid-exit overlay invisible.
+        panel.contentView?.layoutSubtreeIfNeeded()
         reposition()
         panel.orderFrontRegardless()
+        // From the current on-screen value: a session that starts mid-exit reverses smoothly.
+        withAnimation(Self.motion(enter: true)) { model.presented = true }
         return sessionID
     }
 
@@ -106,7 +128,20 @@ final class OverlayController {
         hideTask?.cancel()
         model.phase = .hidden
         sessionID = UUID()
-        panel.orderOut(nil)
+        withAnimation(Self.motion(enter: false)) { model.presented = false }
+        orderOutTask?.cancel()
+        orderOutTask = Task { [weak self] in
+            // ponytail: fixed wait matching the exit spring's settle time; a completion callback if timing drifts.
+            do { try await Task.sleep(for: .milliseconds(320)) } catch { return }
+            guard let self, self.model.phase == .hidden else { return }
+            self.panel.orderOut(nil)
+        }
+    }
+
+    /// Critically damped: no overshoot for a surface that was not thrown. Reduce Motion gets a plain fade.
+    private static func motion(enter: Bool) -> Animation {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return .easeOut(duration: 0.15) }
+        return .spring(response: enter ? 0.32 : 0.2, dampingFraction: 1)
     }
 
     func hide(after seconds: Double, session: UUID) {
@@ -121,6 +156,8 @@ final class OverlayController {
 
     func shutdown() {
         hide()
+        orderOutTask?.cancel()
+        panel.orderOut(nil)
         if let displayObserver { NotificationCenter.default.removeObserver(displayObserver) }
         displayObserver = nil
     }
@@ -133,7 +170,8 @@ final class OverlayController {
         self.screen = screen
         let visible = screen.visibleFrame
         let x = visible.midX - panel.frame.width / 2
-        let y = position == .bottom ? visible.minY + 18 : visible.maxY - panel.frame.height - 18
-        panel.setFrameOrigin(NSPoint(x: max(visible.minX + 8, x), y: max(visible.minY + 8, y)))
+        // The view's transparent margin holds its shadow; keep the visible pill 18pt from the edge.
+        let y = position == .bottom ? visible.minY + 18 - DictationOverlay.shadowMargin : visible.maxY - panel.frame.height - 18
+        panel.setFrameOrigin(NSPoint(x: max(visible.minX + 8, x), y: max(visible.minY - DictationOverlay.shadowMargin, y)))
     }
 }

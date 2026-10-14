@@ -16,5 +16,6 @@ swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx26.0 \
     -I .build/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include \
     -I .build/checkouts/FluidAudio/Sources/FastClusterWrapper/include \
     Sources/GoblinApp/Models/SpeechModelService.swift Sources/GoblinApp/Models/ModelSettingsView.swift \
+    Sources/GoblinApp/GoblinBrand.swift \
     scripts/checks/models.swift "@$objects" -lc++ -lsqlite3 -o "$binary_directory/ModelChecks"
 "$binary_directory/ModelChecks" "$@"

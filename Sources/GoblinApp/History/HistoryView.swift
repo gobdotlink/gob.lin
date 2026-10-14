@@ -10,18 +10,25 @@ struct HistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("History").font(.largeTitle.bold())
-                    Spacer()
-                    Button("Retention…", systemImage: "clock") { showingRetention = true }
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.reload() } }
-                }
+            let section = SettingsSection.history
+            PaneHeader(title: section.rawValue, comment: section.comment) {
+                Button("Retention…", systemImage: "clock") { showingRetention = true }
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.reload() } }.labelStyle(.iconOnly)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search transcripts or app names", text: $model.searchText)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .accessibilityLabel("Search history")
-            }.padding(20)
-            Divider()
+                if !model.searchText.isEmpty {
+                    Button("Clear search", systemImage: "xmark.circle.fill") { model.searchText = "" }
+                        .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.white.opacity(0.08)))
+            .padding(.horizontal, GoblinBrand.pagePadding).padding(.vertical, 12)
             if let error = model.errorMessage {
                 HStack(alignment: .top) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -29,7 +36,8 @@ struct HistoryView: View {
                     Spacer()
                     Button("Dismiss", systemImage: "xmark") { model.errorMessage = nil }.labelStyle(.iconOnly)
                 }
-                .padding(12).background(.orange.opacity(0.1))
+                .padding(12).background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
             }
             if !model.pending.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -43,40 +51,40 @@ struct HistoryView: View {
                     }
                     Button("Retry saving") { Task { await model.retryPending() } }
                 }
-                .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.1))
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
             }
-            HSplitView {
-                List(selection: $selectedID) {
-                    ForEach(model.entries) { entry in
-                        HStack(alignment: .top) {
-                            if entry.starred { Image(systemName: "star.fill").foregroundStyle(.yellow) }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(entry.finalText.isEmpty ? "Empty transcript" : entry.finalText).lineLimit(2)
-                                Text(entry.createdAt, format: .dateTime.month().day().hour().minute())
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
+            Divider()
+            if model.entries.isEmpty, !model.isLoading {
+                // One empty state for the whole page, not an empty list beside an empty detail.
+                ContentUnavailableView {
+                    Label(model.searchText.isEmpty ? "No dictations yet" : "No matches",
+                          systemImage: model.searchText.isEmpty ? "waveform" : "magnifyingglass")
+                } description: {
+                    Text(model.searchText.isEmpty ? "Hold your shortcut and talk. Raw text, final text, and original audio stay together here."
+                                                  : "Nothing matches “\(model.searchText)”.")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    List(selection: $selectedID) {
+                        ForEach(model.entries) { entry in row(entry).tag(entry.id) }
+                        if model.hasMore {
+                            Button("Load older dictations") { Task { await model.loadMore() } }
                         }
-                        .padding(.vertical, 4).tag(entry.id)
                     }
-                    if model.hasMore {
-                        Button("Load older dictations") { Task { await model.loadMore() } }
+                    .scrollContentBackground(.hidden)
+                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 280, maxHeight: .infinity)
+                    Group {
+                        if let entry = model.entries.first(where: { $0.id == selectedID }) {
+                            details(entry)
+                        } else {
+                            ContentUnavailableView("Select a dictation", systemImage: "text.alignleft")
+                        }
                     }
+                    .frame(minWidth: 360, idealWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .overlay {
-                    if model.entries.isEmpty, !model.isLoading {
-                        ContentUnavailableView(model.searchText.isEmpty ? "No dictations yet" : "No matches",
-                                               systemImage: "text.bubble", description: Text("Raw text, final text, and original audio stay together here."))
-                    }
-                }
-                .frame(minWidth: 220, idealWidth: 250, maxWidth: 320, maxHeight: .infinity)
-                Group {
-                    if let entry = model.entries.first(where: { $0.id == selectedID }) {
-                        details(entry)
-                    } else {
-                        ContentUnavailableView("Select a dictation", systemImage: "text.alignleft")
-                    }
-                }
-                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task(id: model.searchText) { await model.reload() }
@@ -91,38 +99,54 @@ struct HistoryView: View {
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
         }
         .onDisappear { model.stopAudio() }
-        .frame(minHeight: 420)
+        // Take the width offered instead of the split view's ideal, so the sidebar keeps its width.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 420)
+    }
+
+    private func row(_ entry: HistoryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(entry.finalText.isEmpty ? "Empty transcript" : entry.finalText).lineLimit(2)
+            HStack(spacing: 4) {
+                if entry.starred { Image(systemName: "star.fill").foregroundStyle(GoblinBrand.yellow).accessibilityLabel("Starred") }
+                Text("\(entry.createdAt.formatted(.dateTime.month().day().hour().minute()))\(entry.targetApplicationName.map { " · " + $0 } ?? "")")
+                    .lineLimit(1)
+            }
+            .font(.caption.monospaced()).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 
     private func details(_ entry: HistoryEntry) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        Form {
+            Section {
                 HStack {
-                    Text(entry.createdAt, format: .dateTime.month().day().hour().minute()).font(.headline)
+                    Text(entry.createdAt, format: .dateTime.weekday(.wide).month().day().hour().minute()).font(.headline)
                     Spacer()
                     Button(entry.starred ? "Unstar" : "Star", systemImage: entry.starred ? "star.fill" : "star") {
                         Task { await model.setStarred(!entry.starred, entry: entry) }
-                    }.labelStyle(.iconOnly)
+                    }.labelStyle(.iconOnly).foregroundStyle(entry.starred ? GoblinBrand.yellow : .secondary)
                     Button("Delete", systemImage: "trash", role: .destructive) { deleteCandidate = entry }.labelStyle(.iconOnly)
                 }
-                LabeledContent("App", value: entry.targetApplicationName ?? "Not recorded")
-                LabeledContent("Tone", value: entry.tone)
-                LabeledContent("Words", value: "\(entry.wordCount)")
-                LabeledContent("Audio", value: String(format: "%.1f seconds", entry.audioDuration))
-                LabeledContent("Model", value: entry.model.isEmpty ? "Not recorded" : entry.model)
                 if let warning = entry.processingWarning {
-                    Label(warning, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Label(warning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 }
-                Divider()
-                transcript("Final text", text: entry.finalText)
-                transcript("Raw text", text: entry.rawText)
+            }
+            transcript("Final text", text: entry.finalText)
+            transcript("Raw text", text: entry.rawText)
+            Section {
                 ViewThatFits(in: .horizontal) {
                     reprocessControls(entry)
                     reprocessControls(entry, vertical: true)
                 }
-                if model.retranscribeAction == nil {
-                    Text("Re-transcription becomes available after the speech engine benchmark.").font(.caption).foregroundStyle(.secondary)
-                }
+            } footer: {
+                if model.retranscribeAction == nil { Text("Re-transcription is unavailable right now.") }
+            }
+            Section("Details") {
+                LabeledContent("App", value: entry.targetApplicationName ?? "Not recorded")
+                LabeledContent("Tone", value: entry.tone)
+                LabeledContent("Words") { Text("\(entry.wordCount)").monospacedDigit() }
+                LabeledContent("Audio") { Text(String(format: "%.1f seconds", entry.audioDuration)).monospacedDigit() }
+                LabeledContent("Model", value: entry.model.isEmpty ? "Not recorded" : entry.model)
                 DisclosureGroup("Latency breakdown") {
                     LabeledContent("Capture", value: milliseconds(entry.latencies.captureMilliseconds))
                     LabeledContent("Silence trimming", value: milliseconds(entry.latencies.trimMilliseconds))
@@ -130,9 +154,10 @@ struct HistoryView: View {
                     LabeledContent("Rewrite", value: milliseconds(entry.latencies.rewriteMilliseconds))
                     LabeledContent("Insertion", value: milliseconds(entry.latencies.insertionMilliseconds))
                 }
+                .monospacedDigit()
             }
-            .padding(24)
         }
+        .formStyle(.grouped).scrollContentBackground(.hidden)
     }
 
     private func reprocessControls(_ entry: HistoryEntry, vertical: Bool = false) -> some View {
@@ -151,13 +176,17 @@ struct HistoryView: View {
     }
 
     private func transcript(_ title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        Section {
+            Text(text.isEmpty ? "No text" : text).textSelection(.enabled)
+                .foregroundStyle(text.isEmpty ? .secondary : .primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } header: {
             HStack {
-                Text(title).font(.headline)
+                Text(title)
                 Spacer()
-                Button("Copy") { copy(text) }
+                Button("Copy", systemImage: "doc.on.doc") { copy(text) }.labelStyle(.titleAndIcon).controlSize(.small)
+                    .accessibilityLabel("Copy " + title.lowercased())
             }
-            Text(text.isEmpty ? "No text" : text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -177,15 +206,20 @@ struct HistoryRetentionView: View {
     @State private var error: String?
 
     var body: some View {
-        Form {
-            Text("Keep everything by leaving both limits empty. Starred dictations are always kept.")
-            Text("Applying limits deletes older unstarred dictations and their saved audio.").foregroundStyle(.secondary)
-            TextField("Maximum unstarred dictations", text: $count)
-            TextField("Maximum age in days", text: $age)
-            if let error { Text(error).foregroundStyle(.red) }
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Maximum unstarred dictations", text: $count, prompt: Text("Keep all"))
+                    TextField("Maximum age in days", text: $age, prompt: Text("No limit"))
+                    if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                } header: { Text("Retention") } footer: {
+                    Text("Keep everything by leaving both limits empty. Starred dictations are always kept. Applying limits deletes older unstarred dictations and their saved audio.")
+                }
+            }
+            .formStyle(.grouped).frame(height: 230)
             HStack {
-                Button("Cancel") { dismiss() }
                 Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save and apply") {
                     let countValue = Int(count)
                     let ageValue = Int(age)
@@ -198,10 +232,11 @@ struct HistoryRetentionView: View {
                         await model.saveRetention(HistoryRetention(maximumUnstarredCount: countValue, maximumAgeDays: ageValue))
                         dismiss()
                     }
-                }.keyboardShortcut(.defaultAction)
+                }.keyboardShortcut(.defaultAction).tint(GoblinBrand.tint)
             }
+            .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
         }
-        .padding(24).frame(width: 420)
+        .frame(width: 440)
         .onAppear {
             count = model.retention.maximumUnstarredCount.map(String.init) ?? ""
             age = model.retention.maximumAgeDays.map(String.init) ?? ""

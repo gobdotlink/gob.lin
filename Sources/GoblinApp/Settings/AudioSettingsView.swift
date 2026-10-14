@@ -103,30 +103,68 @@ struct AudioSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Audio").font(.largeTitle.bold())
-            Picker("Microphone", selection: $selectedUID) {
-                Text("Follow system default").tag("")
-                ForEach(preview.devices) { Text($0.name).tag($0.uid) }
-                if !selectedUID.isEmpty, !preview.devices.contains(where: { $0.uid == selectedUID }) { Text("Saved microphone (unavailable)").tag(selectedUID) }
+        Section {
+            LabeledContent("Microphone") {
+                HStack {
+                    Picker("Microphone", selection: $selectedUID) {
+                        Text("Follow system default").tag("")
+                        ForEach(preview.devices) { Text($0.name).tag($0.uid) }
+                        if !selectedUID.isEmpty, !preview.devices.contains(where: { $0.uid == selectedUID }) { Text("Saved microphone (unavailable)").tag(selectedUID) }
+                    }
+                    .labelsHidden().fixedSize()
+                    Button("Refresh devices", systemImage: "arrow.clockwise") { preview.refresh() }.labelStyle(.iconOnly)
+                }
             }
-            Button("Refresh devices") { preview.refresh() }
-            Toggle("Keep microphone warm between dictations", isOn: $keepMicrophoneWarm)
-            Text("Warm mode keeps the orange microphone indicator on and retains up to half a second of audio in memory before you press the shortcut. It is not saved until recording. With warm mode off, wait for Listening before speaking; first launch and Bluetooth can take longer. Opening a Bluetooth microphone can reduce headphone playback quality.").font(.callout).foregroundStyle(.secondary)
-            Text("Device input level · loudest channel").font(.callout).foregroundStyle(.secondary)
-            ProgressView(value: preview.level).tint(GoblinBrand.accent).accessibilityLabel("Device input level, loudest channel")
-            if preview.running { Text(preview.ready ? "Receiving device input" : "Waiting for the first audio buffer…").foregroundStyle(.secondary) }
-            Button(preview.running ? "Stop level preview" : "Preview microphone level") {
-                if preview.running { preview.stop() } else { preview.start(uid: selectedUID) }
+            Toggle(isOn: $keepMicrophoneWarm) {
+                Text("Keep microphone warm between dictations")
+                Text("Retains up to half a second of audio in memory before you press the shortcut.")
             }
-            .disabled(permissions.snapshot.microphone != .authorized)
-            if permissions.snapshot.microphone != .authorized { Button("Allow microphone…") { permissions.request(.microphone) } }
-            if let error = preview.error { Text(error).foregroundStyle(.orange) }
-            Text("The preview is local and is not saved. Missing devices fall back to the system default without erasing your saved selection.").foregroundStyle(.secondary)
-        }.padding(28)
+            .tint(GoblinBrand.tint)
+        } header: { Text("Input") } footer: {
+            Text("Warm mode keeps the orange microphone indicator on; audio is not saved until recording. With warm mode off, wait for Listening before speaking; first launch and Bluetooth can take longer. Opening a Bluetooth microphone can reduce headphone playback quality.")
+        }
+        Section {
+            LevelMeter(level: preview.level)
+                .accessibilityElement().accessibilityLabel("Device input level, loudest channel")
+                .accessibilityValue(Text(preview.level, format: .percent.precision(.fractionLength(0))))
+            LabeledContent {
+                Button(preview.running ? "Stop level preview" : "Preview microphone level") {
+                    if preview.running { preview.stop() } else { preview.start(uid: selectedUID) }
+                }
+                .disabled(permissions.snapshot.microphone != .authorized)
+            } label: {
+                Text("Device input level · loudest channel")
+                if preview.running { Text(preview.ready ? "Receiving device input" : "Waiting for the first audio buffer…") }
+            }
+            if permissions.snapshot.microphone != .authorized {
+                LabeledContent("Microphone access") { Button("Allow microphone…") { permissions.request(.microphone) } }
+            }
+            if let error = preview.error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+        } header: { Text("Level check") } footer: {
+            Text("The preview is local and is not saved. Missing devices fall back to the system default without erasing your saved selection.")
+        }
         .onAppear { preview.refresh() }
         .onDisappear { preview.stop(reason: .viewClosed) }
         .onChange(of: selectedUID) { _, uid in if preview.running { preview.stop(reason: .selectionChanged); preview.start(uid: uid) } }
         .onChange(of: permissions.snapshot.microphone) { _, status in if status != .authorized { preview.stop(reason: .permissionLost) } }
+    }
+}
+
+/// LED-style meter: green, then yellow, then red near clipping.
+struct LevelMeter: View {
+    let level: Double
+    private let segments = 36
+
+    var body: some View {
+        HStack(spacing: 2) {
+        ForEach(0..<segments, id: \.self) { index in
+            let position = Double(index) / Double(segments)
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(position < 0.7 ? GoblinBrand.accent : position < 0.9 ? GoblinBrand.yellow : GoblinBrand.red)
+                .opacity(level > position ? 1 : 0.13)
+        }
+        }
+        .frame(height: 14)
+        .padding(.vertical, 4)
     }
 }

@@ -6,87 +6,83 @@ struct DiagnosticsView: View {
     @State private var includeDeviceNames = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Diagnostics").font(.title.bold())
-                        Text("A clear view of what gob.lin needs and what went wrong.").foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.labelStyle(.iconOnly)
-                        .accessibilityLabel("Refresh diagnostics")
+        Section {
+            if model.hasWarning {
+                ForEach(model.warnings, id: \.area) { warning in
+                    Label {
+                        Text(warning.area.title)
+                        Text(warning.message)
+                    } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(GoblinBrand.yellow) }
                 }
-                if model.hasWarning {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(model.warnings, id: \.area) { warning in
-                            Label {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(warning.area.title).font(.headline)
-                                    Text(warning.message).font(.callout)
-                                }
-                            } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow) }
-                        }
-                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                } else { Label("No active warnings", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
-                GroupBox("Environment") {
-                    VStack(spacing: 9) {
-                        LabeledContent("Version", value: GoblinMetadata.version)
-                        LabeledContent("Microphone", value: model.environment.microphonePermission.rawValue.capitalized)
-                        LabeledContent("Accessibility", value: model.environment.accessibilityPermission.rawValue.capitalized)
-                        LabeledContent("Input Monitoring (not required)", value: model.environment.inputMonitoringPermission.rawValue.capitalized)
-                        LabeledContent("Secure Input", value: model.environment.secureInput ? "Enabled" : "Disabled")
-                        LabeledContent("Speech engine", value: model.environment.engineStatus.rawValue.capitalized)
-                        LabeledContent("Microphones available", value: String(model.environment.microphoneNames.count))
-                        if let name = model.environment.defaultMicrophoneName { LabeledContent("Default microphone", value: name) }
-                    }.padding(8)
-                }
-                GroupBox("Latest dictation timing") {
-                    VStack(alignment: .leading, spacing: 7) {
-                        if let timings = model.latestTimings {
-                            ForEach(DiagnosticsReport.timingLines(timings), id: \.self) { Text($0).monospacedDigit() }
-                        } else { Text("No dictation timings recorded yet.").foregroundStyle(.secondary) }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                }
-                if !model.events.isEmpty {
-                    HStack {
-                        Text("Recent errors").font(.headline)
-                        Spacer()
-                        Button("Clear recent errors") { model.clearRecentErrors() }
-                    }
-                    ForEach(model.events.reversed()) { event in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(event.failure.area.title + " · " + event.date.formatted(date: .omitted, time: .standard)).font(.caption).foregroundStyle(.secondary)
-                            Text(event.failure.message).font(.callout).textSelection(.enabled)
-                        }
-                    }
-                }
-                GroupBox("Development logs") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(model.logStatus).font(.callout)
-                        Text("~/Library/Logs/gob.lin").font(.caption).textSelection(.enabled)
-                        Text("Events include build, launch, operation, and process IDs. Audio, transcripts, keys, credentials, clipboard contents, and device names are excluded. Crash reports are listed for matching and shared separately.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Button("Reveal logs", systemImage: "folder") { model.revealLogs() }
-                            Button("Export recent logs…", systemImage: "square.and.arrow.up") { model.exportLogs(includeDeviceNames: includeDeviceNames) }
-                            Button("Reveal crash reports") { model.revealCrashReports() }
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                }
-                Divider()
-                Toggle("Include microphone names in copied / exported diagnostics", isOn: $includeDeviceNames)
-                Text("Copied diagnostics contain versions, permissions, stage timings, and typed errors. Transcript text, keys, request bodies, and file paths are excluded.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    if let message = model.copyMessage { Text(message).font(.callout).foregroundStyle(.secondary) }
-                    Spacer()
-                    Button("Copy diagnostics", systemImage: "doc.on.doc") { model.copyDiagnostics(includeDeviceNames: includeDeviceNames) }
-                        .buttonStyle(.borderedProminent)
-                }
-            }.padding(24)
+            } else {
+                Label("No active warnings", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.accent)
+            }
+        } header: {
+            HStack {
+                Text("Status")
+                Spacer()
+                Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.labelStyle(.iconOnly)
+                    .accessibilityLabel("Refresh diagnostics")
+            }
         }
-        .background(GoblinBrand.background).tint(GoblinBrand.accent).preferredColorScheme(.dark)
         .onAppear { model.refresh() }
+        Section("Environment") {
+            LabeledContent("Version") { Text(GoblinMetadata.version).monospaced() }
+            LabeledContent("Microphone", value: model.environment.microphonePermission.rawValue.capitalized)
+            LabeledContent("Accessibility", value: model.environment.accessibilityPermission.rawValue.capitalized)
+            LabeledContent("Input Monitoring (not required)", value: model.environment.inputMonitoringPermission.rawValue.capitalized)
+            LabeledContent("Secure Input", value: model.environment.secureInput ? "Enabled" : "Disabled")
+            LabeledContent("Speech engine", value: model.environment.engineStatus.rawValue.capitalized)
+            LabeledContent("Microphones available", value: String(model.environment.microphoneNames.count))
+            if let name = model.environment.defaultMicrophoneName { LabeledContent("Default microphone", value: name) }
+        }
+        Section("Latest dictation timing") {
+            if let timings = model.latestTimings {
+                ForEach(DiagnosticsReport.timingLines(timings), id: \.self) { Text($0).font(.body.monospaced()).monospacedDigit() }
+            } else { Text("No dictation timings recorded yet.").foregroundStyle(.secondary) }
+        }
+        if !model.events.isEmpty {
+            Section {
+                ForEach(model.events.reversed()) { event in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(event.failure.area.title + " · " + event.date.formatted(date: .omitted, time: .standard))
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Text(event.failure.message).textSelection(.enabled)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Recent errors")
+                    Spacer()
+                    Button("Clear recent errors") { model.clearRecentErrors() }
+                }
+            }
+        }
+        Section {
+            LabeledContent {
+                Text("~/Library/Logs/gob.lin").font(.callout.monospaced()).textSelection(.enabled)
+            } label: {
+                Text("Development logs")
+                Text(model.logStatus)
+            }
+            HStack {
+                Button("Reveal logs", systemImage: "folder") { model.revealLogs() }
+                Button("Export recent logs…", systemImage: "square.and.arrow.up") { model.exportLogs(includeDeviceNames: includeDeviceNames) }
+                Button("Reveal crash reports") { model.revealCrashReports() }
+            }
+        } header: { Text("Logs") } footer: {
+            Text("Events include build, launch, operation, and process IDs. Audio, transcripts, keys, credentials, clipboard contents, and device names are excluded. Crash reports are listed for matching and shared separately.")
+        }
+        Section {
+            Toggle("Include microphone names in copied / exported diagnostics", isOn: $includeDeviceNames).tint(GoblinBrand.tint)
+            HStack {
+                if let message = model.copyMessage { Text(message).foregroundStyle(.secondary) }
+                Spacer()
+                Button("Copy diagnostics", systemImage: "doc.on.doc") { model.copyDiagnostics(includeDeviceNames: includeDeviceNames) }
+                    .buttonStyle(.borderedProminent).tint(GoblinBrand.tint)
+            }
+        } header: { Text("Share") } footer: {
+            Text("Copied diagnostics contain versions, permissions, stage timings, and typed errors. Transcript text, keys, request bodies, and file paths are excluded.")
+        }
     }
 }

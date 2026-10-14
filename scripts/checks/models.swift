@@ -295,7 +295,7 @@ private actor CheckStore: SpeechModelAcquiring {
         }
         defer { ModelHub.offlineMode = false }
         service.preload()
-        let host = NSHostingView(rootView: ScrollView { ModelSettingsView(service: service) }.preferredColorScheme(.dark)
+        let host = NSHostingView(rootView: Form { ModelSettingsView(service: service) }.formStyle(.grouped).preferredColorScheme(.dark)
             .frame(width: 620, height: 820, alignment: .topLeading).background(Color(red: 0.09, green: 0.10, blue: 0.12)))
         host.frame = NSRect(x: 0, y: 0, width: 620, height: 820)
         try snapshot(host, to: directory.appendingPathComponent("model-preparation-layout.png"))

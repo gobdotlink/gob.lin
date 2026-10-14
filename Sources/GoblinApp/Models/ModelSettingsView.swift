@@ -7,42 +7,46 @@ struct ModelSettingsView: View {
     @State private var selectionError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Speech model").font(.largeTitle.bold())
-            Text("Loads at launch. Your audio is transcribed locally.").foregroundStyle(.secondary)
+        Section {
             Picker("Model", selection: Binding(get: { service.selectedModel.id }, set: { id in
                 do { try service.selectModel(id: id); selectionError = nil }
                 catch { selectionError = error.localizedDescription }
             })) {
                 ForEach(service.models) { model in Text(model.name).tag(model.id) }
             }.disabled(service.models.count == 1 || !service.canChangeModel)
+            if let selectionError { Text(selectionError).foregroundStyle(.orange) }
             LabeledContent("Runtime", value: service.selectedModel.runtime)
-            LabeledContent("Languages", value: "\(service.selectedModel.capabilities.languageCodes.count) · detected automatically")
-            DisclosureGroup("Supported languages") {
+            DisclosureGroup {
                 Text(service.selectedModel.capabilities.languageCodes.map {
                     Locale.current.localizedString(forLanguageCode: $0) ?? $0
                 }.joined(separator: ", ")).font(.callout).foregroundStyle(.secondary)
+            } label: {
+                LabeledContent("Languages", value: "\(service.selectedModel.capabilities.languageCodes.count) · detected automatically")
             }
-            Divider()
+        } header: { Text("Speech model") } footer: { Text("Loads at launch. Your audio is transcribed locally.") }
+        Section("Status") {
             status
-            if let selectionError { Text(selectionError).foregroundStyle(.orange) }
             if service.activeSessionCount > 0 {
                 Label(service.activeSessionCount == 1 ? "In use by 1 dictation" : "In use by \(service.activeSessionCount) dictations",
                       systemImage: "mic.fill").foregroundStyle(.secondary)
             }
             if let timing = service.lastLoadTiming {
-                LabeledContent(timing.cache == .installed ? "New installation load" : "Cached model load",
-                               value: String(format: "%.0f ms", timing.runtimeLoadMilliseconds))
-                LabeledContent("Total preparation", value: String(format: "%.0f ms", timing.preparationMilliseconds))
+                LabeledContent(timing.cache == .installed ? "New installation load" : "Cached model load") {
+                    Text(String(format: "%.0f ms", timing.runtimeLoadMilliseconds)).monospacedDigit()
+                }
+                LabeledContent("Total preparation") {
+                    Text(String(format: "%.0f ms", timing.preparationMilliseconds)).monospacedDigit()
+                }
             }
-            Divider()
+        }
+        Section {
             Picker("Unload after idle", selection: $service.idleTimeout) {
                 ForEach(ModelIdleTimeout.allCases) { timeout in Text(timeout.label).tag(timeout) }
             }
+            LabeledContent("Model files") { Button("Open model folder") { NSWorkspace.shared.open(service.directory) } }
+        } header: { Text("Memory") } footer: {
             Text("The model stays loaded throughout recording and recognition. After an idle unload, it reloads while the next recording starts. Downloaded files stay on disk for offline use.")
-                .font(.callout).foregroundStyle(.secondary)
-            Button("Open model folder") { NSWorkspace.shared.open(service.directory) }
-        }.padding(28)
+        }
     }
 
     @ViewBuilder private var status: some View {
@@ -70,7 +74,7 @@ struct ModelSettingsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Button("Cancel preparation") { service.cancelPreparation() }.disabled(service.activeSessionCount > 0)
-        case .ready: Label("Ready · available offline", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        case .ready: Label("Ready · available offline", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.accent)
         case .unloading: Label("Unloading idle model…", systemImage: "memorychip")
         case .unloaded:
             Label("Unloaded to free memory", systemImage: "memorychip")
