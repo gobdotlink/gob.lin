@@ -24,6 +24,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     typealias ReprocessAction = (HistoryEntry, URL?) async throws -> HistoryReprocessResult
 
     @Published private(set) var entries: [HistoryEntry] = []
+    @Published private(set) var revision = 0
     @Published private(set) var pending: [PendingHistoryEntry] = []
     @Published private(set) var isLoading = false
     @Published private(set) var hasMore = false
@@ -64,6 +65,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             onRecorded?(saved)
             do { _ = try await store.applyRetention(retention) }
             catch { lastFailure = .historyOperationFailed; errorMessage = "Dictation saved, but retention cleanup failed: \(error.localizedDescription)" }
+            revision += 1
             await reload()
             return true
         } catch {
@@ -133,6 +135,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             requestID = UUID()
             isLoading = false
             entries.removeAll { $0.id == entry.id }
+            revision += 1
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
@@ -140,6 +143,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             guard let store else { throw HistoryError.database("History is unavailable") }
             _ = try await store.applyRetention(policy)
+            revision += 1
             defaults.set(try JSONEncoder().encode(policy), forKey: "history.retention")
             retention = policy
             await reload()

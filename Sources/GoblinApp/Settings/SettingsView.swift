@@ -5,7 +5,7 @@ import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
-    case rewrite = "Post-processing", tone = "Tone", history = "History", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
+    case rewrite = "Post-processing", tone = "Tone", history = "History", insights = "Insights", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -16,6 +16,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .rewrite: "wand.and.stars"
         case .tone: "textformat"
         case .history: "clock"
+        case .insights: "chart.bar.xaxis"
         case .overlay: "rectangle.on.rectangle"
         case .diagnostics: "stethoscope"
         case .about: "info.circle"
@@ -30,6 +31,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .rewrite: "optional AI cleanup, off by default"
         case .tone: "how your dictation reads"
         case .history: "raw text, final text and audio"
+        case .insights: "your words, on this Mac"
         case .overlay: "the goblin that listens"
         case .diagnostics: "what gob.lin needs, what broke"
         case .about: "local by default"
@@ -66,6 +68,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if section == .history {
                     HistoryView(model: model.history)
+                } else if section == .insights {
+                    InsightsView(history: model.history)
                 } else {
                     // One header and one Form for every page: identical margins, grouping and scrolling.
                     if section != .about { section.header }
@@ -99,7 +103,7 @@ struct SettingsView: View {
                                                onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                                onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
-        case .history: EmptyView()
+        case .history, .insights: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
         case .about: AboutSettingsView(updates: model.updates)

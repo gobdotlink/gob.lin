@@ -47,6 +47,7 @@ private struct GoblinMenu: View {
         ClipboardRecoveryMenu(service: model.insertion)
         Divider()
         Button("History", systemImage: "clock") { model.settingsSelection = .history; show("settings") }
+        Button("Insights", systemImage: "chart.bar.xaxis") { model.settingsSelection = .insights; show("settings") }
         Button("Settings…", systemImage: "gearshape") { show("settings") }
             .keyboardShortcut(",")
         Divider()

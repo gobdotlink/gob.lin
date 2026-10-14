@@ -71,6 +71,23 @@ public actor HistoryStore {
         return try decode(row[0])
     }
 
+    /// A single read snapshot of retained entries, independent of History search and pagination.
+    public func insights(now: Date = Date(), day: Date = Date(), calendar: Calendar = .current) throws -> HistoryInsights {
+        var accumulator = HistoryInsightsAccumulator(now: now, day: day, calendar: calendar)
+        // Project only metrics; stream rows so transcripts and the full store never collect in memory.
+        try database.forEachRow("""
+            SELECT created_at, json_extract(metadata, '$.wordCount'), json_extract(metadata, '$.audioDuration'),
+                   json_extract(metadata, '$.targetBundleIdentifier'), app_name
+            FROM entries WHERE created_at <= ? ORDER BY created_at DESC, id DESC
+            """, [.number(now.timeIntervalSince1970)]) { row in
+            try Task.checkCancellation()
+            guard let timestamp = Double(row[0] ?? ""), timestamp.isFinite else { return }
+            accumulator.add(date: Date(timeIntervalSince1970: timestamp), words: max(0, Int(row[1] ?? "") ?? 0),
+                            duration: row[2].flatMap(Double.init), bundle: row[3], name: row[4])
+        }
+        return accumulator.finish()
+    }
+
     public func setStarred(_ starred: Bool, id: UUID) throws {
         var saved = try entry(id: id)
         saved.starred = starred
@@ -190,6 +207,12 @@ private final class HistoryDatabase {
     }
 
     func query(_ sql: String, _ values: [SQLValue] = []) throws -> [[String?]] {
+        var rows: [[String?]] = []
+        try forEachRow(sql, values) { rows.append($0) }
+        return rows
+    }
+
+    func forEachRow(_ sql: String, _ values: [SQLValue] = [], _ body: ([String?]) throws -> Void) throws {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { throw failure() }
         defer { sqlite3_finalize(statement) }
@@ -206,12 +229,11 @@ private final class HistoryDatabase {
             }
             guard status == SQLITE_OK else { throw failure() }
         }
-        var rows: [[String?]] = []
         while true {
             let status = sqlite3_step(statement)
-            if status == SQLITE_DONE { return rows }
+            if status == SQLITE_DONE { return }
             guard status == SQLITE_ROW else { throw failure() }
-            rows.append((0..<sqlite3_column_count(statement)).map { column in
+            try body((0..<sqlite3_column_count(statement)).map { column in
                 sqlite3_column_text(statement, column).map { String(cString: $0) }
             })
         }
