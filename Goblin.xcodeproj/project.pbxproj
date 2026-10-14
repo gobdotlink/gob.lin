@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		250000000000000000000001 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250000000000000000000002 /* InsightsView.swift */; };
 		5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */; };
 		E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */; };
 		10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */; };
@@ -51,6 +52,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		250000000000000000000002 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
 		651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
 		3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateKeychain.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 			children = (
 				CD14CC141C14EE017D44E28D /* HistoryModel.swift */,
 				5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */,
+				250000000000000000000002 /* InsightsView.swift */,
 			);
 			path = History;
 			sourceTree = "<group>";
@@ -358,6 +361,7 @@
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */,
 				F80F9DD8AE1771A3DE51D7BA /* HistoryView.swift in Sources */,
+				250000000000000000000001 /* InsightsView.swift in Sources */,
 				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
 				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
 				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,
