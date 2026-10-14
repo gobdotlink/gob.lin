@@ -92,6 +92,19 @@ struct HistoryInsightsTests {
         #expect(broken.currentStreak == 0 && broken.longestStreak == 3)
     }
 
+    @Test func skippedMidnightKeepsChartsAndStreaksOnCalendarDates() {
+        let cal = calendar("America/Santiago")
+        let days = ["2026-09-05T18:00:00Z", "2026-09-06T18:00:00Z", "2026-09-07T18:00:00Z"].map(date)
+        for (now, activity, streak) in [(days[2], days, 3), (days[1], Array(days.prefix(2)), 2), (days[1], [days[0]], 1)] {
+            var aggregate = HistoryInsightsAccumulator(now: now, day: now, calendar: cal)
+            for day in activity { aggregate.add(date: day, words: 1, duration: 1, bundle: nil, name: nil) }
+            let result = aggregate.finish()
+            #expect(result.currentStreak == streak && result.longestStreak == streak)
+            #expect(result.totalWords == activity.count && result.days.reduce(0) { $0 + $1.words } == activity.count)
+            #expect(result.days.allSatisfy { $0.date == cal.startOfDay(for: $0.date) })
+        }
+    }
+
     @Test func daylightSavingTimelineKeepsBothRepeatedHours() async throws {
         let directory = try directory()
         defer { try? FileManager.default.removeItem(at: directory) }

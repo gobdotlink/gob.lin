@@ -86,7 +86,10 @@ struct HistoryInsightsAccumulator {
 
     mutating func finish() -> HistoryInsights {
         result.days = (-6...0).compactMap { offset in
-            calendar.date(byAdding: .day, value: offset, to: today).map { InsightWords(date: $0, words: dailyWords[$0, default: 0]) }
+            calendar.date(byAdding: .day, value: offset, to: today).map {
+                let day = calendar.startOfDay(for: $0)
+                return InsightWords(date: day, words: dailyWords[day, default: 0])
+            }
         }
         var hour = selectedDay.start
         while hour < selectedDay.end {
@@ -98,12 +101,14 @@ struct HistoryInsightsAccumulator {
         var previous: Date?
         var run = 0
         for day in activeDays {
-            run = previous.flatMap { calendar.dateComponents([.day], from: $0, to: day).day } == 1 ? run + 1 : 1
+            let nextDay = previous.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) }.map { calendar.startOfDay(for: $0) }
+            run = nextDay == day ? run + 1 : 1
             result.longestStreak = max(result.longestStreak, run)
             previous = day
         }
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today).map { calendar.startOfDay(for: $0) }
         if let last = activeDays.last,
-           last == today || last == calendar.date(byAdding: .day, value: -1, to: today) {
+           last == today || last == yesterday {
             result.currentStreak = run
         }
         result.applications = applications.values.sorted {
