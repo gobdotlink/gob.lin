@@ -115,6 +115,7 @@ scripts/check-updates.sh .build/app/gob.lin.app
 ```
 
 The updater checks exercise release selection, credential redirects, checksums,
-real certificate verification when a signed fixture is supplied, waiting for app
-exit and rollback on launch failure. They use temporary fixtures and never launch
+real certificate verification when a signed fixture is supplied, native AppKit
+termination with async shutdown, waiting for app exit and rollback on launch failure.
+They use temporary fixtures and never launch
 or replace an installed app or request privacy permissions.
