@@ -36,12 +36,19 @@ esac
 
 swift build -c "$configuration" --disable-build-manifest-caching
 binary_directory=$(swift build -c "$configuration" --show-bin-path)
-app='.build/app/gob.lin.app'
+staging=$(mktemp -d .build/bundle.XXXXXX)
+trap 'rm -rf "$staging"' EXIT
+app="$staging/gob.lin.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary_directory/GoblinApp" "$app/Contents/MacOS/GoblinApp"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 cp -R Sources/GoblinApp/Assets "$app/Contents/Resources/"
 cp Resources/Goblin.icns "$app/Contents/Resources/"
+# Keep dependency resources inside the signed app's canonical Resources directory.
+for resource in "$binary_directory"/*.bundle; do
+    [ -d "$resource" ] || continue
+    cp -R "$resource" "$app/Contents/Resources/"
+done
 
 # Pin to the certificate public identity, not the changing executable hash.
 requirement="designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\""
@@ -49,4 +56,9 @@ codesign --force --options runtime --timestamp=none \
     --entitlements Resources/Goblin.entitlements --sign "$certificate" \
     --requirements "=$requirement" "$app"
 codesign --verify --strict --verbose=2 "$app"
+# Replace only after signing succeeds; never accumulate stale resources between releases.
+mkdir -p .build/app
+rm -rf .build/app/gob.lin.app
+mv "$app" .build/app/gob.lin.app
+app='.build/app/gob.lin.app'
 printf '\nBuilt %s\nRun: scripts/launch.sh\n' "$app"

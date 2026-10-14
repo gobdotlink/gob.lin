@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */; };
+		E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */; };
+		10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */; };
+		9E9D3F5BF087A229386F1C7C /* UpdateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */; };
 		380000000000000000000001 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 380000000000000000000002 /* DirectInsertionVerification.swift */; };
 		F90900000000000000000001 /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000003 /* SpeechModelService.swift */; };
 		F90900000000000000000002 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000004 /* ModelSettingsView.swift */; };
@@ -47,6 +51,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
+		3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateKeychain.swift; sourceTree = "<group>"; };
+		9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSettingsView.swift; sourceTree = "<group>"; };
 		380000000000000000000002 /* DirectInsertionVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectInsertionVerification.swift; sourceTree = "<group>"; };
 		F90900000000000000000003 /* SpeechModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelService.swift; sourceTree = "<group>"; };
 		F90900000000000000000004 /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
@@ -99,6 +107,17 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		CC5620D64D6A0F7DB9A6DD38 /* Updates */ = {
+			isa = PBXGroup;
+			children = (
+				651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */,
+				A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */,
+				3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */,
+				9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */,
+			);
+			path = Updates;
+			sourceTree = "<group>";
+		};
 		F90900000000000000000005 /* Models */ = {
 			isa = PBXGroup;
 			children = (
@@ -209,6 +228,7 @@
 				40EA8A05ACABDE4CA467032E /* Overlay */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 				148979F2473089BBF41C17BC /* Settings */,
+				CC5620D64D6A0F7DB9A6DD38 /* Updates */,
 				F90900000000000000000005 /* Models */,
 			);
 			name = GoblinApp;
@@ -316,6 +336,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */,
+				E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */,
+				10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */,
+				9E9D3F5BF087A229386F1C7C /* UpdateSettingsView.swift in Sources */,
 				F90900000000000000000001 /* SpeechModelService.swift in Sources */,
 				F90900000000000000000002 /* ModelSettingsView.swift in Sources */,
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,

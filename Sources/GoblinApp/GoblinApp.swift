@@ -54,6 +54,16 @@ private struct GoblinMenu: View {
         Button("Diagnostics…", systemImage: "stethoscope") { model.settingsSelection = .diagnostics; show("settings") }
         Button("Copy diagnostics", systemImage: "doc.on.doc") { model.diagnostics.copyDiagnostics() }
         Divider()
+        if let version = model.updates.availableVersion {
+            Button("Install v\(version) & relaunch", systemImage: "arrow.down.circle") { model.updates.install() }
+                .disabled(model.updates.isBusy || !model.canInstallUpdate)
+        }
+        Button(model.updates.isBusy ? model.updates.status : "Check for updates…", systemImage: "arrow.clockwise") {
+            model.settingsSelection = .about
+            show("settings")
+            model.updates.check()
+        }.disabled(model.updates.isBusy)
+        Divider()
         Button("Quit gob.lin", systemImage: "power") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }

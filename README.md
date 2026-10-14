@@ -84,6 +84,24 @@ swift run goblin --help
 scripts/smoke.sh                   # package, CLI, and bundle metadata checks
 ```
 
+## Releases and updates
+
+gob.lin checks GitHub Releases at launch and hourly, and offers **Install & relaunch**
+in the menu and **Settings → About**. Private releases use existing `gh` authentication
+or a GitHub token stored in Keychain. Updates must match the installed app's signing
+identity; recording and unsaved history block installation.
+
+After merging changes, publish from a clean, up-to-date `main` checkout:
+
+```sh
+scripts/release.sh 0.1.1
+```
+
+The command bumps app/CLI versions and the build number, checks the project, packages
+a certificate-signed ZIP, commits the version, pushes a release tag, and publishes a
+GitHub release with generated notes. To build an archive without publishing, use
+`scripts/package-app.sh`. See [release setup, signing and recovery](docs/releases.md).
+
 ## Source layout
 
 - `Sources/GoblinCore`: portable Swift domain and pipeline code; no AppKit.

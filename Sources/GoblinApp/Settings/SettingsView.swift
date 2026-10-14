@@ -102,7 +102,7 @@ struct SettingsView: View {
         case .history: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
-        case .about: AboutSettingsView()
+        case .about: AboutSettingsView(updates: model.updates)
         }
     }
 }
@@ -173,6 +173,7 @@ private struct GeneralSettingsView: View {
 }
 
 private struct AboutSettingsView: View {
+    @ObservedObject var updates: UpdateChecker
     var body: some View {
         Section {
             HStack(spacing: 20) {
@@ -185,8 +186,9 @@ private struct AboutSettingsView: View {
                 }
             }
             .padding(.vertical, 8)
-            LabeledContent("Version") { Text(GoblinMetadata.version).font(.body.monospaced()).textSelection(.enabled) }
+            LabeledContent("Version") { Text(updates.currentVersion).font(.body.monospaced()).textSelection(.enabled) }
         }
+        UpdateSettingsView(updates: updates)
         Section("Data") {
             LabeledContent("Dictations and audio") {
                 Button("Open data folder") {
