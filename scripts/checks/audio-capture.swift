@@ -78,6 +78,25 @@ struct AudioCaptureCheck {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-capture-check-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let device = AudioInputResolution(requestedUID: "", device: AudioInputDevice(id: 0, uid: "check", name: "Check input"))
+        // Frequency gating must suppress cues without removing concurrent low-band speech or its timing.
+        for rate in [16_000.0, 44_100.0, 48_000.0] {
+            let count = Int(rate)
+            let voice = (0..<count).map { Float(sin(2 * .pi * 320 * Double($0) / rate) * 0.2) }
+            let mixed = (0..<count).map { voice[$0] + Float(sin(2 * .pi * 1760 * Double($0) / rate) * 0.15) }
+            var filter = CaptureCueFilter(sampleRate: rate)
+            let filtered = filter.apply(mixed, enabled: true)
+            precondition(filtered.count == voice.count && filtered.allSatisfy(\.isFinite))
+            func magnitude(_ frequency: Double) -> Double {
+                let start = count / 2
+                let real = (start..<count).reduce(0.0) { $0 + Double(filtered[$1]) * cos(2 * .pi * frequency * Double($1) / rate) }
+                let imag = (start..<count).reduce(0.0) { $0 + Double(filtered[$1]) * sin(2 * .pi * frequency * Double($1) / rate) }
+                return hypot(real, imag) * 2 / Double(count - start)
+            }
+            precondition(magnitude(1760) < 0.00001 && magnitude(320) > 0.18)
+            let loud = filter.apply([Float](repeating: 0.99, count: 4096), enabled: true)
+            precondition(loud.allSatisfy { $0.isFinite && abs($0) <= 1 })
+            precondition(filter.apply(voice, enabled: false) == voice)
+        }
         for rate in [16_000.0, 44_100.0, 48_000.0] {
             let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 2, interleaved: false)!
             let processor = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })

@@ -47,13 +47,16 @@ public final class AudioCaptureService {
 
     @discardableResult
     public func start(uid: String, directory: URL? = nil,
+                      feedback: FeedbackSounds? = nil,
+                      feedbackSessionID: UUID? = nil,
                       onEvent: @escaping @Sendable (AudioCaptureEvent) -> Void) throws -> UUID {
         guard activeSessionID == nil else { throw AudioCaptureFailure(.alreadyRecording) }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { throw AudioCaptureFailure(.permissionMissing) }
         try prepareInput(uid: uid)
         let id = UUID()
         do {
-            try processor!.begin(sessionID: id, directory: try directory ?? Self.defaultDirectory(), resolution: inputResolution!, handler: onEvent)
+            try processor!.begin(sessionID: id, directory: try directory ?? Self.defaultDirectory(), resolution: inputResolution!,
+                                 feedback: feedback, feedbackSessionID: feedbackSessionID, handler: onEvent)
             activeSessionID = id; eventHandler = onEvent; cancellationRequested = false; terminalCommitted = false; cancellationError = nil
             try startEngine()
             return id

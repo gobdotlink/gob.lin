@@ -32,6 +32,10 @@ final class CaptureProcessor: @unchecked Sendable {
     private var handler: (@Sendable (AudioCaptureEvent) -> Void)?
     private var resolution: AudioInputResolution
     private var ready = false
+    private var firstBufferPending = false
+    private var feedbackSessionID: UUID?
+    private var feedback: FeedbackSounds?
+    private var cueFilter: CaptureCueFilter
     private var preRollCount = 0
     private var failure: AudioCaptureFailure?
     private var failedFileURL: URL?
@@ -42,6 +46,7 @@ final class CaptureProcessor: @unchecked Sendable {
          preview: @escaping @Sendable (Double) -> Void,
          onFailure: @escaping @Sendable (AudioCaptureFailure) -> Void) throws {
         nativeRate = format.sampleRate
+        cueFilter = CaptureCueFilter(sampleRate: format.sampleRate)
         guard format.commonFormat == .pcmFormatFloat32, format.channelCount > 0, nativeRate > 0,
               let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: nativeRate, channels: 1, interleaved: false),
               let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
@@ -52,6 +57,8 @@ final class CaptureProcessor: @unchecked Sendable {
     }
 
     func begin(sessionID: UUID, directory: URL, resolution: AudioInputResolution,
+               feedback: FeedbackSounds? = nil,
+               feedbackSessionID: UUID? = nil,
                handler: @escaping @Sendable (AudioCaptureEvent) -> Void) throws {
         lock.withLock { recordingSince = .now; hasNonzeroInput = false; inputHostRange = nil; hostTimesValid = true }
         try queue.sync {
@@ -61,6 +68,10 @@ final class CaptureProcessor: @unchecked Sendable {
             do { file = try CaptureFile(sessionID: sessionID, directory: directory) }
             catch { throw AudioCaptureFailure(.storageFailed) }
             self.handler = handler; ready = false
+            if let feedback { self.feedback = feedback }
+            firstBufferPending = feedback != nil
+            self.feedbackSessionID = feedbackSessionID ?? sessionID
+            if feedbackSessionID == nil { feedback?.begin(sessionID: sessionID) }
             preRollCount = ring.count
             let preRoll = ring; ring.removeAll(keepingCapacity: true)
             if !preRoll.isEmpty { try deliver(preRoll) }
@@ -128,11 +139,19 @@ final class CaptureProcessor: @unchecked Sendable {
         } else { hostTimesValid = false }
         let rms = sqrt((sums.max() ?? 0) / Double(frames))
         let copiedSamples = mono
+        let capturedAt = time?.isHostTimeValid == true ? time!.hostTime : mach_absolute_time()
         queue.async {
             defer { self.lock.withLock { self.pendingFrames -= frames } }
             guard self.failure == nil else { return }
             self.preview(rms)
-            do { try self.convert(copiedSamples) }
+            do {
+                let protected = self.feedback?.protectsInput(at: capturedAt, duration: durationTicks) ?? false
+                try self.convert(self.feedback == nil ? copiedSamples : self.cueFilter.apply(copiedSamples, enabled: protected))
+                if self.firstBufferPending, self.file != nil, let id = self.feedbackSessionID {
+                    self.firstBufferPending = false
+                    self.feedback?.firstBuffer(sessionID: id)
+                }
+            }
             catch { self.fail((error as? AudioCaptureFailure)?.kind ?? .conversionFailed) }
         }
         if let pendingStop {
@@ -247,7 +266,7 @@ final class CaptureProcessor: @unchecked Sendable {
                     guard let file = self.file, file.sessionID == sessionID else {
                         continuation.resume(throwing: AudioCaptureFailure(.staleSession)); return
                     }
-                    defer { self.file = nil; self.handler = nil; self.ring.removeAll(keepingCapacity: true) }
+                    defer { self.file = nil; self.handler = nil; self.firstBufferPending = false; self.ring.removeAll(keepingCapacity: true) }
                     do {
                         if cancel {
                             try file.cancel()
