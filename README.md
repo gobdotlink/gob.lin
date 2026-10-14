@@ -24,7 +24,7 @@ certificate in your login keychain. macOS may ask you to approve its trust and
 codesign access. Keep that certificate and private key across builds: the bundle
 identifier and certificate-based designated requirement stay stable, so macOS
 can preserve microphone and Accessibility grants. The app runs without a Dock
-icon; its menu contains Settings, History, Paste last transcript, and Quit.
+icon; its menu contains Settings, History, Insights, Paste last transcript, and Quit.
 
 `scripts/launch.sh` verifies the exact bundle and its certificate signature,
 prints its absolute path and designated requirement, and refuses to launch
@@ -143,6 +143,20 @@ its original capture until `HistoryModel.record` returns success.
 migrations, retention, audio boundaries, and paged access to 1,000 synthetic
 entries. It never uses your recordings or history folder.
 
+## Insights
+
+Open Insights from the menu or Settings sidebar for today’s, this calendar week’s,
+and total saved words, weighted dictation WPM, current/longest daily streaks,
+a seven-day word chart, a selectable day’s hourly timeline, and words by app.
+Calculations stay local and use all retained History entries, independent of search
+or pagination. Deletion and retention reduce totals; starred entries still count.
+
+Words use History’s saved final-text whitespace count. Reprocessing creates another
+entry and counts again. WPM uses final words divided by recorded audio minutes
+(including silence) only where words and a positive duration are available; missing
+duration never becomes a guessed speed. Days use the entry start in the Mac’s current
+calendar/time zone; a current streak can end today or yesterday.
+
 ## CLI evaluation
 
 ```sh
@@ -221,7 +235,7 @@ Native Swift, macOS 26+, distributed as a direct download.
 - Optional LLM rewriting, global tone controls, and recoverable history with raw text, final text, and audio.
 - Settings for microphone, hotkeys, model status, dictionary, rewriting, tone, and history retention.
 
-Stats, learning from corrections, context integration, per-app styles, snippets, file transcription, on-device rewriting, and additional model selection are tracked for later in Linear.
+Learning from corrections, context integration, per-app styles, snippets, file transcription, on-device rewriting, and additional model selection are tracked for later in Linear.
 
 ## Milestones
 

@@ -48,7 +48,7 @@ struct SettingsCapture {
                     (.transcribing, "transcribing"), (.polishing, "polishing"), (.error("polish failed — pasted raw"), "error")]
                 if !CommandLine.arguments.contains("--transition-only") {
                     let pages: [(SettingsSection, String)] = [(.general, "general"), (.audio, "audio"), (.model, "model"),
-                        (.dictionary, "dictionary"), (.rewrite, "rewrite"), (.tone, "tone"), (.history, "history"),
+                        (.dictionary, "dictionary"), (.rewrite, "rewrite"), (.tone, "tone"), (.history, "history"), (.insights, "insights"),
                         (.overlay, "overlay"), (.diagnostics, "diagnostics"), (.about, "about")]
                     precondition(Set(pages.map(\.0)) == Set(SettingsSection.allCases))
                     for (page, name) in pages {
