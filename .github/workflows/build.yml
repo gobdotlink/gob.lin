@@ -19,5 +19,7 @@ jobs:
         run: scripts/check-updates.sh
       - name: Check live delivery and finalization
         run: scripts/check-live-delivery.sh && scripts/check-live-transcription.sh
+      - name: Check capture integrity and media ownership
+        run: scripts/check-audio-capture.sh && scripts/check-feedback-media.sh
       - name: Build Xcode app without local signing credentials
         run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build

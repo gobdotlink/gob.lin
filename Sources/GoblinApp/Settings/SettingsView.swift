@@ -114,6 +114,7 @@ struct SettingsView: View {
 private struct GeneralSettingsView: View {
     @ObservedObject var model: AppModel
     @AppStorage("feedbackSoundsEnabled") private var sounds = true
+    @AppStorage("audio.pauseMediaWhileDictating") private var pauseMedia = false
     @State private var loginEnabled = false
     @State private var loginError: String?
 
@@ -151,6 +152,11 @@ private struct GeneralSettingsView: View {
             Toggle(isOn: $sounds) {
                 Text("Feedback sounds")
                 Text("Plays once the microphone is actually capturing.")
+            }
+            .tint(GoblinBrand.tint)
+            Toggle(isOn: $pauseMedia) {
+                Text("Pause media while dictating")
+                Text("Resumes the same player after capture, unless you change playback.")
             }
             .tint(GoblinBrand.tint)
             Toggle("Add a trailing space", isOn: Binding(get: { model.insertion.trailingSpace }, set: { model.insertion.trailingSpace = $0 })).tint(GoblinBrand.tint)

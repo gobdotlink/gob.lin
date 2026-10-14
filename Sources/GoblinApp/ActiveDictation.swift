@@ -15,6 +15,8 @@ final class ActiveDictation {
     let levelContinuation: AsyncStream<Double>.Continuation
     let onEvent: @Sendable (AudioCaptureEvent) -> Void
     var captureID: UUID?
+    var media: MediaPauseSession?
+    var sounds: FeedbackSounds?
     var startTask: Task<Void, Never>?
     var stopTask: Task<CapturedAudio, Error>?
     var cancelTask: Task<Void, Never>?

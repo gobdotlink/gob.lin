@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */; };
 		250000000000000000000001 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250000000000000000000002 /* InsightsView.swift */; };
 		5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */; };
 		E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */; };
@@ -52,6 +53,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPauseSession.swift; sourceTree = "<group>"; };
 		250000000000000000000002 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
 		651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
@@ -215,6 +217,7 @@
 			isa = PBXGroup;
 			children = (
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
+				1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */,
 				130000000000000000000002 /* DictationSession.swift */,
 				130000000000000000000004 /* ActiveDictation.swift */,
 				5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */,
@@ -346,6 +349,7 @@
 				F90900000000000000000001 /* SpeechModelService.swift in Sources */,
 				F90900000000000000000002 /* ModelSettingsView.swift in Sources */,
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
+				61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */,
 				130000000000000000000001 /* DictationSession.swift in Sources */,
 				130000000000000000000003 /* ActiveDictation.swift in Sources */,
 				2D264F8C1F01B32F7D43596E /* AudioSettingsView.swift in Sources */,
