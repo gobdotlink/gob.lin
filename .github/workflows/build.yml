@@ -13,5 +13,7 @@ jobs:
         run: scripts/smoke.sh
       - name: Check dictionary and text-processing guardrails
         run: swift test
+      - name: Check live delivery and finalization
+        run: scripts/check-live-delivery.sh && scripts/check-live-transcription.sh
       - name: Build Xcode app without local signing credentials
         run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build

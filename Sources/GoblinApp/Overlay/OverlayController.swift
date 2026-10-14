@@ -11,7 +11,7 @@ enum OverlayPhase: Equatable {
         case .listening: "autism recording in progress"
         case .transcribing: "turning voice into words…"
         case .polishing: "polishing your words…"
-        case .error(let message): message
+        case .error: "dictation needs attention"
         }
     }
 }
@@ -37,7 +37,8 @@ final class OverlayModel: ObservableObject {
     }
     /// Recent levels, newest last; the meter ripples them outward from its center.
     @Published var levels = Array(repeating: 0.0, count: OverlayModel.levelHistory)
-    @Published var textHeight: Double = 44
+    @Published var previewUnavailable = false
+    let textHeight: Double = 96
     static let levelHistory = 4
     var cancel: () -> Void = {}
     var sizeChanged: (CGSize) -> Void = { _ in }
@@ -74,8 +75,10 @@ final class OverlayController {
         model.sizeChanged = { [weak self] size in
             guard let self else { return }
             let available = self.screen?.visibleFrame.size ?? CGSize(width: 800, height: 600)
-            self.panel.setContentSize(CGSize(width: min(size.width, max(240, available.width - 32)),
-                height: min(size.height, max(100, available.height - 32))))
+            let bounded = CGSize(width: min(size.width, max(240, available.width - 32)),
+                height: min(size.height, max(100, available.height - 32)))
+            guard self.panel.contentView?.frame.size != bounded else { return }
+            self.panel.setContentSize(bounded)
             self.reposition()
         }
         displayObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -94,7 +97,7 @@ final class OverlayController {
         model.tentativeText = ""
         model.levels = Array(repeating: 0, count: OverlayModel.levelHistory)
         model.audioLevel = 0
-        model.textHeight = 44
+        model.previewUnavailable = false
         model.cancel = onCancel
         model.phase = .arming
         // Render the collapsed frame first so the spring has somewhere to start from.
@@ -110,17 +113,15 @@ final class OverlayController {
     }
 
     func update(_ phase: OverlayPhase, committed: String? = nil, tentative: String? = nil,
-                level: Double? = nil, session: UUID) {
+                level: Double? = nil, previewUnavailable: Bool = false, session: UUID) {
         if session != sessionID { return }
         if phase == .hidden { hide(session: session); return }
         hideTask?.cancel()
-        model.phase = phase
-        if let committed { model.committedText = committed }
-        if let tentative { model.tentativeText = tentative }
-        let textHeight = min(130, max(44, Double(model.committedText.count + model.tentativeText.count) / 48 * 20))
-        model.textHeight = max(model.textHeight, textHeight)
+        if model.phase != phase { model.phase = phase }
+        if let committed, committed != model.committedText { model.committedText = committed }
+        if let tentative, tentative != model.tentativeText { model.tentativeText = tentative }
+        if previewUnavailable { model.previewUnavailable = true }
         if let level { model.audioLevel = level.isFinite ? min(1, max(0, level)) : 0 }
-        panel.orderFrontRegardless()
     }
 
     func hide(session: UUID? = nil) {

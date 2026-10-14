@@ -24,20 +24,34 @@ struct OverlayCapture {
                 guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CaptureError.captureFailed }
                 let output = CommandLine.arguments.dropFirst().first ?? "docs/screenshots/gob-12-overlay.png"
                 try png.write(to: URL(fileURLWithPath: output))
-                let height = overlay.model.textHeight
+                let window = app.windows.first(where: { $0.title == "gob.lin Dictation" })!
+                let frame = window.frame
+                for text in ["", "One word", String(repeating: "A much longer streaming transcript. ", count: 30)] {
+                    overlay.update(.listening, committed: text, tentative: "", session: session)
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    try await Task.sleep(for: .milliseconds(80))
+                    precondition(window.frame == frame, "Streaming text changed the native overlay frame")
+                }
+                overlay.update(.listening, committed: "Keep the final words", tentative: " visible.", session: session)
                 overlay.update(.transcribing, session: session)
                 precondition(!overlay.model.committedText.isEmpty && !overlay.model.tentativeText.isEmpty,
                              "Finalization discarded visible text")
                 overlay.update(.polishing, committed: "Done.", tentative: "", session: session)
-                precondition(overlay.model.textHeight == height, "Finalization collapsed the text area")
+                overlay.update(.error(String(repeating: "Detailed failure message. ", count: 15)), session: session)
+                window.contentView?.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(80))
+                precondition(window.frame == frame, "An error message shifted the overlay")
                 let next = overlay.begin { overlay.hide() }
+                window.contentView?.layoutSubtreeIfNeeded()
+                precondition(window.frame == frame, "A new session shifted the empty overlay")
                 overlay.hide(session: session)
                 precondition(overlay.model.phase == .arming, "A stale hide closed a newer session")
                 overlay.update(.listening, level: .nan, session: next)
                 precondition(overlay.model.audioLevel == 0)
                 overlay.hide(session: next)
-                overlay.update(.listening, session: next)
+                overlay.update(.listening, previewUnavailable: true, session: next)
                 precondition(overlay.model.phase == .hidden, "A canceled session reopened")
+                precondition(!overlay.model.previewUnavailable, "A stale live failure changed the next session")
                 overlay.shutdown()
                 print("Native overlay captured; finalization, non-key panel, stale hide and non-finite input checks passed.")
             } catch {
