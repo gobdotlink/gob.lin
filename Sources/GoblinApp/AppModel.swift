@@ -310,10 +310,6 @@ final class AppModel: ObservableObject {
             await previousDrain?.value
             guard let self, !session.cancelled, !Task.isCancelled else { active.finishEvents(); return }
             do {
-                if self.defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
-                   let script = GoblinBrand.assetDirectory?.appendingPathComponent("pause-media.js") {
-                    active.media = MediaPauseSession(script: script)
-                }
                 if self.defaults.object(forKey: "feedbackSoundsEnabled") as? Bool ?? true {
                     active.sounds = self.feedback
                     active.sounds?.begin(sessionID: session.id)
@@ -332,6 +328,10 @@ final class AppModel: ObservableObject {
                 }
                 active.captureID = try self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
                     directory: self.captureDirectory, feedback: self.feedback, feedbackSessionID: session.id, onEvent: active.onEvent)
+                if self.defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
+                   let script = GoblinBrand.assetDirectory?.appendingPathComponent("pause-media.js") {
+                    active.media = MediaPauseSession(script: script)
+                }
                 active.eventTask = Task { @MainActor [weak self] in
                     for await event in active.events { await self?.consume(event, for: active) }
                 }
