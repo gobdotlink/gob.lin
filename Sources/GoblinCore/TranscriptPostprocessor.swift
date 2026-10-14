@@ -8,6 +8,13 @@ public struct TranscriptProcessingResult: Sendable {
     public let warning: DiagnosticFailure?
     public let timings: DictationTimings
 
+    /// A successful cleanup can remove every hesitation sound without producing
+    /// an insertion. Keep this distinct from missing ASR output or a failed rewrite.
+    public var intentionallyEmpty: Bool {
+        polished && warning == nil && !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     public init(rawText: String, finalText: String, tone: DictationTone, polished: Bool,
                 warning: DiagnosticFailure? = nil, timings: DictationTimings = DictationTimings()) {
         self.rawText = rawText; self.finalText = finalText; self.tone = tone

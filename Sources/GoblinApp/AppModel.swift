@@ -547,6 +547,12 @@ final class AppModel: ObservableObject {
             overlay.update(.polishing, session: overlayID)
         }
         let result = await processTranscript(raw)
+        try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
+    }
+
+    /// Shared completion path, including successful cleanup that leaves nothing to insert.
+    func finishDictation(_ result: TranscriptProcessingResult, model: String, audioURL: URL,
+                         duration: Double, timings: DictationTimings, session: DictationSession) async throws {
         try session.checkCancellation()
         var timings = timings
         timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
@@ -581,12 +587,12 @@ final class AppModel: ObservableObject {
                 }
                 timings.insertionMilliseconds = Self.milliseconds(since: insertionStart)
             }
-        } else {
+        } else if !result.intentionallyEmpty {
             warning = warning ?? DiagnosticFailure.noTranscriptAvailable.message
         }
         // Once insertion starts, retain its text/audio even if cancellation interrupts acknowledgement.
         if !insertionAttempted { try session.checkCancellation() }
-        let entry = HistoryEntry(id: session.id, rawText: raw, finalText: result.finalText,
+        let entry = HistoryEntry(id: session.id, rawText: result.rawText, finalText: result.finalText,
             tone: result.tone.rawValue, polished: result.polished,
             targetBundleIdentifier: session.target?.bundleIdentifier,
             targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,

@@ -1,5 +1,7 @@
 import Darwin
+import AppKit
 import Foundation
+import GoblinCore
 @testable import GoblinApp
 @testable import GoblinEngines
 
@@ -67,5 +69,45 @@ struct LiveDeliveryCheck {
         models.endSession(lease)
         await models.shutdown()
         print("Live delivery passed: 200 ordered audio frames survive a one-second UI stall; meter coalesces and terminal events drain.")
+        try await checkEmptyCleanupCompletion()
+    }
+
+    @MainActor private static func checkEmptyCleanupCompletion() async throws {
+        _ = NSApplication.shared
+        let suite = "app.goblin.empty-cleanup-check." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let model = AppModel(dataDirectory: directory, defaults: defaults, servicesEnabled: false)
+        model.lastTranscript = "Previous transcript."
+        await model.history.reload()
+        let fixtures: [(TranscriptProcessingResult, String?)] = [
+            (.init(rawText: "um uh erm", finalText: "", tone: .formal, polished: true), nil),
+            (.init(rawText: "", finalText: "", tone: .formal, polished: false), DiagnosticFailure.noTranscriptAvailable.message),
+            (.init(rawText: "uh", finalText: "", tone: .formal, polished: false, warning: .rewrite(.transport)), DiagnosticFailure.rewrite(.transport).message),
+        ]
+        for (result, expectedWarning) in fixtures {
+            let audio = directory.appendingPathComponent(UUID().uuidString + ".wav")
+            let syntheticBytes = Data([0x52, 0x49, 0x46, 0x46])
+            try syntheticBytes.write(to: audio)
+            let session = DictationSession(target: nil)
+            try await model.finishDictation(result, model: "fixture", audioURL: audio, duration: 1,
+                                            timings: DictationTimings(), session: session)
+            let entry = model.history.entries.first { $0.id == session.id }
+            precondition(entry?.rawText == result.rawText && entry?.finalText == "" && entry?.polished == result.polished,
+                         "Empty cleanup lost the original History entry")
+            precondition(entry?.processingWarning == expectedWarning, "Intentional empty cleanup became a dictation failure")
+            precondition(model.lastTranscript == "Previous transcript." && model.insertion.outcome == .idle,
+                         "Empty cleanup changed the previous transcript or attempted insertion")
+            guard let savedAudio = try await model.history.store?.audioFileURL(for: session.id) else { preconditionFailure("Missing original audio") }
+            let savedBytes = try Data(contentsOf: savedAudio)
+            precondition(savedBytes == syntheticBytes, "Empty cleanup lost the original audio")
+            precondition(session.audioOwnedByHistory && !FileManager.default.fileExists(atPath: audio.path), "Capture ownership was not transferred")
+        }
+        await model.shutdown()
+        print("Empty cleanup completion passed: no insertion or failure; original text/audio retained; missing ASR and provider errors still warn.")
     }
 }
