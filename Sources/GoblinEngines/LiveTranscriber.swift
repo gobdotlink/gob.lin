@@ -32,6 +32,7 @@ public actor LiveTranscriber {
     private var previewHasGap = false
     private var cancelled = false
     private var finishing = false
+    private var previewStopped = false
     public private(set) var requiresFinalRecovery = false
     public private(set) var computeMilliseconds = 0.0
 
@@ -108,6 +109,12 @@ public actor LiveTranscriber {
         return TranscriptionResult(text: Self.join(settled, Self.text(committed + remainder)))
     }
 
+    /// Stop publishing previews immediately, while still accepting the capture's final frames.
+    public func stopPreview() {
+        previewStopped = true
+        continuation.finish()
+    }
+
     public func cancel() async {
         cancelled = true
         inference?.cancel()
@@ -120,7 +127,7 @@ public actor LiveTranscriber {
     private var unavailable: Bool { recoveryReason == .decodeUnavailable }
 
     private func scheduleIfNeeded() {
-        guard !cancelled, !finishing, !unavailable, inference == nil, !samples.isEmpty,
+        guard !cancelled, !finishing, !previewStopped, !unavailable, inference == nil, !samples.isEmpty,
               received - lastScheduled >= (previousText.isEmpty ? 6_400 : 9_600) else { return }
         if samples.count > maximumSamples {
             // A skipped boundary starts a separate preview; original audio owns final continuity.

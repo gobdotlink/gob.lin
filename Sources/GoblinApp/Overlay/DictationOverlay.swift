@@ -8,7 +8,6 @@ struct DictationOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listening: Bool { model.phase == .listening }
-    private var hasText: Bool { !model.committedText.isEmpty || !model.tentativeText.isEmpty }
     private var isError: Bool { if case .error = model.visiblePhase { true } else { false } }
     private var indicator: Int { model.visiblePhase == .listening ? 0 : isError ? 1 : 2 }
     private let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -30,8 +29,8 @@ struct DictationOverlay: View {
                     .frame(width: 40, height: 28)
                     .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: indicator)
                     HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        caption.fixedSize(horizontal: false, vertical: true)
-                        if !isError { BlinkingCursor(steady: reduceMotion) }
+                        caption.lineLimit(1)
+                        if model.visiblePhase == .listening { BlinkingCursor(steady: reduceMotion) }
                     }
                     .font(.custom("VT323-Regular", size: 19, relativeTo: .body))
                     .foregroundStyle(.white)
@@ -41,21 +40,24 @@ struct DictationOverlay: View {
                         .accessibilityLabel("Cancel dictation")
                         .help(listening ? "Cancel dictation (Esc)" : "Cancel dictation")
                 }
-                if hasText {
-                    ScrollView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if case .error(let message) = model.visiblePhase {
+                            Text(message).foregroundStyle(GoblinBrand.yellow).font(.system(size: 13))
+                        }
                         Text("\(Text(model.committedText).foregroundStyle(.white))\(Text(model.tentativeText).foregroundStyle(.secondary))")
                             .font(.system(size: 15)).lineSpacing(2).frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.disabled)
                     }
-                    .defaultScrollAnchor(.bottom, for: .initialOffset)
-                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
-                    .frame(height: model.textHeight)
                 }
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .frame(height: model.textHeight)
             }
             .padding(.horizontal, 18).padding(.vertical, 16)
             .background {
                 // Opaque for legibility over any desktop. Only the shape casts the shadow, so the text
-                // is never rasterized through a shadow layer that changes as the pill grows.
+                // is never rasterized through the shadow layer as its content changes.
                 shape.fill(GoblinBrand.background)
                     // Light catching the top edge, fading into the brand green.
                     .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.2), GoblinBrand.accent.opacity(0.22)],
@@ -79,6 +81,9 @@ struct DictationOverlay: View {
     }
 
     private var caption: Text {
+        if model.visiblePhase == .listening, model.previewUnavailable {
+            return Text("recording · preview unavailable")
+        }
         let caption = model.visiblePhase.caption
         guard caption.hasPrefix("autism ") else { return Text(verbatim: caption) }
         return Text("\(Text(verbatim: "autism").foregroundStyle(GoblinBrand.accent))\(Text(verbatim: String(caption.dropFirst(6))))")

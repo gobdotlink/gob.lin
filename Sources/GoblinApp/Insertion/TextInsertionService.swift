@@ -5,7 +5,7 @@ import GoblinCore
 import SwiftUI
 
 enum InsertionOutcome: Equatable {
-    case idle, pending, success, failure(DiagnosticFailure)
+    case idle, pending, success, unverified, failure(DiagnosticFailure)
 }
 
 @MainActor
@@ -56,7 +56,7 @@ final class TextInsertionService: ObservableObject {
         }
     }
 
-    func insert(_ transcript: String) async {
+    func insert(_ transcript: String, onPasteSent: (() -> Void)? = nil) async {
         guard !busy else { setStatus("A paste is still awaiting confirmation", outcome: .failure(.insertionNotAcknowledged)); return }
         guard !transcript.isEmpty else { setStatus("No transcript to paste", outcome: .failure(.noTranscriptAvailable)); return }
         guard AXIsProcessTrusted() else { setStatus("Allow Accessibility before inserting text", outcome: .failure(.insertionPermissionMissing)); return }
@@ -164,6 +164,11 @@ final class TextInsertionService: ObservableObject {
             return
         }
         setStatus("Waiting for the focused app to consume the transcript", outcome: .pending)
+        onPasteSent?()
+        guard expected != nil, !quirks.remoteDesktop else {
+            setStatus("Paste sent; this app does not expose edit verification. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .unverified)
+            return
+        }
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while ProcessInfo.processInfo.systemUptime < deadline, !Task.isCancelled {
             guard pasteboard.changeCount == ownedCount else {
@@ -194,7 +199,7 @@ final class TextInsertionService: ObservableObject {
             try? await Task.sleep(for: .milliseconds(50))
         }
         // This deadline only abandons verification. It must never trigger a clipboard restore.
-        setStatus("This app did not expose paste confirmation. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .failure(.insertionNotAcknowledged))
+        setStatus("Paste sent; the edit could not be verified. Check the target before retrying. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .unverified)
     }
 
     func restorePreviousClipboard() {

@@ -43,7 +43,14 @@ struct FocusedText {
     }
 
     func isStillFocused() -> Bool {
-        guard let current = Self.capture() else { return false }
-        return current.pid == pid && (applicationFallback || CFEqual(current.element, element))
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+        if applicationFallback { return true }
+        // Focus checks must not re-read the editor's value/range on every paste poll.
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.25)
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &raw) == .success,
+              let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
+        return CFEqual(raw, element)
     }
 }

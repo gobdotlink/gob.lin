@@ -262,6 +262,18 @@ struct LiveTranscriptionCheck {
         await overflow.append([Float](repeating: 0.1, count: 12_800), at: 0)
         verify(try await overflow.finish() == nil, "Skipped window did not require original audio")
 
+        let releaseRuntime = SlowUntimedPCM(delay: .milliseconds(100))
+        let released = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { releaseRuntime })
+        let releaseValues = Values()
+        let releaseCollector = Task { for await value in released.updates { await releaseValues.add(value) } }
+        await released.append([Float](repeating: 0.1, count: 6_400), at: 0)
+        await released.stopPreview()
+        await released.append([Float](repeating: 0.2, count: 9_600), at: 6_400)
+        verify(try await released.finish()?.text == "Second sentence.", "Stopping preview dropped capture's final frames")
+        await releaseCollector.value
+        verify(await releaseValues.values.isEmpty, "Release replayed pending live previews")
+        verify(await releaseRuntime.calls == 2, "Release decoded a queued preview before final recognition")
+
         let discontinuous = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { runtime })
         await discontinuous.append([0.1], at: 1)
         verify(try await discontinuous.finish() == nil, "Missing frame was accepted")

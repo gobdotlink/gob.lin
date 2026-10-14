@@ -50,11 +50,14 @@ final class AppModel: ObservableObject {
         audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")], diagnostics: diagnostics)
         for child in [permissions.objectWillChange, hotkeys.objectWillChange, insertion.objectWillChange,
                       history.objectWillChange, dictionary.objectWillChange, audioPreview.objectWillChange, diagnostics.objectWillChange,
-                      speechModels.objectWillChange, overlay.model.objectWillChange] {
+                      speechModels.objectWillChange] {
             child.sink { [weak self] _ in
                 Task { @MainActor in self?.synchronizeMascot(); self?.objectWillChange.send() }
             }.store(in: &subscriptions)
         }
+        overlay.model.$phase.removeDuplicates().sink { [weak self] _ in
+            Task { @MainActor in self?.synchronizeMascot() }
+        }.store(in: &subscriptions)
         permissions.$snapshot.sink { [weak self] snapshot in
             Task { @MainActor in
                 guard let self else { return }
@@ -90,7 +93,7 @@ final class AppModel: ObservableObject {
                 guard let self, !self.shuttingDown else { return }
                 switch outcome {
                 case .failure(let failure): self.showFailure(failure)
-                case .success: self.diagnostics.resolve(.insertion)
+                case .success, .unverified: self.diagnostics.resolve(.insertion)
                 case .idle, .pending: break
                 }
             }
@@ -266,7 +269,7 @@ final class AppModel: ObservableObject {
         active.textTask = Task { @MainActor [weak self] in
             var previousRecovery: LiveRecoveryReason?
             for await text in active.live.updates {
-                guard let self, !session.cancelled, let overlayID = session.overlayID else { continue }
+                guard let self, !session.cancelled, !active.stopping, let overlayID = session.overlayID else { continue }
                 if text.recoveryReason != previousRecovery {
                     var details = DevelopmentDetails()
                     switch text.recoveryReason {
@@ -283,34 +286,35 @@ final class AppModel: ObservableObject {
                         area: .application, severity: text.recoveryReason == nil ? .info : .warning, operation: session.id, details: details)
                     previousRecovery = text.recoveryReason
                 }
-                let phase: OverlayPhase = text.recoveryReason == nil ? (active.stopping ? .transcribing : .listening)
-                    : .error(text.recoveryReason == .decodeUnavailable
-                        ? "Live preview is unavailable; final audio will be checked on release."
-                        : "Live preview is recovering; recording continues.")
-                self.overlay.update(phase,
-                    committed: text.committedText, tentative: text.tentativeText, session: overlayID)
+                self.overlay.update(.listening,
+                    committed: text.committedText, tentative: text.tentativeText,
+                    previewUnavailable: text.recoveryReason == .decodeUnavailable, session: overlayID)
             }
         }
         let previousDrain = captureDrainTask
         active.startTask = Task { @MainActor [weak self] in
             await previousDrain?.value
-            guard let self, !session.cancelled, !Task.isCancelled else { active.eventContinuation.finish(); return }
+            guard let self, !session.cancelled, !Task.isCancelled else { active.finishEvents(); return }
             do {
-                let continuation = active.eventContinuation
-                active.captureID = try self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
-                    directory: self.captureDirectory) { event in
-                    continuation.yield(event)
-                    switch event {
-                    case .finished, .failed, .cancelled: continuation.finish()
-                    default: break
+                let frames = active.frames, live = active.live
+                active.frameTask = Task.detached {
+                    for await frame in frames { await live.append(frame.samples, at: frame.samplePosition) }
+                }
+                active.levelTask = Task { @MainActor [weak self] in
+                    for await rms in active.levels {
+                        guard !session.cancelled, !active.stopping, let overlayID = session.overlayID else { continue }
+                        self?.overlay.update(.listening, level: AudioInputDevices.displayLevel(rms: rms), session: overlayID)
+                        do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
                     }
                 }
-                active.frameTask = Task { @MainActor [weak self] in
+                active.captureID = try self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
+                    directory: self.captureDirectory, onEvent: active.onEvent)
+                active.eventTask = Task { @MainActor [weak self] in
                     for await event in active.events { await self?.consume(event, for: active) }
                 }
             } catch {
                 active.failure = error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed)
-                active.eventContinuation.finish()
+                active.finishEvents()
                 if !active.stopping && !session.cancelled { self.suspendDictation(active) }
             }
         }
@@ -325,12 +329,7 @@ final class AppModel: ObservableObject {
             diagnostics.resolve(.microphone)
             diagnostics.developmentLog.record(.firstBuffer, area: .microphone, operation: session.id)
             overlay.update(.listening, session: overlayID)
-        case .frame(let frame):
-            guard frame.sessionID == active.captureID else { return }
-            await active.live.append(frame.samples, at: frame.samplePosition)
-        case .level(let id, let rms):
-            guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
-            overlay.update(overlay.model.phase, level: AudioInputDevices.displayLevel(rms: rms), session: overlayID)
+        case .frame, .level: break
         case .failed(let id, let failure):
             guard id == active.captureID else { return }
             active.failure = failure
@@ -357,17 +356,19 @@ final class AppModel: ObservableObject {
         }
         if let overlayID = active.session.overlayID { overlay.update(.transcribing, session: overlayID) }
         active.stopTask = Task { @MainActor [weak self] in
+            await active.live.stopPreview()
             await active.startTask?.value
             guard let self else { throw CancellationError() }
             defer {
                 active.captureMilliseconds = Self.milliseconds(since: active.session.captureStarted)
-                active.eventContinuation.finish()
+                active.finishEvents()
             }
             try active.session.checkCancellation()
             guard let captureID = active.captureID else { throw active.failure ?? AudioCaptureFailure(.startFailed) }
             let audio = try await self.capture.stop(sessionID: captureID)
             active.audio = audio
             await active.frameTask?.value
+            await active.eventTask?.value
             self.applyWarmMicrophone()
             return audio
         }
@@ -419,8 +420,10 @@ final class AppModel: ObservableObject {
             await active.cancelTask?.value
             await active.startTask?.value
             _ = try? await active.stopTask?.value
-            active.eventContinuation.finish()
+            active.finishEvents()
             await active.frameTask?.value
+            await active.eventTask?.value
+            await active.levelTask?.value
             await active.live.cancel()
             await active.textTask?.value
             _ = try? await active.readiness.value
@@ -448,8 +451,9 @@ final class AppModel: ObservableObject {
                 do { try await self.capture.cancel(sessionID: captureID) }
                 catch { self.diagnostics.report(.microphoneCaptureFailed, operation: active.session.id) }
             }
-            active.eventContinuation.finish()
+            active.finishEvents()
             await active.frameTask?.value
+            await active.eventTask?.value
         }
         let cancellation = active.cancelTask
         captureDrainTask = Task { await cancellation?.value }
@@ -551,13 +555,16 @@ final class AppModel: ObservableObject {
                 if session.targetIsFocused && !insertion.busy && insertionTask == nil {
                     insertionAttempted = true
                     diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
-                    await insertion.insert(result.finalText)
+                    await insertion.insert(result.finalText) { [weak self] in
+                        if let overlayID = session.overlayID { self?.overlay.hide(session: overlayID) }
+                    }
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
                         details.failure = failure
                         details.succeeded = false
                         warning = warning ?? failure.message
                     } else if case .success = insertion.outcome { details.succeeded = true }
+                    else if case .unverified = insertion.outcome { warning = warning ?? insertion.status }
                     diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: session.id, details: details)
                 } else {
                     let failure: DiagnosticFailure = session.targetIsFocused ? .insertionNotAcknowledged : .insertionTargetChanged
@@ -605,12 +612,16 @@ final class AppModel: ObservableObject {
     }
 
     private func synchronizeMascot() {
-        if diagnostics.hasWarning { mascotState = .warning; return }
-        switch overlay.model.phase {
-        case .arming, .listening: mascotState = .recording
-        case .transcribing, .polishing: mascotState = .transcribing
-        case .error: mascotState = .warning
-        case .hidden: mascotState = .idle
+        let state: MascotState
+        if diagnostics.hasWarning { state = .warning }
+        else {
+            switch overlay.model.phase {
+            case .arming, .listening: state = .recording
+            case .transcribing, .polishing: state = .transcribing
+            case .error: state = .warning
+            case .hidden: state = .idle
+            }
         }
+        if mascotState != state { mascotState = state }
     }
 }
