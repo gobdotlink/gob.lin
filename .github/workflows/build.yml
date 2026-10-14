@@ -13,6 +13,8 @@ jobs:
         run: scripts/smoke.sh
       - name: Check dictionary and text-processing guardrails
         run: swift test
+      - name: Check provider credential preflight and prompt-free submissions
+        run: scripts/check-rewrite-credentials.sh
       - name: Check updater protocol and installation recovery
         run: scripts/check-updates.sh
       - name: Check live delivery and finalization

@@ -82,7 +82,11 @@ struct RewriteSettingsView: View {
                 Spacer()
                 if keySaved {
                     Button("Remove key", role: .destructive) {
-                        do { try RewriteKeychain.delete(for: settings); keySaved = false; apiKey = ""; message = "API key removed."; failed = false }
+                        do {
+                            try RewriteKeychain.delete(for: settings)
+                            keySaved = false; apiKey = ""; message = "API key removed."; failed = false
+                            onSaved()
+                        }
                         catch { show(error) }
                     }
                 }

@@ -91,6 +91,11 @@ in the menu and **Settings → About**. Private releases use existing `gh` authe
 or a GitHub token stored in Keychain. Updates must match the installed app's signing
 identity; recording and unsaved history block installation.
 
+When AI cleanup is enabled, gob.lin accesses the selected provider’s Keychain key
+at launch, including after an update relaunch. Approve any macOS Keychain request
+then, before dictating. The credential stays in memory until quit or a settings/key
+change; denied access falls back to raw text without prompting during submission.
+
 After merging changes, publish from a clean, up-to-date `main` checkout:
 
 ```sh

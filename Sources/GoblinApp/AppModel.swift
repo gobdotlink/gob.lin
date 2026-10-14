@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     let servicesEnabled: Bool
     let overlay = OverlayController()
     let processor = TranscriptPostprocessor()
+    private let rewriteCredentials = RewriteCredentials()
     let diagnostics: DiagnosticsModel
     let dictionary: DictionaryModel
     let history: HistoryModel
@@ -157,6 +158,10 @@ final class AppModel: ObservableObject {
         guard !shuttingDown else { return }
         overlay.position = OverlayPosition(rawValue: defaults.string(forKey: "overlayPosition") ?? "") ?? .bottom
         let settings = RewriteSettingsStore.load(defaults: defaults)
+        if servicesEnabled {
+            do { try rewriteCredentials.prepare(for: settings) }
+            catch { showFailure(.rewriteConfiguration) }
+        }
         if settings.enabled && settings.cleanup != .none {
             history.rewriteAction = { [weak self] entry, _ in
                 guard let self, !self.shuttingDown else { throw CancellationError() }
@@ -185,6 +190,11 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
+    func reloadRewriteCredentials() {
+        rewriteCredentials.reset()
+        refreshConfiguration()
+    }
+
     func processTranscript(_ raw: String) async -> TranscriptProcessingResult {
         let operation = UUID()
         diagnostics.developmentLog.record(.processingStarted, area: .application, operation: operation)
@@ -204,7 +214,7 @@ final class AppModel: ObservableObject {
                 showFailure(.rewriteConfiguration)
                 return TranscriptProcessingResult(rawText: raw, finalText: raw, tone: tone, polished: false, warning: .rewriteConfiguration)
             }
-            do { key = try RewriteKeychain.load(for: settings) }
+            do { key = try rewriteCredentials.key(for: settings) }
             catch {
                 let failure = DiagnosticFailure.rewriteConfiguration
                 completed.failure = failure
@@ -536,6 +546,7 @@ final class AppModel: ObservableObject {
         audioPreview.stop(reason: .shutdown)
         overlay.shutdown()
         subscriptions.removeAll()
+        rewriteCredentials.reset()
         diagnostics.developmentLog.record(.appStopped, area: .application)
     }
 

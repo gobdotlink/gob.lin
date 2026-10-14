@@ -24,9 +24,11 @@ struct IconCheck {
         let bytes = Data(bytes: bitmap.bitmapData!, count: size * size * 4)
         precondition(stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 0 }.count > size,
             "Artwork must have visible pixels")
-        precondition(stride(from: 0, to: bytes.count, by: 4).contains {
-            bytes[$0 + 1] > bytes[$0] && bytes[$0 + 1] > bytes[$0 + 2] && bytes[$0 + 3] > 0
-        }, "Artwork must retain the green brand color")
+        let containsGreen = stride(from: 0, to: bytes.count, by: 4).contains { index -> Bool in
+            let red = bytes[index], green = bytes[index + 1], blue = bytes[index + 2], alpha = bytes[index + 3]
+            return green > red && green > blue && alpha > 0
+        }
+        precondition(containsGreen, "Artwork must retain the green brand color")
         return bytes
     }
 
@@ -40,6 +42,36 @@ struct IconCheck {
             }
             precondition(Set(rendered).count == MascotState.allCases.count, "Menu states must be distinct")
         }
+    }
+
+    static func writePreview(to path: String) throws {
+        let size = NSSize(width: 660, height: 180)
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1320, pixelsHigh: 360,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 1320 * 4, bitsPerPixel: 32)!
+        let context = NSGraphicsContext(bitmapImageRep: bitmap)!
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(x: 2, y: 2)
+        NSColor.white.setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+        ("gob.lin · 22 × 22 pt menu icon · Retina rendering" as NSString).draw(at: NSPoint(x: 18, y: 152),
+            withAttributes: [.font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: NSColor.black])
+        for (column, state) in MascotState.allCases.enumerated() {
+            let x = CGFloat(18 + column * 162)
+            (state.rawValue.capitalized as NSString).draw(at: NSPoint(x: x, y: 123),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.darkGray])
+            for (row, dark) in [false, true].enumerated() {
+                let y = CGFloat(72 - row * 46)
+                (dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.9, alpha: 1)).setFill()
+                NSBezierPath(roundedRect: NSRect(x: x, y: y, width: 146, height: 36), xRadius: 5, yRadius: 5).fill()
+                (dark ? "Dark" : "Light" as NSString).draw(at: NSPoint(x: x + 10, y: y + 11),
+                    withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: dark ? NSColor.white : NSColor.darkGray])
+                GoblinBrand.menuImage(state).draw(in: NSRect(x: x + 111, y: y + 7, width: 22, height: 22))
+            }
+        }
+        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
     }
 
     static func main() throws {
@@ -59,23 +91,49 @@ struct IconCheck {
             precondition(icon.representations.contains { $0.pixelsWide == 16 })
             precondition(icon.representations.contains { $0.pixelsWide == 1024 })
             for size in [16, 32, 128, 256, 512, 1024] { _ = pixels(icon, size: size) }
-            for name in ["goblin-shut", "goblin-yap", "hands"] {
+            for name in ["goblin-shut", "goblin-yap", "hands", "goblin-menu", "goblin-menu@2x"] {
                 let packaged = app.resourceURL!.appendingPathComponent("Assets/" + name + ".png")
                 let packagedBytes = try Data(contentsOf: packaged)
                 let sourceBytes = try Data(contentsOf: assets.appendingPathComponent(name + ".png"))
                 precondition(packagedBytes == sourceBytes,
                     "Both packaging paths must preserve the source sprites")
                 _ = pixels(NSImage(contentsOf: packaged)!, size: 64)
+                if name.hasPrefix("goblin-menu") {
+                    let bitmap = NSBitmapImageRep(data: packagedBytes)!
+                    let dimension = name.hasSuffix("@2x") ? 44 : 22
+                    precondition(bitmap.pixelsWide == dimension && bitmap.pixelsHigh == dimension && bitmap.hasAlpha,
+                        "Menu artwork must ship transparent 22×22 and 44×44 representations")
+                }
             }
             print("PASS signed-bundle artwork: \(path)")
         }
+        let artwork = GoblinBrand.menuArtwork()
+        precondition(artwork.size == NSSize(width: 22, height: 22))
+        for dimension in [22, 44] {
+            precondition(artwork.representations.contains { $0.pixelsWide == dimension && $0.pixelsHigh == dimension },
+                "Load both menu artwork scales at the same 22-point logical size")
+        }
+        let originalMenu = pixels(GoblinBrand.menuImage(.idle), size: 44)
         checkMenuStates()
+        if let path = ProcessInfo.processInfo.environment["GOBLIN_ICON_PREVIEW"] { try writePreview(to: path) }
         let shut = assets.appendingPathComponent("goblin-shut.png")
         let yap = assets.appendingPathComponent("goblin-yap.png")
         try FileManager.default.removeItem(at: shut)
         try Data("invalid PNG".utf8).write(to: yap)
         checkMenuStates()
+        precondition(pixels(GoblinBrand.menuImage(.idle), size: 44) == originalMenu,
+            "The menu must use its dedicated artwork independently of overlay sprites")
         precondition(GoblinBrand.sprite("goblin-shut").accessibilityDescription == "gob.lin artwork unavailable")
+        let menu = assets.appendingPathComponent("goblin-menu.png")
+        let retina = assets.appendingPathComponent("goblin-menu@2x.png")
+        try Data("invalid PNG".utf8).write(to: retina)
+        checkMenuStates()
+        precondition(GoblinBrand.menuArtwork().representations.count == 1, "A bad Retina asset must fall back to the standard asset")
+        try Data("invalid PNG".utf8).write(to: menu)
+        checkMenuStates()
+        precondition(GoblinBrand.menuArtwork().accessibilityDescription == "gob.lin artwork unavailable")
+        try FileManager.default.removeItem(at: menu)
+        checkMenuStates()
         try FileManager.default.removeItem(at: assets)
         precondition(GoblinBrand.sprite("hands").accessibilityDescription == "gob.lin artwork unavailable")
         checkMenuStates()

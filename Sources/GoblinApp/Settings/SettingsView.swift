@@ -96,7 +96,7 @@ struct SettingsView: View {
             else { Section { Text("The speech model service is not connected.").foregroundStyle(.secondary) } }
         case .dictionary: DictionarySettingsView(model: model.dictionary)
         case .rewrite: RewriteSettingsView(defaults: model.defaults, inspectKeychain: model.servicesEnabled,
-                                               onSaved: { model.refreshConfiguration(); model.diagnostics.resolve(.settings) },
+                                               onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                                onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
         case .history: EmptyView()
