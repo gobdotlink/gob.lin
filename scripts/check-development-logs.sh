@@ -1,14 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build --product GoblinApp
+swift build --target GoblinCore
 binary_directory=$(swift build --show-bin-path)
 mkdir -p .build/development-log-check
-sources=()
-while IFS= read -r source; do sources+=("$source"); done < <(find Sources/GoblinApp -name '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
+sources=(
+    Sources/GoblinApp/Diagnostics/DiagnosticsModel.swift
+    Sources/GoblinApp/Permissions/PermissionModel.swift
+    Sources/GoblinApp/Permissions/OnboardingView.swift
+    Sources/GoblinApp/Hotkeys/EventTap.swift
+    Sources/GoblinApp/Hotkeys/HotkeyShortcut.swift
+    Sources/GoblinApp/GoblinBrand.swift
+)
 swiftc -parse-as-library -swift-version 6 -target "$(uname -m)-apple-macosx26.0" \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
     "${sources[@]}" scripts/checks/development-logs.swift \
-    "$binary_directory"/GoblinCore.build/*.swift.o "$binary_directory"/GoblinEngines.build/*.swift.o \
+    "$binary_directory"/GoblinCore.build/*.swift.o \
     -o .build/development-log-check/check
 .build/development-log-check/check

@@ -13,6 +13,8 @@ jobs:
         run: scripts/smoke.sh
       - name: Check dictionary and text-processing guardrails
         run: swift test
+      - name: Check updater protocol and installation recovery
+        run: scripts/check-updates.sh
       - name: Check live delivery and finalization
         run: scripts/check-live-delivery.sh && scripts/check-live-transcription.sh
       - name: Build Xcode app without local signing credentials

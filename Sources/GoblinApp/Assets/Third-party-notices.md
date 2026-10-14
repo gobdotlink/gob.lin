@@ -16,8 +16,7 @@ The original goblin sprites come from the owner's gob.lin brand kit. Only visual
 
 - The optional CLI vocabulary diagnostic uses NVIDIA Parakeet TDT-CTC 110M through [FluidInference's CTC Core ML conversion](https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml). It is separately downloaded only with `prepare-model --vocabulary-support`; the app does not expose it as another selectable recognizer. The upstream metadata identifies CC BY 4.0 while the conversion card describes Apache 2.0. Both complete licence texts and original/conversion cards are retained with the app assets. Goblin does not modify the downloaded model components.
 
-## Planned dependencies (not currently bundled)
+## Updates
 
-- Sparkle — MIT licence with additional third-party notices in its [upstream licence](https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE). The update/distribution ticket is separate; retain the complete upstream licence for the version shipped.
-
-Before adding one of these dependencies, replace its planned entry with the exact version, required copyright/attribution, and locally bundled licence text. No model weights or Sparkle binaries are committed.
+The GitHub Releases updater uses Foundation, Security and macOS system utilities.
+No third-party updater framework or model weights are bundled.

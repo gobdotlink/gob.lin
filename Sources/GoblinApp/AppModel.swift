@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     let insertion: TextInsertionService
     let audioPreview: AudioPreviewModel
     let speechModels: SpeechModelService
+    let updates = UpdateChecker()
     @Published var mascotState: MascotState = .idle
     @Published var settingsSelection: SettingsSection? = .general
     @Published var lastTranscript: String?
@@ -50,7 +51,7 @@ final class AppModel: ObservableObject {
         audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")], diagnostics: diagnostics)
         for child in [permissions.objectWillChange, hotkeys.objectWillChange, insertion.objectWillChange,
                       history.objectWillChange, dictionary.objectWillChange, audioPreview.objectWillChange, diagnostics.objectWillChange,
-                      speechModels.objectWillChange] {
+                      speechModels.objectWillChange, updates.objectWillChange] {
             child.sink { [weak self] _ in
                 Task { @MainActor in self?.synchronizeMascot(); self?.objectWillChange.send() }
             }.store(in: &subscriptions)
@@ -124,7 +125,8 @@ final class AppModel: ObservableObject {
         }
         refreshConfiguration()
         refreshDiagnostics(snapshot: permissions.snapshot)
-        if servicesEnabled { speechModels.preload() }
+        updates.canInstall = { [weak self] in self?.canInstallUpdate == true }
+        if servicesEnabled { speechModels.preload(); updates.start() }
         Task { [weak self] in
             guard let self else { return }
             await self.history.reload()
@@ -507,9 +509,15 @@ final class AppModel: ObservableObject {
         overlay.hide(after: 4, session: session)
     }
 
+    var canInstallUpdate: Bool {
+        !shuttingDown && dictationSessions.isEmpty && activeCapture == nil &&
+        insertionTask == nil && !insertion.busy && history.pending.isEmpty && !insertion.hasRecoveryClipboard
+    }
+
     func shutdown() async {
         guard !shuttingDown else { return }
         shuttingDown = true
+        updates.stop()
         diagnostics.developmentLog.record(.shutdownRequested, area: .application)
         hotkeys.shutdown()
         permissions.stop()
