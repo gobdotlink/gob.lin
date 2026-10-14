@@ -41,17 +41,20 @@ struct ShortcutRecorder: View {
     @State private var hint = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(service.shortcut.label).font(.title2.monospaced()).frame(minWidth: 150, alignment: .leading)
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 10) {
+                if service.recorderActive {
+                    Text("press keys…").font(.callout.monospaced()).foregroundStyle(GoblinBrand.accent)
+                } else {
+                    KeyCombo(label: service.shortcut.label)
+                }
                 Button(service.recorderActive ? "Cancel" : "Record shortcut") {
                     if service.recorderActive { end() } else { begin() }
                 }
             }
-            if service.recorderActive { Text("Press your shortcut, then release it.").foregroundStyle(.tint) }
+            if service.recorderActive { Text("Press your shortcut, then release it.").font(.caption).foregroundStyle(.secondary) }
             if !hint.isEmpty { Text(hint).font(.caption).foregroundStyle(.orange) }
         }
-        .padding(16).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
         .onChange(of: service.recorderActive) { _, active in
             if !active { removeMonitor() }
         }

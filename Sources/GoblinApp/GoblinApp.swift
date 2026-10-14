@@ -25,11 +25,7 @@ struct GoblinApp: App {
             SettingsView(model: model, speechModels: model.speechModels)
         }
         .defaultSize(width: 940, height: 720)
-
-        Window("gob.lin History", id: "history") {
-            HistoryView(model: model.history)
-        }
-        .defaultSize(width: 820, height: 620)
+        .windowResizability(.contentSize)
 
     }
 
@@ -41,21 +37,24 @@ private struct GoblinMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Settings…") { show("settings") }
-            .keyboardShortcut(",")
-        Button("History") { show("history") }
-        Button("Permissions & onboarding…") { model.permissions.showOnboarding() }
+        MenuStatus(hotkeys: model.hotkeys, state: model.mascotState)
         if let warning = model.diagnostics.warningMessage {
-            Text(warning)
+            Label(warning, systemImage: "exclamationmark.triangle")
         }
-        Button("Diagnostics…") { model.settingsSelection = .diagnostics; show("settings") }
-        Button("Copy diagnostics") { model.diagnostics.copyDiagnostics() }
         Divider()
-        Button("Paste last transcript") { model.pasteLastTranscript() }
+        Button("Paste last transcript", systemImage: "doc.on.clipboard") { model.pasteLastTranscript() }
             .disabled(!model.canPasteLastTranscript)
         ClipboardRecoveryMenu(service: model.insertion)
         Divider()
-        Button("Quit gob.lin") { NSApp.terminate(nil) }
+        Button("History", systemImage: "clock") { model.settingsSelection = .history; show("settings") }
+        Button("Settings…", systemImage: "gearshape") { show("settings") }
+            .keyboardShortcut(",")
+        Divider()
+        Button("Permissions & onboarding…", systemImage: "hand.raised") { model.permissions.showOnboarding() }
+        Button("Diagnostics…", systemImage: "stethoscope") { model.settingsSelection = .diagnostics; show("settings") }
+        Button("Copy diagnostics", systemImage: "doc.on.doc") { model.diagnostics.copyDiagnostics() }
+        Divider()
+        Button("Quit gob.lin", systemImage: "power") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 
@@ -65,11 +64,26 @@ private struct GoblinMenu: View {
     }
 }
 
+/// First menu line: what gob.lin is doing right now.
+private struct MenuStatus: View {
+    @ObservedObject var hotkeys: HotkeyService
+    let state: MascotState
+
+    var body: some View {
+        switch state {
+        case .idle: Text("Ready · hold \(hotkeys.shortcut.label) to talk")
+        case .recording: Text("Dictating…")
+        case .transcribing: Text("Transcribing…")
+        case .warning: Text("Needs attention")
+        }
+    }
+}
+
 private struct ClipboardRecoveryMenu: View {
     @ObservedObject var service: TextInsertionService
     var body: some View {
         if service.hasRecoveryClipboard {
-            Button("Restore previous clipboard") { service.restorePreviousClipboard() }.disabled(service.busy)
+            Button("Restore previous clipboard", systemImage: "arrow.uturn.backward") { service.restorePreviousClipboard() }.disabled(service.busy)
         }
     }
 }

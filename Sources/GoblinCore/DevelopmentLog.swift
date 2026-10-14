@@ -31,11 +31,13 @@ public enum DevelopmentEventName: String {
     case previewRequested, devicesEnumerated, deviceEnumerationFailed, deviceSelection, deviceResolved, deviceFallback, inputFormat
     case tapInstalling, tapInstalled, engineStarting, engineStarted, firstBuffer, configurationChanged
     case previewFailed, previewStopping, previewStopped
+    case livePreviewDegraded, livePreviewRecovered, liveFinalRecovery, speechNotDetected
 }
 public enum DevelopmentReason: String {
     case user, restart, selectionChanged, viewClosed, permissionLost, configurationChanged, startFailed, shutdown
     case manualRetry, settingsReturn
     case permissionMissing, invalidFormat, deviceUnavailable, systemDefault, savedDevice
+    case liveWindowLimit, liveDecodeFailed, liveDecodeUnavailable, liveOverlapMismatch, liveTimingUnavailable, liveInputDiscontinuity, liveInvalidSamples
 }
 
 /// Device UIDs never leave this type. Tokens correlate devices only within one launch.

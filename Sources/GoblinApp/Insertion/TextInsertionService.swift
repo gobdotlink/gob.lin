@@ -87,12 +87,46 @@ final class TextInsertionService: ObservableObject {
         let expected = target.value.flatMap { before in
             target.selection.flatMap { InsertionPolicy.expectedValue(before: before, selectedRange: $0, inserted: text) }
         }
-        if !quirks.preferPaste && !target.applicationFallback {
+        if !quirks.remoteDesktop, let expected, expected == target.value, let selection = target.selection {
+            let fresh = FocusedText.read(pid: target.pid, element: target.element)
+            guard fresh.value == expected, fresh.selection == selection, !fresh.secure,
+                  target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+                setStatus("The target changed before confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
+            }
+            // Use the unchanged, validated selection's UTF-16 end; equivalent text can have different lengths.
+            var caret = CFRange(location: selection.location + selection.length, length: 0)
+            if let range = AXValueCreate(.cfRange, &caret) {
+                _ = AXUIElementSetAttributeValue(target.element, kAXSelectedTextRangeAttribute as CFString, range)
+            }
+            let observed = FocusedText.read(pid: target.pid, element: target.element)
+            guard observed.value == expected, !observed.secure, target.isStillFocused(),
+                  !Task.isCancelled, !IsSecureEventInputEnabled() else {
+                setStatus("The target changed while confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
+            }
+            let caretConfirmed = observed.selection == NSRange(location: caret.location, length: 0)
+            setStatus(caretConfirmed
+                ? "Text already matched the dictation · clipboard preserved; caret at replacement end"
+                : "Text already matched the dictation · clipboard preserved; caret placement was not confirmed", outcome: .success)
+            return
+        }
+        if !quirks.preferPaste && !target.applicationFallback, let expected {
             var settable = DarwinBoolean(false)
             if AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success, settable.boolValue {
-                guard target.isStillFocused() else { setStatus("Focus changed before insertion", outcome: .failure(.insertionTargetChanged)); return }
+                guard target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+                    setStatus("Focus or Secure Input changed before insertion", outcome: .failure(.insertionTargetChanged)); return
+                }
                 let result = AXUIElementSetAttributeValue(target.element, kAXSelectedTextAttribute as CFString, text as CFString)
-                if result == .success { setStatus("Inserted directly · clipboard preserved", outcome: .success); return }
+                if result == .success {
+                    let verified = await DirectInsertionVerification.wait(expected: expected,
+                        readValue: { FocusedText.read(pid: target.pid, element: target.element).value },
+                        isSafe: { target.isStillFocused() && !IsSecureEventInputEnabled() })
+                    if verified {
+                        setStatus("Direct insertion verified in the focused app · clipboard preserved", outcome: .success)
+                    } else {
+                        setStatus("The app accepted an Accessibility write but did not confirm the edit; no duplicate paste was attempted", outcome: .failure(.insertionNotAcknowledged))
+                    }
+                    return
+                }
                 // A timeout may have applied the write: never retry a possibly successful insertion.
                 guard result == .attributeUnsupported || result == .notImplemented else {
                     setStatus("Accessibility could not confirm insertion (\(result.rawValue)); no duplicate paste was attempted", outcome: .failure(.insertionNotAcknowledged)); return
@@ -259,7 +293,7 @@ struct AppInsertionQuirks {
     static func forBundle(_ bundle: String) -> Self {
         let pasteOnly: Set<String> = ["com.apple.Terminal", "com.mitchellh.ghostty", "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders",
                                       "com.todesktop.230313mzl4w4u92", "com.tinyspeck.slackmacgap", "com.google.Chrome",
-                                      "company.thebrowser.Browser", "company.thebrowser.dia"]
+                                      "company.thebrowser.Browser", "company.thebrowser.dia", "com.t3tools.t3code"]
         let remote: Set<String> = ["com.microsoft.rdc.macos", "com.realvnc.vncviewer", "com.teamviewer.TeamViewer", "com.anydesk.AnyDesk"]
         return Self(preferPaste: pasteOnly.contains(bundle) || remote.contains(bundle) || bundle.lowercased().contains("paseo"),
                     remoteDesktop: remote.contains(bundle))

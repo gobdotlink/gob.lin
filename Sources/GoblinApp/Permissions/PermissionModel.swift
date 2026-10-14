@@ -169,7 +169,7 @@ final class PermissionModel: ObservableObject {
             let window = NSWindow(contentViewController: NSHostingController(rootView: OnboardingView(permissions: self)))
             window.title = "Welcome to gob.lin"
             window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 590, height: 540))
+            window.setContentSize(NSSize(width: 620, height: 560))
             window.center()
             window.isReleasedWhenClosed = false
             onboarding = NSWindowController(window: window)

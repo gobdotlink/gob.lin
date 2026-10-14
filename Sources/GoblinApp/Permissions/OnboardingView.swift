@@ -4,19 +4,31 @@ struct OnboardingView: View {
     @ObservedObject var permissions: PermissionModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Let’s get gob.lin ready").font(.largeTitle.bold())
-                Text("Two permissions put your voice where your cursor is. Each request starts only when you choose Allow.")
-                    .foregroundStyle(.secondary)
+        Form {
+            Section {
+                HStack(spacing: 16) {
+                    Image(nsImage: GoblinBrand.sprite("goblin-shut")).resizable().interpolation(.none)
+                        .frame(width: 64, height: 64).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Let’s get gob.lin ready").font(.title2.weight(.semibold))
+                        Text("Two permissions put your voice where your cursor is. Each request starts only when you choose Allow.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            Section {
                 permissionRow(.microphone, title: "Microphone", detail: "Capture your voice during dictation.",
                               granted: permissions.snapshot.microphone == .authorized, icon: "mic")
                 permissionRow(.accessibility, title: "Accessibility", detail: "Insert text and handle your dictation shortcut.",
-                              granted: permissions.snapshot.accessibility, icon: "hand.raised")
-                if let failure = permissions.tapFailure {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Shortcut unavailable", systemImage: "exclamationmark.triangle")
-                            .font(.headline).foregroundStyle(.orange)
+                              granted: permissions.snapshot.accessibility, icon: "accessibility")
+            } header: { Text("Permissions") } footer: {
+                Text("This window checks grants live; no recording starts here.")
+            }
+            if let failure = permissions.tapFailure {
+                Section {
+                    Label {
+                        Text("Shortcut unavailable")
                         if failure == .runLoopSourceFailed {
                             Text("The shortcut tap was created, but its run-loop source could not be prepared. Quit and reopen gob.lin. If it persists, collect development diagnostics.")
                         } else if !permissions.snapshot.accessibility {
@@ -24,29 +36,34 @@ struct OnboardingView: View {
                         } else {
                             Text("macOS reports Accessibility allowed, but the shortcut tap could not be created. Choose Check again to retry. If it still fails, quit and reopen the same signed app and collect development diagnostics. This failure alone does not establish a stale grant.")
                         }
-                    }
-                    .padding(14).background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
                 }
-                if permissions.lastRevoked != nil {
-                    Label("A permission was revoked. Shortcuts and recording have stopped safely.", systemImage: "pause.circle")
+            }
+            if permissions.lastRevoked != nil {
+                Section {
+                    Label("A permission was revoked. Shortcuts and recording have stopped safely.", systemImage: "pause.circle.fill")
                         .foregroundStyle(.orange)
                 }
-                Divider()
-                Label(permissions.snapshot.ready ? "Permissions ready" : "Waiting for permissions",
-                      systemImage: permissions.snapshot.ready ? "checkmark.circle.fill" : "circle.dotted")
-                    .foregroundStyle(permissions.snapshot.ready ? .green : .secondary)
-                Text("Speech engine setup follows the benchmark. This window checks grants live; no recording starts here.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("If a System Settings toggle is on but its row is not Allowed, quit and reopen the same signed app. Check that the entry belongs to this app rather than an older build. Some permission changes require a relaunch.")
-                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                HStack {
+                    Label(permissions.snapshot.ready ? "Permissions ready" : "Waiting for permissions",
+                          systemImage: permissions.snapshot.ready ? "checkmark.circle.fill" : "circle.dotted")
+                        .foregroundStyle(permissions.snapshot.ready ? GoblinBrand.accent : .secondary)
+                    Spacer()
+                    Button("Check again") { permissions.checkAgain() }
+                }
                 DisclosureGroup("Running app") {
                     Text(PermissionModel.launchIdentity["bundle_path"] ?? "Unknown bundle")
                         .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 }
-                Button("Check again") { permissions.checkAgain() }
+            } footer: {
+                Text("If a System Settings toggle is on but its row is not Allowed, quit and reopen the same signed app. Check that the entry belongs to this app rather than an older build. Some permission changes require a relaunch.")
             }
-            .padding(28)
         }
+        .formStyle(.grouped).scrollContentBackground(.hidden)
+        .background(GoblinBrand.background)
+        .preferredColorScheme(.dark)
     }
 
     private func statusLabel(_ permission: PermissionModel.Permission) -> String {
@@ -63,23 +80,24 @@ struct OnboardingView: View {
 
     private func permissionRow(_ permission: PermissionModel.Permission, title: String, detail: String,
                                granted: Bool, icon: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon).font(.title2).frame(width: 30)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(title).font(.headline)
-                    Label(statusLabel(permission), systemImage: granted ? "checkmark.circle.fill" : "circle")
-                        .font(.caption).foregroundStyle(granted ? .green : .secondary)
-                }
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.title2).foregroundStyle(.secondary).frame(width: 28).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
                 Text(detail).font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
-            let opensSettings = granted || (permission == .microphone && permissions.snapshot.microphone != .notDetermined)
-            Button(opensSettings ? "Settings" : "Allow") {
-                if opensSettings { permissions.openSettings(permission) } else { permissions.request(permission) }
+            Label(statusLabel(permission), systemImage: granted ? "checkmark.circle.fill" : "circle")
+                .font(.callout).foregroundStyle(granted ? GoblinBrand.accent : .secondary)
+            if granted || (permission == .microphone && permissions.snapshot.microphone != .notDetermined) {
+                Button("Settings") { permissions.openSettings(permission) }
+                    .accessibilityLabel("Open settings for \(title)")
+            } else {
+                Button("Allow") { permissions.request(permission) }
+                    .buttonStyle(.borderedProminent).tint(GoblinBrand.tint)
+                    .accessibilityLabel("Allow \(title)")
             }
-            .accessibilityLabel("\(opensSettings ? "Open settings for" : "Allow") \(title)")
         }
-        .padding(14).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 2)
     }
 }
