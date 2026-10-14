@@ -85,8 +85,9 @@ struct InsightsView: View {
             }
             LabeledContent("Words", value: data.hours.reduce(0) { $0 + $1.words }.formatted())
             Chart(data.hours) { hour in
-                BarMark(xStart: .value("Hour start", hour.date), xEnd: .value("Hour end", hour.date.addingTimeInterval(3600)),
-                        y: .value("Words", hour.words))
+                RectangleMark(xStart: .value("Hour start", hour.date),
+                              xEnd: .value("Hour end", min(hour.date.addingTimeInterval(3600), data.calendar.dateInterval(of: .day, for: hour.date)!.end)),
+                              yStart: .value("Words", 0), yEnd: .value("Words", hour.words))
                     .foregroundStyle(GoblinBrand.accent)
                     .accessibilityLabel(hour.date.formatted(.dateTime.hour().minute().timeZone(.specificName(.short))))
                     .accessibilityValue("\(hour.words) words")
