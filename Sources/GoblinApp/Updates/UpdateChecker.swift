@@ -139,10 +139,17 @@ final class UpdateChecker: ObservableObject {
                 try UpdateInstaller.launchHelper(in: directory, replacing: bundle)
                 handedOff = true
                 phase = .installing
-                NSApp.terminate(nil)
+                Self.requestTermination()
             } catch is CancellationError { phase = .idle }
             catch { phase = .failed(message(error)) }
         }
+    }
+
+    static func requestTermination() {
+        // AppKit enters a nested event loop while awaiting async shutdown. Enter
+        // termination from a run-loop callback, outside both the Swift task and
+        // the main dispatch queue, so shutdown can use the main actor's queue.
+        NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
     }
 
     private func credentials() async throws -> String? {
