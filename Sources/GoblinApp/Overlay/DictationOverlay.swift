@@ -42,12 +42,12 @@ struct DictationOverlay: View {
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        if case .error(let message) = model.visiblePhase {
-                            Text(message).foregroundStyle(GoblinBrand.yellow).font(.system(size: 13))
-                        }
                         Text("\(Text(model.committedText).foregroundStyle(.white))\(Text(model.tentativeText).foregroundStyle(.secondary))")
                             .font(.system(size: 15)).lineSpacing(2).frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.disabled)
+                        if case .error(let message) = model.visiblePhase {
+                            Text(message).foregroundStyle(GoblinBrand.yellow).font(.system(size: 13))
+                        }
                     }
                 }
                 .defaultScrollAnchor(.bottom, for: .initialOffset)

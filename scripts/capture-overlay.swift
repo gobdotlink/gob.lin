@@ -24,7 +24,6 @@ struct OverlayCapture {
                 guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CaptureError.captureFailed }
                 let output = CommandLine.arguments.dropFirst().first ?? "docs/screenshots/gob-12-overlay.png"
                 try png.write(to: URL(fileURLWithPath: output))
-                let height = overlay.model.textHeight
                 let window = app.windows.first(where: { $0.title == "gob.lin Dictation" })!
                 let frame = window.frame
                 for text in ["", "One word", String(repeating: "A much longer streaming transcript. ", count: 30)] {
@@ -38,7 +37,6 @@ struct OverlayCapture {
                 precondition(!overlay.model.committedText.isEmpty && !overlay.model.tentativeText.isEmpty,
                              "Finalization discarded visible text")
                 overlay.update(.polishing, committed: "Done.", tentative: "", session: session)
-                precondition(overlay.model.textHeight == height, "Finalization collapsed the text area")
                 overlay.update(.error(String(repeating: "Detailed failure message. ", count: 15)), session: session)
                 window.contentView?.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(80))

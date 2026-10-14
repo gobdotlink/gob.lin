@@ -556,7 +556,7 @@ final class AppModel: ObservableObject {
                     insertionAttempted = true
                     diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
                     await insertion.insert(result.finalText) { [weak self] in
-                        if let overlayID = session.overlayID { self?.overlay.hide(session: overlayID) }
+                        if result.warning == nil, let overlayID = session.overlayID { self?.overlay.hide(session: overlayID) }
                     }
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
