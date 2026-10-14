@@ -115,7 +115,7 @@ struct RewriteSettingsView: View {
                     .font(.body.monospaced()).autocorrectionDisabled()
                     .frame(minHeight: 100, maxHeight: 160)
                     .accessibilityLabel("Extra request options JSON")
-                Text("For example: {\"max_completion_tokens\": 1024}. Options override request defaults; null omits a field. Choose Provider default for custom reasoning parameters. Model, messages and streaming are managed by gob.lin. These options are stored in preferences; keep API keys in the Keychain field.")
+                Text("For example: {\"max_completion_tokens\": 1024}. Options override request defaults; null omits a field. Choose Provider default for custom reasoning parameters. Luna omits sampling options unless reasoning is explicitly off. Groq GPT-OSS and Qwen cleanup always hide reasoning output. Model, messages and streaming are managed by gob.lin. These options are stored in preferences; keep API keys in the Keychain field.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         } footer: {

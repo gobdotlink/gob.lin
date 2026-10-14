@@ -33,8 +33,9 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         switch self {
         case .cerebras: [RewriteModelPreset(id: "qwen-3.8-27b", title: "Qwen 3.8 27B", reasoning: .off)]
         case .groq: [RewriteModelPreset(id: "openai/gpt-oss-20b", title: "GPT-OSS 20B", reasoning: .low,
-                                       extraRequestJSON: #"{"reasoning_format":"hidden"}"#),
-                     RewriteModelPreset(id: "qwen/qwen3.8-27b", title: "Qwen 3.8 27B", reasoning: .off)]
+                                       extraRequestJSON: #"{"include_reasoning":false}"#),
+                     RewriteModelPreset(id: "qwen/qwen3.8-27b", title: "Qwen 3.8 27B", reasoning: .off,
+                                        extraRequestJSON: #"{"reasoning_format":"hidden"}"#)]
         case .openAI: [RewriteModelPreset(id: "gpt-6-luna", title: "GPT-6 Luna", reasoning: .off)]
         case .openRouter: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
                            RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]

@@ -113,6 +113,39 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         return parameters
     }
 
+    public func requestParameters(automaticEffort: String?) throws -> [String: Any] {
+        var body: [String: Any] = ["model": model, "stream": false]
+        if let temperature { body["temperature"] = temperature }
+        body.merge(reasoning.parameters(provider: provider, automaticEffort: automaticEffort)) { _, value in value }
+        for (key, value) in try extraRequestParameters() {
+            if value is NSNull { body.removeValue(forKey: key) }
+            else { body[key] = value }
+        }
+        // Cleanup consumes only final text. These model-specific output controls
+        // stay safe even after changing effort or loading an older provider profile.
+        if provider == .groq {
+            if ["openai/gpt-oss-20b", "openai/gpt-oss-120b"].contains(model) {
+                body.removeValue(forKey: "reasoning_format")
+                body["include_reasoning"] = false
+            } else if model == "qwen/qwen3.8-27b" {
+                body.removeValue(forKey: "include_reasoning")
+                body["reasoning_format"] = "hidden"
+            }
+        }
+        // Luna accepts sampling options only with reasoning explicitly disabled.
+        // Check each attempt, so Automatic's none -> low retry is compatible too.
+        let luna = provider == .openAI ? "gpt-6-luna" : (provider == .openRouter ? "openai/gpt-6-luna" : "")
+        if !luna.isEmpty, model == luna || model.hasPrefix(luna + "-") {
+            let routerReasoning = body["reasoning"] as? [String: Any]
+            let reasoningOff = body["reasoning_effort"] as? String == "none"
+                || routerReasoning?["enabled"] as? Bool == false || routerReasoning?["effort"] as? String == "none"
+            if !reasoningOff {
+                for key in ["temperature", "top_p", "top_logprobs", "logprobs"] { body.removeValue(forKey: key) }
+            }
+        }
+        return body
+    }
+
     public func endpoint() throws -> URL {
         guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = components.scheme?.lowercased(), let host = components.host,
@@ -246,7 +279,7 @@ public actor RewriteClient {
                 throw RewriteFailure.configuration("Save an API key before enabling AI cleanup.")
             }
             let messages = try RewritePrompt.messages(transcript: rawText, cleanup: settings.cleanup, tone: tone, preferredSpellings: preferredSpellings)
-            let extra = try settings.extraRequestParameters()
+            _ = try settings.extraRequestParameters()
             let scope = EffortScope(endpoint: endpoint, model: settings.model)
             // Only Automatic can relax a rejected setting. Explicit Off/effort choices are never changed.
             let canRetryEffort = settings.reasoning == .automatic && ![.openRouter, .zai].contains(settings.provider)
@@ -254,13 +287,8 @@ public actor RewriteClient {
             var effort = canRetryEffort ? nextEffort(for: scope) : "none"
             while true {
                 try Task.checkCancellation()
-                var body: [String: Any] = ["model": settings.model, "messages": messages, "stream": false]
-                if let temperature = settings.temperature { body["temperature"] = temperature }
-                body.merge(settings.reasoning.parameters(provider: settings.provider, automaticEffort: effort)) { _, value in value }
-                for (key, value) in extra {
-                    if value is NSNull { body.removeValue(forKey: key) }
-                    else { body[key] = value }
-                }
+                var body = try settings.requestParameters(automaticEffort: effort)
+                body["messages"] = messages
                 var request = URLRequest(url: endpoint)
                 request.httpMethod = "POST"
                 let remaining = ContinuousClock.now.duration(to: deadline).components

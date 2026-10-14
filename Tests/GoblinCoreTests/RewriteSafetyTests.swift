@@ -130,7 +130,7 @@ struct RewriteSafetyTests {
             RewriteStubState.shared.prepare([StubReply(status: 200, body: empty)])
             let result = await TranscriptPostprocessor(rewriteClient: client()).process(raw, dictionaryEntries: [], tone: .formal,
                                                                                       rewriteSettings: settings, apiKey: "fixture-key")
-            #expect(result.rawText == raw && result.finalText.isEmpty && result.polished && result.warning == nil)
+            #expect(result.rawText == raw && result.finalText.isEmpty && result.polished && result.warning == nil && result.intentionallyEmpty)
         }
         for raw in ["Send the report", "Ich komme um acht", "um", "er", "like", "hmm", "say um", "`uh`", "\"uh\"", "uh 8", "okay uh"] {
             RewriteStubState.shared.prepare([StubReply(status: 200, body: empty)])
@@ -218,7 +218,12 @@ struct RewriteSafetyTests {
                 default:
                     #expect(body["reasoning_effort"] as? String == (preset.reasoning == .off ? "none" : "low"))
                 }
-                if preset.id == "openai/gpt-oss-20b" { #expect(body["reasoning_format"] as? String == "hidden") }
+                if provider == .groq, preset.id == "openai/gpt-oss-20b" {
+                    #expect(body["include_reasoning"] as? Bool == false && body["reasoning_format"] == nil)
+                }
+                if provider == .groq, preset.id == "qwen/qwen3.8-27b" {
+                    #expect(body["reasoning_format"] as? String == "hidden" && body["include_reasoning"] == nil)
+                }
             }
         }
         var custom = settings
@@ -232,5 +237,55 @@ struct RewriteSafetyTests {
         RewriteStubState.shared.prepare([])
         #expect(await client().rewrite("Dictation", settings: custom, apiKey: "fixture-key").failure != nil)
         #expect(RewriteStubState.shared.received().isEmpty)
+    }
+
+    @Test func groqReasoningOutputStaysSeparateAfterEffortAndProfileChanges() async throws {
+        for model in ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"] {
+            for reasoning in [RewriteReasoning.low, .medium, .high, .providerDefault, .automatic] {
+                var configured = settings
+                configured.selectProvider(.groq)
+                configured.model = model
+                configured.reasoning = reasoning
+                // Include the old GPT-OSS preset and explicit advanced overrides.
+                configured.extraRequestJSON = #"{"reasoning_format":"raw","include_reasoning":true}"#
+                RewriteStubState.shared.prepare([StubReply(status: 200, body: success)])
+                #expect(await client().rewrite("Dictation", settings: configured, apiKey: "fixture-key").failure == nil)
+                let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
+                if model.hasPrefix("openai/gpt-oss-") {
+                    #expect(body["include_reasoning"] as? Bool == false && body["reasoning_format"] == nil)
+                } else {
+                    #expect(body["reasoning_format"] as? String == "hidden" && body["include_reasoning"] == nil)
+                }
+            }
+        }
+    }
+
+    @Test func lunaSamplingDependsOnEffectiveReasoningIncludingAutomaticRetries() async throws {
+        for provider in [RewriteProvider.openAI, .openRouter] {
+            var configured = settings
+            configured.selectProvider(provider)
+            for reasoning in [RewriteReasoning.off, .low, .medium, .high, .providerDefault] {
+                configured.reasoning = reasoning
+                configured.extraRequestJSON = #"{"temperature":0.2,"top_p":0.9,"top_logprobs":2,"logprobs":true}"#
+                RewriteStubState.shared.prepare([StubReply(status: 200, body: success)])
+                #expect(await client().rewrite("Dictation", settings: configured, apiKey: "fixture-key").failure == nil)
+                let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
+                for key in ["temperature", "top_p", "top_logprobs", "logprobs"] {
+                    #expect((body[key] != nil) == (reasoning == .off))
+                }
+            }
+        }
+        var automatic = settings
+        automatic.selectProvider(.openAI)
+        automatic.reasoning = .automatic
+        let reject = #"{"error":{"param":"reasoning_effort"}}"#
+        RewriteStubState.shared.prepare([StubReply(status: 400, body: reject), StubReply(status: 200, body: success)])
+        #expect(await client().rewrite("Dictation", settings: automatic, apiKey: "fixture-key").failure == nil)
+        let bodies = try RewriteStubState.shared.received().map { try JSONSerialization.jsonObject(with: $0.httpBody!) as! [String: Any] }
+        #expect(bodies[0]["temperature"] as? Int == 0 && bodies[0]["reasoning_effort"] as? String == "none")
+        #expect(bodies[1]["temperature"] == nil && bodies[1]["reasoning_effort"] as? String == "low")
+        automatic.reasoning = .providerDefault
+        automatic.extraRequestJSON = #"{"reasoning_effort":"none","temperature":0.4}"#
+        #expect(try automatic.requestParameters(automaticEffort: nil)["temperature"] as? Double == 0.4)
     }
 }
