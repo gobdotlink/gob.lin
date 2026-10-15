@@ -135,8 +135,7 @@ struct TalkKeyCaps: View {
         let keys = shortcut.keys
         HStack(spacing: 6) {
             ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
-                BigKeyCap(symbol: key.symbol, word: key.word, globe: shortcut.modifier == .fn, light: index == 0 ? light : nil,
-                          width: keys.count > 2 ? 54 : 60)
+                BigKeyCap(symbol: key.symbol, word: key.word, globe: shortcut.modifier == .fn, light: index == 0 ? light : nil)
             }
         }
         .accessibilityElement(children: .ignore).accessibilityLabel(shortcut.title)
@@ -148,7 +147,6 @@ struct BigKeyCap: View {
     var word = ""
     var globe = false
     var light: LightState?
-    var width: CGFloat = 60
 
     var body: some View {
         let ink = Color.black.opacity(0.86)
@@ -168,7 +166,7 @@ struct BigKeyCap: View {
                 if globe { Image(systemName: "globe").font(.system(size: 13)).foregroundStyle(ink).padding(.leading, 9).padding(.bottom, 8) }
                 else if !word.isEmpty { Text(word).font(.system(size: 9, weight: .medium)).foregroundStyle(ink).lineLimit(1).fixedSize().padding(.leading, 7).padding(.bottom, 7) }
             }
-            .frame(width: width, height: 56)
+            .frame(width: 60, height: 56)
     }
 }
 

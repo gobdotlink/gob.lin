@@ -175,8 +175,10 @@ struct OnboardingView: View {
             headline("Pick your talk key.", Text("Hold it to talk, let go to type. Tap it to keep listening hands-free."))
             Plate {
                 VStack(alignment: .leading, spacing: 14) {
+                    let stacked = hotkeys.shortcut.keys.count > 2
+                    if stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyChecked ? .ready : .off) }
                     HStack(spacing: 16) {
-                        TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyChecked ? .ready : .off)
+                        if !stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyChecked ? .ready : .off) }
                         Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
                         Spacer()
                         ShortcutRecorder(service: hotkeys, showsCurrent: false)

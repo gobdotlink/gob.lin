@@ -122,15 +122,20 @@ private struct GeneralSettingsView: View {
 
     var body: some View {
         Section {
-            HStack(spacing: 16) {
-                TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyLight)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
-                    Text("Hold to talk, let go to type. Tap once to keep listening hands-free, and tap again to finish.")
-                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            // Three or more caps get their own row instead of squeezing the text.
+            let stacked = hotkeys.shortcut.keys.count > 2
+            VStack(alignment: .leading, spacing: 14) {
+                if stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyLight) }
+                HStack(spacing: 16) {
+                    if !stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyLight) }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
+                        Text("Hold to talk, let go to type. Tap once to keep listening hands-free, and tap again to finish.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    ShortcutRecorder(service: hotkeys, showsCurrent: false)
                 }
-                Spacer(minLength: 12)
-                ShortcutRecorder(service: hotkeys, showsCurrent: false)
             }
             .padding(.vertical, 6)
             LabeledContent("Quick picks") {
