@@ -13,6 +13,7 @@ struct MenuPopover: View {
     @State private var levels = Array(repeating: 0.0, count: 28)
     @State private var testing = false
     @State private var hovered: UUID?
+    @State private var height: CGFloat = 0
     @FocusState private var searching: Bool
 
     var body: some View {
@@ -53,6 +54,8 @@ struct MenuPopover: View {
         }
         .padding(8)
         .frame(width: 360)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .background(PopoverWindowFit(height: height))
         .task(id: RecentQuery(text: query, revision: model.history.revision)) {
             recent = (try? await model.history.store?.entries(matching: query, limit: 4)) ?? []
         }
@@ -453,3 +456,39 @@ private enum PopoverModule {
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.075) : NSColor(white: 1, alpha: 0.62)
     })
 }
+
+/// The menu-bar window grows with its content but never shrinks, so anything that disappears
+/// (a warning, the clipboard notice) left the old, taller frame outlined behind the popover.
+/// This keeps the window exactly as tall as the content, its top edge under the menu bar.
+private struct PopoverWindowFit: NSViewRepresentable {
+    let height: CGFloat
+
+    func makeNSView(context: Context) -> Fitter { Fitter() }
+    func updateNSView(_ view: Fitter, context: Context) { view.height = height }
+
+    final class Fitter: NSView {
+        var height: CGFloat = 0 { didSet { if height != oldValue { fit() } } }
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = window.map {
+                // The system resizes the window when it opens or the content grows; fit after it.
+                NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: $0, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.fit() }
+                }
+            }
+            fit()
+        }
+
+        private func fit() {
+            guard let window, height > 0 else { return }
+            let content = window.contentRect(forFrameRect: window.frame)
+            guard abs(content.height - height) >= 1 else { return }
+            let fitted = NSRect(x: content.minX, y: content.maxY - height, width: content.width, height: height)
+            window.setFrame(window.frameRect(forContentRect: fitted), display: true)
+        }
+    }
+}
+
