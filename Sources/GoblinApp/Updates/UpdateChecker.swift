@@ -4,7 +4,7 @@ import GoblinCore
 
 enum UpdateFailure: Error, LocalizedError {
     case authentication, noReleases, http(Int), invalidRelease, invalidArchive, signature, incompatible
-    case notPackaged, busy, keychain, command, checksum
+    case notPackaged, busy, command, checksum
 
     var errorDescription: String? {
         switch self {
@@ -17,7 +17,6 @@ enum UpdateFailure: Error, LocalizedError {
         case .incompatible: "This release requires a newer macOS version or a different Mac architecture."
         case .notPackaged: "Run a certificate-signed copy of gob.lin from a writable Applications folder to install updates."
         case .busy: "Finish dictation, retry unsaved history, and restore any recovery clipboard before updating."
-        case .keychain: "The update token could not be accessed in Keychain. Unlock your Mac and try again."
         case .command: "The update could not be prepared. The installed app has not changed."
         case .checksum: "The update download failed its integrity check. Try again."
         }
@@ -49,6 +48,8 @@ final class UpdateChecker: ObservableObject {
         case idle, checking, upToDate, available(String), downloading, installing, failed(String)
     }
     static let repository = "akalikin/gob.lin"
+    // ponytail: same preferences compromise as RewriteKeyStore; move back to Keychain with the certificate.
+    private static let tokenKey = "updateGitHubToken"
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var ghAuthenticated = false
     var canInstall: () -> Bool = { false }
@@ -85,8 +86,10 @@ final class UpdateChecker: ObservableObject {
 
     func saveToken(_ value: String) {
         guard !isBusy else { return }
-        do { try UpdateKeychain.save(value.trimmingCharacters(in: .whitespacesAndNewlines)); check() }
-        catch { phase = .failed(error.localizedDescription) }
+        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if token.isEmpty { UserDefaults.standard.removeObject(forKey: Self.tokenKey) }
+        else { UserDefaults.standard.set(token, forKey: Self.tokenKey) }
+        check()
     }
 
     func check() {
@@ -164,7 +167,7 @@ final class UpdateChecker: ObservableObject {
         }.value
         try Task.checkCancellation()
         ghAuthenticated = token != nil
-        return try token ?? UpdateKeychain.load()
+        return token ?? UserDefaults.standard.string(forKey: Self.tokenKey)
     }
 
     private func request(path: String, token: String?, accept: String) -> URLRequest {

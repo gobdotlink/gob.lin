@@ -104,7 +104,7 @@ public enum RewriteReasoning: String, CaseIterable, Codable, Sendable, Identifia
     }
 }
 
-/// Non-secret settings are remembered per provider; credentials remain keyed by endpoint in Keychain.
+/// Non-secret settings are remembered per provider; credentials remain keyed by endpoint in RewriteKeyStore.
 public struct RewriteProviderConfiguration: Codable, Equatable, Sendable {
     public var baseURL: String
     public var model: String

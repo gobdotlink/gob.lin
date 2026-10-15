@@ -238,7 +238,7 @@ private struct GoblinCommands {
     Parakeet TDT v3 is the default. Transcribe/replay/benchmark load local models only.
     Run prepare-model once before recognition. Recognition and benchmarks run locally.
     Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>.
-    --rewrite additionally opts into your enabled provider and reads its Keychain key.
+    --rewrite additionally opts into your enabled provider and reads its saved key.
     Ground truth, jargon, and ordinary-word annotations are needed for accuracy metrics.
     """
 }

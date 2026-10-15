@@ -172,7 +172,7 @@ The ⋯ menu is a plain menu: Permissions… (with the number that are off), Dia
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
 - **Cleanup:**
   - A top plate with the AI cleanup switch and a status row naming where the text goes.
-  - Provider: Service, Address, Model (a free field plus a "Suggested" menu), and API key (masked, "Saved in your Keychain", Replace…).
+  - Provider: Service, Address, Model (a free field plus a "Suggested" menu), and API key (masked, "Saved in gob.lin preferences", Replace…).
   - Style: Level (None, Light, Medium) and Reasoning.
   - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again, plus an amber row: "Slower than 4 s? I type what you said instead."
 - **About:** centred.

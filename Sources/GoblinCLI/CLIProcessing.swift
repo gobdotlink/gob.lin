@@ -1,8 +1,5 @@
 import Foundation
 import GoblinCore
-#if canImport(Security)
-import Security
-#endif
 
 struct CLIProcessingOptions {
     var enabled = false
@@ -49,7 +46,7 @@ struct CLIProcessingConfiguration: Sendable {
             guard rewrite.enabled, rewrite.cleanup != .none else {
                 throw RewriteFailure.configuration("Enable and configure AI cleanup in gob.lin Settings before using --rewrite.")
             }
-            apiKey = try Self.loadKey(for: rewrite)
+            apiKey = try Self.loadKey(for: rewrite, defaults: defaults)
         } else { rewrite.enabled = false }
     }
 
@@ -57,28 +54,10 @@ struct CLIProcessingConfiguration: Sendable {
         await processor.process(raw, dictionaryEntries: entries, tone: tone, rewriteSettings: rewrite, apiKey: apiKey)
     }
 
-    private static func loadKey(for settings: RewriteSettings) throws -> String {
-        let endpoint = try settings.endpoint()
+    private static func loadKey(for settings: RewriteSettings, defaults: UserDefaults) throws -> String {
         guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw RewriteFailure.configuration("Enter a provider model before enabling AI cleanup.")
         }
-        #if canImport(Security)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: GoblinMetadata.bundleIdentifier + ".rewrite",
-            kSecAttrAccount as String: endpoint.absoluteString,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var value: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &value)
-        if status == errSecItemNotFound { return "" }
-        guard status == errSecSuccess, let data = value as? Data, let key = String(data: data, encoding: .utf8) else {
-            throw RewriteFailure.configuration("Keychain could not read the cleanup credential. Unlock your Mac and try again.")
-        }
-        return key
-        #else
-        throw RewriteFailure.configuration("Cloud rewrite credentials require the macOS Keychain shell.")
-        #endif
+        return try RewriteKeyStore.load(for: settings, defaults: defaults)
     }
 }

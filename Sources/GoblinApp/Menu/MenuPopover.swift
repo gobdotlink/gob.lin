@@ -261,7 +261,7 @@ struct MenuPopover: View {
         if settings.enabled && settings.cleanup != .none { changed.enabled = false; save(changed); return }
         // Turning it on needs a model and, for remote providers, a saved key; Settings explains what's missing.
         let local = ["localhost", "127.0.0.1", "[::1]", "::1"].contains((try? settings.endpoint())?.host ?? "")
-        let hasKey = local || (model.servicesEnabled && (try? RewriteKeychain.containsKey(for: settings)) == true)
+        let hasKey = local || (model.servicesEnabled && (try? RewriteKeyStore.load(for: settings, defaults: model.defaults))?.isEmpty == false)
         guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, hasKey else {
             close { model.openSettings(.cleanup) }
             return
