@@ -80,4 +80,12 @@ struct RewriteProviderTests {
         ]
         for (provider, reasoning, value) in expected { #expect(fields(provider, reasoning) == NSDictionary(dictionary: value), "\(provider) \(reasoning)") }
     }
+
+    @Test func requestyLunaNeverKeepsSamplingBecauseOffRunsAsLow() throws {
+        var settings = RewriteSettings(enabled: true, provider: .requesty)
+        settings.configuration = RewriteProvider.requesty.configuration
+        settings.temperature = 0
+        let body = try settings.requestParameters(automaticEffort: nil)
+        #expect(body["reasoning_effort"] as? String == "none" && body["temperature"] == nil)
+    }
 }

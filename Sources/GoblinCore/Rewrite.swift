@@ -142,8 +142,9 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         let luna = provider == .openAI ? "gpt-6-luna" : ([.openRouter, .vercel, .requesty].contains(provider) ? "openai/gpt-6-luna" : "")
         if !luna.isEmpty, model == luna || model.hasPrefix(luna + "-") {
             let routerReasoning = body["reasoning"] as? [String: Any]
-            let reasoningOff = body["reasoning_effort"] as? String == "none"
-                || routerReasoning?["enabled"] as? Bool == false || routerReasoning?["effort"] as? String == "none"
+            // Requesty runs "none" as low effort, so Luna's sampling options never survive it.
+            let reasoningOff = provider != .requesty && (body["reasoning_effort"] as? String == "none"
+                || routerReasoning?["enabled"] as? Bool == false || routerReasoning?["effort"] as? String == "none")
             if !reasoningOff {
                 for key in ["temperature", "top_p", "top_logprobs", "logprobs"] { body.removeValue(forKey: key) }
             }

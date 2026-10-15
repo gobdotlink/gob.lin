@@ -28,24 +28,18 @@ public enum RewriteKeyStore {
     /// Named providers keep one key across address edits. Custom is scoped to its endpoint, so it never
     /// picks up a named provider's key or another custom server's.
     public static func load(for settings: RewriteSettings, defaults: UserDefaults = .standard) throws -> String {
-        let keys = keys(defaults), (account, legacy) = try accounts(settings)
-        return keys[account] ?? legacy.flatMap { keys[$0] } ?? ""
+        keys(defaults)[try account(settings)] ?? ""
     }
 
-    /// Saving an empty key removes it. Either way the legacy endpoint entry is dropped.
+    /// Saving an empty key removes it.
     public static func save(_ key: String, for settings: RewriteSettings, defaults: UserDefaults = .standard) throws {
         var keys = keys(defaults)
-        let (account, legacy) = try accounts(settings)
-        keys[account] = key.isEmpty ? nil : key
-        if let legacy { keys[legacy] = nil }
+        keys[try account(settings)] = key.isEmpty ? nil : key
         defaults.set(keys, forKey: preferenceKey)
     }
 
-    // Keys used to be stored under the endpoint URL alone.
-    private static func accounts(_ settings: RewriteSettings) throws -> (account: String, legacy: String?) {
-        guard settings.provider == .custom else { return (settings.provider.rawValue, try? settings.endpoint().absoluteString) }
-        let endpoint = try settings.endpoint().absoluteString
-        return ("custom " + endpoint, RewriteProvider.matching(baseURL: settings.baseURL) == .custom ? endpoint : nil)
+    private static func account(_ settings: RewriteSettings) throws -> String {
+        settings.provider == .custom ? "custom " + (try settings.endpoint().absoluteString) : settings.provider.rawValue
     }
 
     private static func keys(_ defaults: UserDefaults) -> [String: String] {

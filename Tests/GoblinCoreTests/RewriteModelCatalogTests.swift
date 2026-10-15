@@ -78,20 +78,14 @@ struct RewriteModelCatalogTests {
         #expect(throws: RewriteFailure.self) { try RewriteSettings(baseURL: "http://example.com/v1").modelsEndpoint() }
     }
 
-    @Test func keysFollowTheProviderAndMoveFromTheEndpoint() throws {
+    @Test func keysFollowTheProvider() throws {
         let suite = "rewrite-key-store-test-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         var groq = RewriteSettings(provider: .groq); groq.configuration = RewriteProvider.groq.configuration
-        let legacyGroq = try groq.endpoint().absoluteString
         let custom = RewriteSettings(baseURL: "https://proxy.example.com/v1", provider: .custom)
-        defaults.set([legacyGroq: "groq-old", try custom.endpoint().absoluteString: "proxy-old"], forKey: RewriteKeyStore.preferenceKey)
-
-        #expect(try RewriteKeyStore.load(for: groq, defaults: defaults) == "groq-old")
-        #expect(try RewriteKeyStore.load(for: custom, defaults: defaults) == "proxy-old")
-        // Custom at a named provider's address never inherits that provider's key.
+        // Custom at a named provider's address never shares that provider's key.
         let customAtGroq = RewriteSettings(baseURL: RewriteProvider.groq.baseURL, provider: .custom)
-        #expect(try RewriteKeyStore.load(for: customAtGroq, defaults: defaults) == "")
 
         try RewriteKeyStore.save("groq-new", for: groq, defaults: defaults)
         groq.baseURL = "https://groq-proxy.example.com/v1"
@@ -102,6 +96,7 @@ struct RewriteModelCatalogTests {
                 == ["groq": "groq-new", "custom https://proxy.example.com/v1/chat/completions": "proxy-new"])
         try RewriteKeyStore.save("", for: custom, defaults: defaults)
         #expect(try RewriteKeyStore.load(for: custom, defaults: defaults) == "")
+        #expect(try RewriteKeyStore.load(for: groq, defaults: defaults) == "groq-new")
     }
 
     @Test func anthropicListIsPagedWithItsOwnHeaders() async throws {

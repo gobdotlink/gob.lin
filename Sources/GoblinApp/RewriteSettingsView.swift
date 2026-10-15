@@ -335,7 +335,9 @@ struct RewriteSettingsView: View {
             case nil:
                 StatusRow(.problem, Text("I couldn't get models from \(name). \(failure.localizedDescription)")) { tryAgain }
             }
-        } else if let listing = shownListing, !listing.models.isEmpty {
+        } else if let listing = shownListing, listing.models.isEmpty {
+            StatusRow(.waiting, Text("\(name) didn't list any chat models. You can still type a model ID."))
+        } else if let listing = shownListing {
             let model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
             // Wait until editing ends: a half-typed id is never listed.
             if !modelFieldFocused, !model.isEmpty, !listing.models.contains(where: { $0.id == model }) {
