@@ -1,7 +1,7 @@
 # Releases and updates
 
 gob.lin ships as one versioned ZIP on GitHub Releases, with
-an hourly in-app check, GitHub CLI authentication with a Keychain token fallback,
+an hourly in-app check, GitHub CLI authentication with a saved token fallback,
 and an explicit install-and-relaunch action. There is no appcast, Sparkle dependency,
 scheduled publisher, or update service to operate.
 
@@ -10,7 +10,7 @@ scheduled publisher, or update service to operate.
 The current repository, `akalikin/gob.lin`, is private. A user needs repository
 access and either `gh auth login --hostname github.com` or a fine-grained GitHub
 token restricted to this repository with **Contents: read**. Settings → About
-accepts and removes a token; it is stored in Keychain separately from rewrite keys.
+accepts and removes a token; it is saved in gob.lin preferences separately from rewrite keys.
 Existing GitHub CLI authentication takes precedence. The app looks for `gh` in
 `/opt/homebrew/bin` and `/usr/local/bin`, so launching from Finder works too.
 Public releases can also be checked without authentication.

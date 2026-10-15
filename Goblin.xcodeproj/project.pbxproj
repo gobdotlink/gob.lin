@@ -11,7 +11,6 @@
 		250000000000000000000001 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250000000000000000000002 /* InsightsView.swift */; };
 		5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */; };
 		E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */; };
-		10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */; };
 		9E9D3F5BF087A229386F1C7C /* UpdateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */; };
 		380000000000000000000001 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 380000000000000000000002 /* DirectInsertionVerification.swift */; };
 		F90900000000000000000001 /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000003 /* SpeechModelService.swift */; };
@@ -38,7 +37,7 @@
 		75603E9EA9B586CFE778063E /* Goblin.icns in Resources */ = {isa = PBXBuildFile; fileRef = 8C7DC821C59D20E3BD8E9846 /* Goblin.icns */; };
 		7A570615D99771B775D264EF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD3A88B3315580E9F903DD8 /* SettingsView.swift */; };
 		8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86CA786E7971062A617DCC40 /* KeyboardLayout.swift */; };
-		85E32CD7C7808D071F8091FA /* RewriteKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8E24C44A912745118817BC /* RewriteKeychain.swift */; };
+		85E32CD7C7808D071F8091FA /* RewriteCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8E24C44A912745118817BC /* RewriteCredentials.swift */; };
 		90BA4272E95E7192F6993A4E /* GoblinApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */; };
 		94815388F584D4E2E822E3C0 /* DiagnosticsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37BC44B5352BC52AFF2D6019 /* DiagnosticsModel.swift */; };
 		94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */; };
@@ -57,7 +56,6 @@
 		250000000000000000000002 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
 		651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
-		3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateKeychain.swift; sourceTree = "<group>"; };
 		9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSettingsView.swift; sourceTree = "<group>"; };
 		380000000000000000000002 /* DirectInsertionVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectInsertionVerification.swift; sourceTree = "<group>"; };
 		F90900000000000000000003 /* SpeechModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelService.swift; sourceTree = "<group>"; };
@@ -91,7 +89,7 @@
 		D6B44F440C37D56DCC03C439 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
 		E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlaySettingsView.swift; sourceTree = "<group>"; };
-		EE8E24C44A912745118817BC /* RewriteKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteKeychain.swift; sourceTree = "<group>"; };
+		EE8E24C44A912745118817BC /* RewriteCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteCredentials.swift; sourceTree = "<group>"; };
 		F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteSettingsView.swift; sourceTree = "<group>"; };
 		F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApplicationDelegate.swift; sourceTree = "<group>"; };
 		130000000000000000000002 /* DictationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationSession.swift; sourceTree = "<group>"; };
@@ -116,7 +114,6 @@
 			children = (
 				651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */,
 				A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */,
-				3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */,
 				9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */,
 			);
 			path = Updates;
@@ -224,7 +221,7 @@
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */,
 				7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */,
-				EE8E24C44A912745118817BC /* RewriteKeychain.swift */,
+				EE8E24C44A912745118817BC /* RewriteCredentials.swift */,
 				F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */,
 				D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */,
 				195481D948EED77B9D1FF41E /* Diagnostics */,
@@ -344,7 +341,6 @@
 			files = (
 				5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */,
 				E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */,
-				10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */,
 				9E9D3F5BF087A229386F1C7C /* UpdateSettingsView.swift in Sources */,
 				F90900000000000000000001 /* SpeechModelService.swift in Sources */,
 				F90900000000000000000002 /* ModelSettingsView.swift in Sources */,
@@ -375,7 +371,7 @@
 				7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */,
 				21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */,
 				A80D16C881344416CB256003 /* PermissionModel.swift in Sources */,
-				85E32CD7C7808D071F8091FA /* RewriteKeychain.swift in Sources */,
+				85E32CD7C7808D071F8091FA /* RewriteCredentials.swift in Sources */,
 				174F206992DBAA3EB8F3DF21 /* RewriteSettingsView.swift in Sources */,
 				7A570615D99771B775D264EF /* SettingsView.swift in Sources */,
 				94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */,

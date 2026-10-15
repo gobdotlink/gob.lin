@@ -80,6 +80,17 @@ struct RewriteCredentialChecks {
         try relaunched.prepare(for: settings)
         require(relaunchReads == 1, "An updated app must preflight again on relaunch")
         require(try relaunched.key(for: settings) == "relaunch-key", "Relaunched dictation uses the prepared key")
-        print("PASS launch authorization, prompt-free submissions, denial, key changes and relaunch checks (synthetic credentials only)")
+
+        let suite = "rewrite-key-store-check-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var other = settings
+        other.selectProvider(.cerebras)
+        try RewriteKeyStore.save("stored-key", for: settings, defaults: defaults)
+        require(try RewriteKeyStore.load(for: settings, defaults: defaults) == "stored-key", "A saved key loads for its endpoint")
+        require(try RewriteKeyStore.load(for: other, defaults: defaults) == "", "Another endpoint never reuses the key")
+        try RewriteKeyStore.save("", for: settings, defaults: defaults)
+        require(try RewriteKeyStore.load(for: settings, defaults: defaults) == "", "Saving an empty key removes it")
+        print("PASS launch authorization, prompt-free submissions, denial, key changes, relaunch and key store checks (synthetic credentials only)")
     }
 }

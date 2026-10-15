@@ -7,6 +7,6 @@ temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 swiftc -parse-as-library -swift-version 6 \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
-    Sources/GoblinApp/RewriteKeychain.swift scripts/checks/rewrite-credentials.swift \
+    Sources/GoblinApp/RewriteCredentials.swift scripts/checks/rewrite-credentials.swift \
     "$binary_directory"/GoblinCore.build/*.swift.o -o "$temporary/check"
 "$temporary/check"

@@ -5,7 +5,7 @@ struct RewriteSettingsView: View {
     @State private var settings: RewriteSettings
     @State private var savedSettings: RewriteSettings
     private let defaults: UserDefaults
-    private let inspectKeychain: Bool
+    private let inspectCredentials: Bool
     private let onSaved: () -> Void
     private let onFailure: (DiagnosticFailure) -> Void
     @State private var apiKey = ""
@@ -15,9 +15,9 @@ struct RewriteSettingsView: View {
     @State private var testing = false
     @State private var testTask: Task<Void, Never>?
 
-    init(defaults: UserDefaults = .standard, inspectKeychain: Bool = true, onSaved: @escaping () -> Void = {},
+    init(defaults: UserDefaults = .standard, inspectCredentials: Bool = true, onSaved: @escaping () -> Void = {},
          onFailure: @escaping (DiagnosticFailure) -> Void = { _ in }) {
-        self.defaults = defaults; self.inspectKeychain = inspectKeychain
+        self.defaults = defaults; self.inspectCredentials = inspectCredentials
         self.onSaved = onSaved; self.onFailure = onFailure
         let saved = RewriteSettingsStore.load(defaults: defaults)
         _settings = State(initialValue: saved)
@@ -41,7 +41,7 @@ struct RewriteSettingsView: View {
                 }
                 Spacer()
                 Button(testing ? "Testing…" : "Test cleanup") { testCleanup() }
-                    .disabled(testing || hasUnsavedChanges || !inspectKeychain || !savedSettings.enabled || savedSettings.cleanup == .none)
+                    .disabled(testing || hasUnsavedChanges || !inspectCredentials || !savedSettings.enabled || savedSettings.cleanup == .none)
                 Button("Save settings") { save() }
                     .buttonStyle(.borderedProminent).tint(GoblinBrand.tint)
                     .disabled(testing || !hasUnsavedChanges)
@@ -75,15 +75,15 @@ struct RewriteSettingsView: View {
                     }
                 }
             }
-            SecureField(keySaved ? "API key — saved in Keychain" : "API key", text: $apiKey)
+            SecureField(keySaved ? "API key — saved" : "API key", text: $apiKey)
             HStack {
-                Text(keySaved ? "A key is saved for this endpoint." : "Keys are stored only in macOS Keychain.")
+                Text(keySaved ? "A key is saved for this endpoint." : "Keys are saved in gob.lin preferences on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if keySaved {
                     Button("Remove key", role: .destructive) {
                         do {
-                            try RewriteKeychain.delete(for: settings)
+                            try RewriteKeyStore.save("", for: settings, defaults: defaults)
                             keySaved = false; apiKey = ""; message = "API key removed."; failed = false
                             onSaved()
                         }
@@ -119,7 +119,7 @@ struct RewriteSettingsView: View {
                     .font(.body.monospaced()).autocorrectionDisabled()
                     .frame(minHeight: 100, maxHeight: 160)
                     .accessibilityLabel("Extra request options JSON")
-                Text("For example: {\"max_completion_tokens\": 1024}. Options override request defaults; null omits a field. Choose Provider default for custom reasoning parameters. Luna omits sampling options unless reasoning is explicitly off. Groq GPT-OSS and Qwen cleanup always hide reasoning output. Model, messages and streaming are managed by gob.lin. These options are stored in preferences; keep API keys in the Keychain field.")
+                Text("For example: {\"max_completion_tokens\": 1024}. Options override request defaults; null omits a field. Choose Provider default for custom reasoning parameters. Luna omits sampling options unless reasoning is explicitly off. Groq GPT-OSS and Qwen cleanup always hide reasoning output. Model, messages and streaming are managed by gob.lin. Keep API keys in the API key field.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         } footer: {
@@ -136,20 +136,20 @@ struct RewriteSettingsView: View {
     }
 
     private func refreshKeyStatus() {
-        guard inspectKeychain else { keySaved = false; return }
-        do { keySaved = try RewriteKeychain.containsKey(for: settings) }
+        guard inspectCredentials else { keySaved = false; return }
+        do { keySaved = try !RewriteKeyStore.load(for: settings, defaults: defaults).isEmpty }
         catch { keySaved = false }
     }
 
     private func testCleanup() {
-        guard !testing, !hasUnsavedChanges, inspectKeychain, savedSettings.enabled, savedSettings.cleanup != .none else { return }
+        guard !testing, !hasUnsavedChanges, inspectCredentials, savedSettings.enabled, savedSettings.cleanup != .none else { return }
         let snapshot = savedSettings
         testing = true
         message = nil
         testTask = Task { @MainActor in
             defer { testing = false; testTask = nil }
             do {
-                let key = try RewriteKeychain.load(for: snapshot)
+                let key = try RewriteKeyStore.load(for: snapshot, defaults: defaults)
                 let start = ContinuousClock.now
                 let result = await RewriteClient().rewrite("i will send the report tomorrow morning", settings: snapshot, apiKey: key)
                 try Task.checkCancellation()
@@ -178,12 +178,12 @@ struct RewriteSettingsView: View {
                 }
                 let local = ["localhost", "127.0.0.1", "[::1]", "::1"].contains(endpoint.host ?? "")
                 if !local, key.isEmpty {
-                    guard inspectKeychain, try RewriteKeychain.containsKey(for: settings) else {
+                    guard inspectCredentials, try !RewriteKeyStore.load(for: settings, defaults: defaults).isEmpty else {
                         throw RewriteFailure.configuration("Enter an API key before enabling AI cleanup.")
                     }
                 }
             }
-            if !key.isEmpty, inspectKeychain { try RewriteKeychain.save(key, for: settings) }
+            if !key.isEmpty, inspectCredentials { try RewriteKeyStore.save(key, for: settings, defaults: defaults) }
             try RewriteSettingsStore.save(settings, defaults: defaults)
             savedSettings = settings
             apiKey = ""
