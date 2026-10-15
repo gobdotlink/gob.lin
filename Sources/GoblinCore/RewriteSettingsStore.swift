@@ -25,16 +25,21 @@ public enum RewriteSettingsStore {
 public enum RewriteKeyStore {
     public static let preferenceKey = "rewriteAPIKeys"
 
-    /// Keys are scoped to the canonical endpoint, so switching providers never reuses another provider's key.
+    /// Named providers keep one key across address edits. Custom is scoped to its endpoint, so it never
+    /// picks up a named provider's key or another custom server's.
     public static func load(for settings: RewriteSettings, defaults: UserDefaults = .standard) throws -> String {
-        keys(defaults)[try settings.endpoint().absoluteString] ?? ""
+        keys(defaults)[try account(settings)] ?? ""
     }
 
     /// Saving an empty key removes it.
     public static func save(_ key: String, for settings: RewriteSettings, defaults: UserDefaults = .standard) throws {
         var keys = keys(defaults)
-        keys[try settings.endpoint().absoluteString] = key.isEmpty ? nil : key
+        keys[try account(settings)] = key.isEmpty ? nil : key
         defaults.set(keys, forKey: preferenceKey)
+    }
+
+    private static func account(_ settings: RewriteSettings) throws -> String {
+        settings.provider == .custom ? "custom " + (try settings.endpoint().absoluteString) : settings.provider.rawValue
     }
 
     private static func keys(_ defaults: UserDefaults) -> [String: String] {

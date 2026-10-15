@@ -197,7 +197,7 @@ struct RewriteSafetyTests {
     }
 
     @Test func providerPresetsSendNativeReasoningAndAdvancedOptions() async throws {
-        for provider in RewriteProvider.allCases where !provider.models.isEmpty {
+        for provider in RewriteProvider.allCases where !provider.models.isEmpty && provider != .anthropic {
             for preset in provider.models {
                 var configured = settings
                 configured.selectProvider(provider)
@@ -211,12 +211,13 @@ struct RewriteSafetyTests {
                 if let temperature = preset.temperature { #expect(body["temperature"] as? Double == temperature) }
                 else { #expect(body["temperature"] == nil) }
                 switch provider {
-                case .openRouter:
+                case .openRouter, .vercel:
                     #expect((body["reasoning"] as? [String: Bool])?["enabled"] == false && body["reasoning_effort"] == nil)
                 case .zai:
                     #expect((body["thinking"] as? [String: String])?["type"] == "disabled" && body["reasoning_effort"] == nil)
-                default:
+                case .cerebras, .groq, .openAI, .requesty:
                     #expect(body["reasoning_effort"] as? String == (preset.reasoning == .off ? "none" : "low"))
+                default: break // Provider-specific mappings are covered in RewriteProviderTests.
                 }
                 if provider == .groq, preset.id == "openai/gpt-oss-20b" {
                     #expect(body["include_reasoning"] as? Bool == false && body["reasoning_format"] == nil)
