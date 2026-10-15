@@ -7,22 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */; };
-		250000000000000000000001 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250000000000000000000002 /* InsightsView.swift */; };
-		5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */; };
-		E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */; };
-		10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */; };
-		9E9D3F5BF087A229386F1C7C /* UpdateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */; };
-		380000000000000000000001 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 380000000000000000000002 /* DirectInsertionVerification.swift */; };
-		F90900000000000000000001 /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000003 /* SpeechModelService.swift */; };
-		F90900000000000000000002 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90900000000000000000004 /* ModelSettingsView.swift */; };
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
+		0770F768310A3AA4B04E59ED /* UpdateKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF791A52E4050890D6BFE3CB /* UpdateKeychain.swift */; };
+		0885CBBAA0DE9F6FB9BFB4A3 /* HistorySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC4B5EB8D08B3E2EE319018 /* HistorySettingsView.swift */; };
+		0FC039959BF7AD5EE416140E /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3FEC9638FA6353F8324835A /* SpeechModelService.swift */; };
 		12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2CADA2FD0B5602E82686E92 /* EventTap.swift */; };
 		174F206992DBAA3EB8F3DF21 /* RewriteSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */; };
 		17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */; };
 		1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */; };
 		1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */; };
 		21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */; };
+		2CEF1DEC0B82CA2270B7C39A /* MenuPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C7D9C4546227E5C237B460 /* MenuPopover.swift */; };
 		2D264F8C1F01B32F7D43596E /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51AB615CEA151D8A5A244DCD /* AudioSettingsView.swift */; };
 		31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */; };
 		328878B095DD6E130364C893 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = DDB1197B94259F10AEFE3EFC /* Assets */; };
@@ -30,6 +25,10 @@
 		39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EBD258A804FC8847A87D791 /* OnboardingView.swift */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
 		45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A854E8221704C177743D7C /* FocusedText.swift */; };
+		58E00021912DB4B5D0D06F35 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F18F0064FDFE0737432235A /* ModelSettingsView.swift */; };
+		5C55A7CF565ECAD05E937128 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAC73565C924F4F70CD7F9BB /* InsightsView.swift */; };
+		5FFE7394E4A1EC402B37C343 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24B1A95910F26D0E4F24463 /* DirectInsertionVerification.swift */; };
+		61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */; };
 		669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740B2E14FC110A8510E92CB /* OverlayController.swift */; };
 		705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */; };
 		70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */; };
@@ -37,65 +36,74 @@
 		7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */; };
 		75603E9EA9B586CFE778063E /* Goblin.icns in Resources */ = {isa = PBXBuildFile; fileRef = 8C7DC821C59D20E3BD8E9846 /* Goblin.icns */; };
 		7A570615D99771B775D264EF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD3A88B3315580E9F903DD8 /* SettingsView.swift */; };
+		7FC0B09A37C901C81DBE588C /* AppStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B029479976312A99966D9899 /* AppStatus.swift */; };
 		8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86CA786E7971062A617DCC40 /* KeyboardLayout.swift */; };
 		85E32CD7C7808D071F8091FA /* RewriteKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8E24C44A912745118817BC /* RewriteKeychain.swift */; };
 		90BA4272E95E7192F6993A4E /* GoblinApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */; };
 		94815388F584D4E2E822E3C0 /* DiagnosticsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37BC44B5352BC52AFF2D6019 /* DiagnosticsModel.swift */; };
 		94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */; };
 		A7811327A6820FE203C57930 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975C736F378D2F622BC649E2 /* AppModel.swift */; };
+		A7B0E11472D7E9433AF08152 /* UpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A0D0DB452A87EEC40083EE /* UpdateInstaller.swift */; };
 		A80D16C881344416CB256003 /* PermissionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D589917F852F1F35A10767 /* PermissionModel.swift */; };
 		B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 329F4335956AA81050B7D254 /* HotkeyService.swift */; };
+		BCAAF415428181460FE45503 /* UpdateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBB16907584DA296A1ABB543 /* UpdateSettingsView.swift */; };
 		BFC91F80B072CFDCE76C1B1A /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B44F440C37D56DCC03C439 /* DiagnosticsView.swift */; };
+		CD7F1BE60A8700CD5BAF0453 /* HistoryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6094FD8E8B26D894C6B110C /* HistoryWindow.swift */; };
 		CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7BE4BFC2CC19C75E54AB9178 /* GoblinCore */; };
-		F80F9DD8AE1771A3DE51D7BA /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */; };
-		130000000000000000000001 /* DictationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130000000000000000000002 /* DictationSession.swift */; };
-		130000000000000000000003 /* ActiveDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130000000000000000000004 /* ActiveDictation.swift */; };
+		D3D42EB4371D6BA94FD4F2B8 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119D82C80CFD2C6D04B8785E /* UpdateChecker.swift */; };
+		D762EA37F9BE0EFAFE1BF66B /* DictationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */; };
+		E044215AEE61E9611339C46B /* ActiveDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF1FE8056C680509FF18EE58 /* ActiveDictation.swift */; };
+		E6008ABDEBD09FC35F26CD52 /* DesignComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E33741D23CEF99390DFA8769 /* DesignComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		119D82C80CFD2C6D04B8785E /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPauseSession.swift; sourceTree = "<group>"; };
-		250000000000000000000002 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
-		651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
-		A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
-		3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateKeychain.swift; sourceTree = "<group>"; };
-		9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSettingsView.swift; sourceTree = "<group>"; };
-		380000000000000000000002 /* DirectInsertionVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectInsertionVerification.swift; sourceTree = "<group>"; };
-		F90900000000000000000003 /* SpeechModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelService.swift; sourceTree = "<group>"; };
-		F90900000000000000000004 /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
 		37BC44B5352BC52AFF2D6019 /* DiagnosticsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModel.swift; sourceTree = "<group>"; };
+		3FC4B5EB8D08B3E2EE319018 /* HistorySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySettingsView.swift; sourceTree = "<group>"; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4740B2E14FC110A8510E92CB /* OverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayController.swift; sourceTree = "<group>"; };
+		4F18F0064FDFE0737432235A /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
 		51AB615CEA151D8A5A244DCD /* AudioSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsView.swift; sourceTree = "<group>"; };
 		5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySettingsView.swift; sourceTree = "<group>"; };
-		5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationSession.swift; sourceTree = "<group>"; };
 		60A860B76707FA3E30261DB1 /* PasteboardTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteboardTransaction.swift; sourceTree = "<group>"; };
 		7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyShortcut.swift; sourceTree = "<group>"; };
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		86CA786E7971062A617DCC40 /* KeyboardLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayout.swift; sourceTree = "<group>"; };
 		8C7DC821C59D20E3BD8E9846 /* Goblin.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Goblin.icns; sourceTree = "<group>"; };
+		8E6CC1934008CEF8613C1E74 /* t3-04294d41 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "t3-04294d41"; path = .; sourceTree = SOURCE_ROOT; };
 		975C736F378D2F622BC649E2 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApp.swift; sourceTree = "<group>"; };
 		9DD3A88B3315580E9F903DD8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsertionService.swift; sourceTree = "<group>"; };
+		A24B1A95910F26D0E4F24463 /* DirectInsertionVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectInsertionVerification.swift; sourceTree = "<group>"; };
+		A9A0D0DB452A87EEC40083EE /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
+		AAC73565C924F4F70CD7F9BB /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		B029479976312A99966D9899 /* AppStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStatus.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
+		B1C7D9C4546227E5C237B460 /* MenuPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPopover.swift; sourceTree = "<group>"; };
+		B3FEC9638FA6353F8324835A /* SpeechModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechModelService.swift; sourceTree = "<group>"; };
+		BF1FE8056C680509FF18EE58 /* ActiveDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveDictation.swift; sourceTree = "<group>"; };
 		C2A854E8221704C177743D7C /* FocusedText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusedText.swift; sourceTree = "<group>"; };
 		CD14CC141C14EE017D44E28D /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
-		CFB3982C8AD54452D9320E23 /* goblin-merges */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "goblin-merges"; path = .; sourceTree = SOURCE_ROOT; };
 		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 		D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneSettingsView.swift; sourceTree = "<group>"; };
+		D6094FD8E8B26D894C6B110C /* HistoryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryWindow.swift; sourceTree = "<group>"; };
 		D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationOverlay.swift; sourceTree = "<group>"; };
 		D6B44F440C37D56DCC03C439 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		DBB16907584DA296A1ABB543 /* UpdateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSettingsView.swift; sourceTree = "<group>"; };
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
+		E33741D23CEF99390DFA8769 /* DesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignComponents.swift; sourceTree = "<group>"; };
 		E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlaySettingsView.swift; sourceTree = "<group>"; };
 		EE8E24C44A912745118817BC /* RewriteKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteKeychain.swift; sourceTree = "<group>"; };
+		EF791A52E4050890D6BFE3CB /* UpdateKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateKeychain.swift; sourceTree = "<group>"; };
 		F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteSettingsView.swift; sourceTree = "<group>"; };
 		F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApplicationDelegate.swift; sourceTree = "<group>"; };
-		130000000000000000000002 /* DictationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationSession.swift; sourceTree = "<group>"; };
-		130000000000000000000004 /* ActiveDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveDictation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,30 +119,10 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		CC5620D64D6A0F7DB9A6DD38 /* Updates */ = {
-			isa = PBXGroup;
-			children = (
-				651E0E671D2508BEAAA0B11F /* UpdateChecker.swift */,
-				A236AF4ACCA1306AB27F08F2 /* UpdateInstaller.swift */,
-				3016EB7942616C67E95D40A3 /* UpdateKeychain.swift */,
-				9FCB92D7A447279E57A8AB19 /* UpdateSettingsView.swift */,
-			);
-			path = Updates;
-			sourceTree = "<group>";
-		};
-		F90900000000000000000005 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				F90900000000000000000003 /* SpeechModelService.swift */,
-				F90900000000000000000004 /* ModelSettingsView.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
 		0B79B8288F3B62DD712A2F97 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				CFB3982C8AD54452D9320E23 /* goblin-merges */,
+				8E6CC1934008CEF8613C1E74 /* t3-04294d41 */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -165,6 +153,17 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		208911D9D23652C3053961C2 /* Updates */ = {
+			isa = PBXGroup;
+			children = (
+				119D82C80CFD2C6D04B8785E /* UpdateChecker.swift */,
+				A9A0D0DB452A87EEC40083EE /* UpdateInstaller.swift */,
+				EF791A52E4050890D6BFE3CB /* UpdateKeychain.swift */,
+				DBB16907584DA296A1ABB543 /* UpdateSettingsView.swift */,
+			);
+			path = Updates;
+			sourceTree = "<group>";
+		};
 		2121F3256188A52EA0842CDA /* Hotkeys */ = {
 			isa = PBXGroup;
 			children = (
@@ -190,8 +189,9 @@
 			isa = PBXGroup;
 			children = (
 				CD14CC141C14EE017D44E28D /* HistoryModel.swift */,
-				5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */,
-				250000000000000000000002 /* InsightsView.swift */,
+				3FC4B5EB8D08B3E2EE319018 /* HistorySettingsView.swift */,
+				D6094FD8E8B26D894C6B110C /* HistoryWindow.swift */,
+				AAC73565C924F4F70CD7F9BB /* InsightsView.swift */,
 			);
 			path = History;
 			sourceTree = "<group>";
@@ -205,6 +205,23 @@
 			path = Permissions;
 			sourceTree = "<group>";
 		};
+		B1982B83AAF6B5401B76F2C2 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				4F18F0064FDFE0737432235A /* ModelSettingsView.swift */,
+				B3FEC9638FA6353F8324835A /* SpeechModelService.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		B3C36C856F045467A6707D1B /* Menu */ = {
+			isa = PBXGroup;
+			children = (
+				B1C7D9C4546227E5C237B460 /* MenuPopover.swift */,
+			);
+			path = Menu;
+			sourceTree = "<group>";
+		};
 		DF7F3C1710AEBA19D2F4A3EA /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -216,14 +233,16 @@
 		E25ED717AB1306A299993066 /* GoblinApp */ = {
 			isa = PBXGroup;
 			children = (
+				BF1FE8056C680509FF18EE58 /* ActiveDictation.swift */,
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
-				1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */,
-				130000000000000000000002 /* DictationSession.swift */,
-				130000000000000000000004 /* ActiveDictation.swift */,
+				B029479976312A99966D9899 /* AppStatus.swift */,
+				E33741D23CEF99390DFA8769 /* DesignComponents.swift */,
+				5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */,
 				5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */,
 				7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */,
+				1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */,
 				EE8E24C44A912745118817BC /* RewriteKeychain.swift */,
 				F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */,
 				D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */,
@@ -231,11 +250,12 @@
 				46547DF0C29D7ED94EADCB64 /* History */,
 				2121F3256188A52EA0842CDA /* Hotkeys */,
 				FB558193443617ABD3750FC0 /* Insertion */,
+				B3C36C856F045467A6707D1B /* Menu */,
+				B1982B83AAF6B5401B76F2C2 /* Models */,
 				40EA8A05ACABDE4CA467032E /* Overlay */,
 				63D6A1534597FB8FF39193BB /* Permissions */,
 				148979F2473089BBF41C17BC /* Settings */,
-				CC5620D64D6A0F7DB9A6DD38 /* Updates */,
-				F90900000000000000000005 /* Models */,
+				208911D9D23652C3053961C2 /* Updates */,
 			);
 			name = GoblinApp;
 			path = Sources/GoblinApp;
@@ -244,7 +264,7 @@
 		FB558193443617ABD3750FC0 /* Insertion */ = {
 			isa = PBXGroup;
 			children = (
-				380000000000000000000002 /* DirectInsertionVerification.swift */,
+				A24B1A95910F26D0E4F24463 /* DirectInsertionVerification.swift */,
 				C2A854E8221704C177743D7C /* FocusedText.swift */,
 				207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */,
 				86CA786E7971062A617DCC40 /* KeyboardLayout.swift */,
@@ -342,34 +362,33 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5EFCB11F113DD994C6C47B08 /* UpdateChecker.swift in Sources */,
-				E3522A390F657104759050D8 /* UpdateInstaller.swift in Sources */,
-				10E48FF5DA0E7733EF0902FB /* UpdateKeychain.swift in Sources */,
-				9E9D3F5BF087A229386F1C7C /* UpdateSettingsView.swift in Sources */,
-				F90900000000000000000001 /* SpeechModelService.swift in Sources */,
-				F90900000000000000000002 /* ModelSettingsView.swift in Sources */,
+				E044215AEE61E9611339C46B /* ActiveDictation.swift in Sources */,
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
-				61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */,
-				130000000000000000000001 /* DictationSession.swift in Sources */,
-				130000000000000000000003 /* ActiveDictation.swift in Sources */,
+				7FC0B09A37C901C81DBE588C /* AppStatus.swift in Sources */,
 				2D264F8C1F01B32F7D43596E /* AudioSettingsView.swift in Sources */,
+				E6008ABDEBD09FC35F26CD52 /* DesignComponents.swift in Sources */,
 				94815388F584D4E2E822E3C0 /* DiagnosticsModel.swift in Sources */,
 				BFC91F80B072CFDCE76C1B1A /* DiagnosticsView.swift in Sources */,
 				1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */,
+				D762EA37F9BE0EFAFE1BF66B /* DictationSession.swift in Sources */,
 				04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */,
+				5FFE7394E4A1EC402B37C343 /* DirectInsertionVerification.swift in Sources */,
 				12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */,
-				380000000000000000000001 /* DirectInsertionVerification.swift in Sources */,
 				45729207E4F7E3AE5E45ADEC /* FocusedText.swift in Sources */,
 				422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */,
 				90BA4272E95E7192F6993A4E /* GoblinApplicationDelegate.swift in Sources */,
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */,
-				F80F9DD8AE1771A3DE51D7BA /* HistoryView.swift in Sources */,
-				250000000000000000000001 /* InsightsView.swift in Sources */,
+				0885CBBAA0DE9F6FB9BFB4A3 /* HistorySettingsView.swift in Sources */,
+				CD7F1BE60A8700CD5BAF0453 /* HistoryWindow.swift in Sources */,
 				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
 				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
 				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,
+				5C55A7CF565ECAD05E937128 /* InsightsView.swift in Sources */,
 				8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */,
+				61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */,
+				2CEF1DEC0B82CA2270B7C39A /* MenuPopover.swift in Sources */,
+				58E00021912DB4B5D0D06F35 /* ModelSettingsView.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
 				669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */,
 				7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */,
@@ -379,8 +398,13 @@
 				174F206992DBAA3EB8F3DF21 /* RewriteSettingsView.swift in Sources */,
 				7A570615D99771B775D264EF /* SettingsView.swift in Sources */,
 				94BAFF89F5A0076613420B93 /* ShortcutRecorder.swift in Sources */,
+				0FC039959BF7AD5EE416140E /* SpeechModelService.swift in Sources */,
 				705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */,
 				1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */,
+				D3D42EB4371D6BA94FD4F2B8 /* UpdateChecker.swift in Sources */,
+				A7B0E11472D7E9433AF08152 /* UpdateInstaller.swift in Sources */,
+				0770F768310A3AA4B04E59ED /* UpdateKeychain.swift in Sources */,
+				BCAAF415428181460FE45503 /* UpdateSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -538,9 +562,9 @@
 				CODE_SIGN_ENTITLEMENTS = Resources/Goblin.entitlements;
 				CODE_SIGN_IDENTITY = "gob.lin Local Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
-				ENABLE_DEBUG_DYLIB = NO;
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				EXECUTABLE_NAME = GoblinApp;
 				GENERATE_INFOPLIST_FILE = NO;

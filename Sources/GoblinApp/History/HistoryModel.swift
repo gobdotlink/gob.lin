@@ -29,6 +29,8 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var isLoading = false
     @Published private(set) var hasMore = false
     @Published var searchText = ""
+    @Published var filter: HistoryFilter = .all
+    @Published private(set) var counts = HistoryCounts()
     @Published var errorMessage: String?
     @Published var retranscribeAction: ReprocessAction?
     @Published var rewriteAction: ReprocessAction?
@@ -91,10 +93,12 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         isLoading = true
         guard let store else { isLoading = false; return }
         do {
-            let result = try await store.entries(matching: searchText, limit: 200)
+            let result = try await store.entries(matching: searchText, filter: filter, limit: 200)
+            let counts = try await store.counts()
             guard id == requestID else { return }
             entries = result
             hasMore = result.count == 200
+            self.counts = counts
         } catch {
             guard id == requestID else { return }
             errorMessage = error.localizedDescription
@@ -109,7 +113,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let offset = entries.count
         isLoading = true
         do {
-            let result = try await store.entries(matching: searchText, limit: 200, offset: offset)
+            let result = try await store.entries(matching: searchText, filter: filter, limit: 200, offset: offset)
             guard id == requestID else { return }
             entries.append(contentsOf: result)
             hasMore = result.count == 200
@@ -125,6 +129,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             try await store?.setStarred(starred, id: entry.id)
             if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index].starred = starred }
+            if let counts = try? await store?.counts() { self.counts = counts }
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
@@ -136,6 +141,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             isLoading = false
             entries.removeAll { $0.id == entry.id }
             revision += 1
+            if let counts = try? await store?.counts() { self.counts = counts }
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 

@@ -18,7 +18,7 @@ struct ToneSettingsView: View {
                         }
                         Spacer(minLength: 12)
                         Image(systemName: "checkmark").font(.body.weight(.semibold))
-                            .foregroundStyle(GoblinBrand.accent).opacity(selected ? 1 : 0)
+                            .foregroundStyle(GoblinBrand.mossText).opacity(selected ? 1 : 0)
                     }
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())

@@ -74,7 +74,7 @@ struct ModelSettingsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Button("Cancel preparation") { service.cancelPreparation() }.disabled(service.activeSessionCount > 0)
-        case .ready: Label("Ready · available offline", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.accent)
+        case .ready: Label("Ready · available offline", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.mossText)
         case .unloading: Label("Unloading idle model…", systemImage: "memorychip")
         case .unloaded:
             Label("Unloaded to free memory", systemImage: "memorychip")

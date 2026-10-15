@@ -24,6 +24,14 @@ final class AppModel: ObservableObject {
     @Published var mascotState: MascotState = .idle
     @Published var settingsSelection: SettingsSection? = .general
     @Published var lastTranscript: String?
+    @Published var historyScope: HistoryScope = .all
+    /// A dictation History should select when it opens, e.g. from a popover row.
+    @Published var historyFocus: UUID?
+    /// Set by the app scene: opens a window by id and brings gob.lin forward.
+    var openWindow: ((String) -> Void)?
+    /// While first run is testing the talk key, dictations made with gob.lin in front go here instead of
+    /// being refused as a focus change: gob.lin never types into its own windows.
+    var onboardingTake: ((OverlayResult, String) -> Void)?
     private var subscriptions: Set<AnyCancellable> = []
     private var insertionTask: Task<Void, Never>?
     private let processingQueue = DictationProcessingQueue()
@@ -119,6 +127,19 @@ final class AppModel: ObservableObject {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).sink { [weak self] _ in
             Task { @MainActor in self?.refreshConfiguration() }
         }.store(in: &subscriptions)
+        hotkeys.$recording.sink { [weak self] recording in
+            Task { @MainActor in self?.overlay.model.handsFree = recording == .handsFree }
+        }.store(in: &subscriptions)
+        overlay.model.modelName = speechModels.selectedModel.name.components(separatedBy: " ").first ?? "Parakeet"
+        overlay.model.perform = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .setup: self.permissions.showOnboarding()
+            case .audioSettings: self.openSettings(.audio)
+            case .cleanupSettings: self.openSettings(.cleanup)
+            }
+        }
+        permissions.onboardingContent = { [weak self] in self.map { AnyView(OnboardingView(model: $0)) } ?? AnyView(EmptyView()) }
         hotkeys.onAction = { [weak self] action in self?.handleHotkey(action) }
         insertion.lastTranscript = { [weak self] in self?.lastTranscript }
         insertion.onPasteRequested = { [weak self] in self?.pasteLastTranscript() }
@@ -499,7 +520,7 @@ final class AppModel: ObservableObject {
     private func recordFailedDictation(_ active: ActiveDictation, failure: DiagnosticFailure) async {
         diagnostics.report(failure, operation: active.session.id)
         if let overlayID = active.session.overlayID {
-            overlay.update(.error(failure.message), session: overlayID)
+            overlay.update(.error(OverlayNotice(failure)), session: overlayID)
             overlay.hide(after: 4, session: overlayID)
         }
         guard let url = active.audio?.fileURL ?? active.failure?.recoveryURL,
@@ -539,7 +560,7 @@ final class AppModel: ObservableObject {
         // A background operation must not replace the current dictation's text.
         guard dictationSessions.isEmpty else { return }
         let session = overlay.begin { [weak self] in self?.overlay.hide() }
-        overlay.update(.error(failure.message), session: session)
+        overlay.update(.error(OverlayNotice(failure)), session: session)
         overlay.hide(after: 4, session: session)
     }
 
@@ -578,8 +599,11 @@ final class AppModel: ObservableObject {
                                   duration: Double, timings: DictationTimings,
                                   session: DictationSession) async throws {
         try session.checkCancellation()
-        if let overlayID = session.overlayID {
-            overlay.update(.polishing, session: overlayID)
+        let cleanup = RewriteSettingsStore.load(defaults: defaults)
+        if let overlayID = session.overlayID, cleanup.enabled, cleanup.cleanup != .none,
+           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            overlay.model.cleanupLabel = "\(cleanup.cleanup.title) · \(cleanup.provider.title)"
+            overlay.update(.polishing, committed: raw, tentative: "", session: overlayID)
         }
         let result = await processTranscript(raw)
         try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
@@ -592,6 +616,7 @@ final class AppModel: ObservableObject {
         var timings = timings
         timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
         var warning = result.warning?.message
+        var warningFailure = result.warning
         let text = result.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
         var insertionAttempted = false
         if !text.isEmpty {
@@ -599,31 +624,49 @@ final class AppModel: ObservableObject {
             if let overlayID = session.overlayID {
                 overlay.update(.transcribing, committed: result.finalText, tentative: "", session: overlayID)
             }
-            if !session.historyOnly {
+            if !session.historyOnly, session.target == nil, let deliver = onboardingTake {
+                let seconds = (Self.milliseconds(since: session.captureStarted) - timings.captureMilliseconds) / 1000
+                let take = OverlayResult(application: "gob.lin", words: result.finalText.split(whereSeparator: \.isWhitespace).count,
+                                         seconds: seconds.isFinite ? max(0, seconds) : 0)
+                deliver(take, result.finalText)
+                if let overlayID = session.overlayID { overlay.update(.inserted(take), session: overlayID) }
+            } else if !session.historyOnly {
                 let insertionStart = ContinuousClock.now
                 if session.targetIsFocused && !insertion.busy && insertionTask == nil {
                     insertionAttempted = true
                     diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
-                    await insertion.insert(result.finalText) { [weak self] in
-                        if result.warning == nil, let overlayID = session.overlayID { self?.overlay.hide(session: overlayID) }
+                    var chipShown = false
+                    let showChip = { [weak self] in
+                        guard !chipShown, result.warning == nil, let self, let overlayID = session.overlayID else { return }
+                        chipShown = true
+                        // Key-up is when capture ended; the chip reports key-up to text.
+                        let seconds = (Self.milliseconds(since: session.captureStarted) - timings.captureMilliseconds) / 1000
+                        self.overlay.update(.inserted(OverlayResult(application: session.target?.localizedName,
+                            words: result.finalText.split(whereSeparator: \.isWhitespace).count,
+                            seconds: seconds.isFinite ? max(0, seconds) : 0)), session: overlayID)
+                        self.overlay.hide(after: 0.6, session: overlayID)
                     }
+                    // Pastes report as soon as they're sent; direct Accessibility writes once verified.
+                    await insertion.insert(result.finalText, onPasteSent: showChip)
+                    if case .success = insertion.outcome { showChip() }
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
                         details.failure = failure
                         details.succeeded = false
-                        warning = warning ?? failure.message
+                        if warning == nil { warning = failure.message; warningFailure = failure }
                     } else if case .success = insertion.outcome { details.succeeded = true }
                     else if case .unverified = insertion.outcome { warning = warning ?? insertion.status }
                     diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: session.id, details: details)
                 } else {
                     let failure: DiagnosticFailure = session.targetIsFocused ? .insertionNotAcknowledged : .insertionTargetChanged
                     diagnostics.report(failure, operation: session.id)
-                    warning = warning ?? failure.message
+                    if warning == nil { warning = failure.message; warningFailure = failure }
                 }
                 timings.insertionMilliseconds = Self.milliseconds(since: insertionStart)
             }
-        } else if !result.intentionallyEmpty {
-            warning = warning ?? DiagnosticFailure.noTranscriptAvailable.message
+        } else if !result.intentionallyEmpty, warning == nil {
+            warning = DiagnosticFailure.noTranscriptAvailable.message
+            warningFailure = .noTranscriptAvailable
         }
         // Once insertion starts, retain its text/audio even if cancellation interrupts acknowledgement.
         if !insertionAttempted { try session.checkCancellation() }
@@ -638,10 +681,33 @@ final class AppModel: ObservableObject {
         if saved { try? FileManager.default.removeItem(at: audioURL) }
         if let overlayID = session.overlayID {
             if let warning {
-                overlay.update(.error(warning), session: overlayID)
+                overlay.update(.error(OverlayNotice(message: warning, failure: warningFailure)), session: overlayID)
                 overlay.hide(after: 4, session: overlayID)
-            } else { overlay.hide(after: 0.8, session: overlayID) }
+            } else {
+                overlay.hide(after: 0.8, session: overlayID)
+                if saved, insertionAttempted { await celebrateMilestone(adding: entry.wordCount, overlay: overlayID) }
+            }
         }
+    }
+
+    /// One celebration per threshold, replacing the inserted chip. Thresholds passed before this
+    /// feature existed are recorded quietly instead of celebrated late.
+    private func celebrateMilestone(adding words: Int, overlay overlayID: UUID) async {
+        guard defaults.object(forKey: "overlay.milestones") as? Bool ?? true else { return }
+        let thresholds = [1_000, 10_000, 100_000, 1_000_000]
+        let total: Int
+        if defaults.object(forKey: "milestones.words") == nil {
+            total = (try? await history.store?.insights().totalWords) ?? words
+            defaults.set(thresholds.last { $0 <= total } ?? 0, forKey: "milestones.celebrated")
+            defaults.set(total, forKey: "milestones.words")
+            return
+        }
+        total = defaults.integer(forKey: "milestones.words") + words
+        defaults.set(total, forKey: "milestones.words")
+        guard let threshold = thresholds.last(where: { $0 <= total }), threshold > defaults.integer(forKey: "milestones.celebrated") else { return }
+        defaults.set(threshold, forKey: "milestones.celebrated")
+        overlay.update(.milestone(words: threshold), session: overlayID)
+        overlay.hide(after: 2.5, session: overlayID)
     }
 
     private static func milliseconds(since start: ContinuousClock.Instant) -> Double {
@@ -668,7 +734,7 @@ final class AppModel: ObservableObject {
             case .arming, .listening: state = .recording
             case .transcribing, .polishing: state = .transcribing
             case .error: state = .warning
-            case .hidden: state = .idle
+            case .hidden, .inserted, .milestone: state = .idle
             }
         }
         if mascotState != state { mascotState = state }

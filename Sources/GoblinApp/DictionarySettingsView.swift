@@ -72,9 +72,12 @@ struct DictionarySettingsView: View {
             HStack {
                 Text("Terms")
                 Spacer()
-                Button("Import words…") { importing = true }.disabled(!model.available)
-                Button("Add term", systemImage: "plus") { editing = DictionaryEntry(spelling: "") }.disabled(!model.available)
-                    .buttonStyle(.borderedProminent).tint(GoblinBrand.tint)
+                Group {
+                    Button("Import Words…") { importing = true }.disabled(!model.available)
+                    Button("Add Term", systemImage: "plus") { editing = DictionaryEntry(spelling: "") }.disabled(!model.available)
+                        .prominent()
+                }
+                .textCase(nil).font(.callout).controlSize(.small)
             }
         } footer: {
             Text("Only words you add are used. Aliases match exact whole words; nothing is guessed.")
@@ -130,7 +133,7 @@ private struct DictionaryEntryEditor: View {
                     if model.put(DictionaryEntry(id: entry.id, spelling: spelling, aliases: aliases.components(separatedBy: .newlines))) {
                         dismiss()
                     } else { error = model.error; model.error = nil }
-                }.keyboardShortcut(.defaultAction).disabled(spelling.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).tint(GoblinBrand.tint)
+                }.keyboardShortcut(.defaultAction).disabled(spelling.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
         }

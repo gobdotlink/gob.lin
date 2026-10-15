@@ -17,7 +17,7 @@ struct HistoryLayoutChecks {
             try? FileManager.default.removeItem(at: directory)
         }
         let model = AppModel(dataDirectory: directory, defaults: defaults, servicesEnabled: false)
-        model.settingsSelection = .history
+        model.historyScope = .all
         let first = HistoryEntry(rawText: "Plan the next release and review the checklist.",
                                  finalText: "Plan the next release and review the checklist.",
                                  targetApplicationName: "Synthetic editor", audioDuration: 3.4, model: "Fixture", starred: true)
@@ -26,27 +26,27 @@ struct HistoryLayoutChecks {
         let firstSaved = await model.history.record(first)
         let secondSaved = await model.history.record(second)
         precondition(firstSaved && secondSaved)
-        let host = NSHostingView(rootView: SettingsView(model: model).frame(width: 940, height: 720))
-        let window = NSWindow(contentRect: NSRect(x: -2000, y: -2000, width: 940, height: 720),
+        let host = NSHostingView(rootView: HistoryWindow(model: model).frame(width: 1100, height: 720))
+        let window = NSWindow(contentRect: NSRect(x: -2000, y: -2000, width: 1100, height: 720),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = host
         defer { window.close() }
         let output = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "docs/screenshots/history")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        try await capture(host, to: output.appendingPathComponent("settings-history.png"))
+        try await capture(host, to: output.appendingPathComponent("history.png"))
         model.history.searchText = "schedule"
         await model.history.reload()
         precondition(model.history.entries.map(\.id) == [second.id])
-        try await capture(host, to: output.appendingPathComponent("settings-history-search.png"))
+        try await capture(host, to: output.appendingPathComponent("history-search.png"))
         model.history.searchText = "no matching fixture"
         await model.history.reload()
         precondition(model.history.entries.isEmpty)
-        try await capture(host, to: output.appendingPathComponent("settings-history-no-matches.png"))
+        try await capture(host, to: output.appendingPathComponent("history-no-matches.png"))
         model.history.searchText = ""
         await model.history.reload()
         await model.history.delete(second)
         precondition(model.history.entries.map(\.id) == [first.id])
-        try await capture(host, to: output.appendingPathComponent("settings-history-after-delete.png"))
+        try await capture(host, to: output.appendingPathComponent("history-after-delete.png"))
         let reopened = HistoryModel(directory: directory, defaults: defaults)
         await reopened.reload()
         precondition(reopened.entries == model.history.entries, "Navigation must use the existing persistent store")
@@ -57,9 +57,9 @@ struct HistoryLayoutChecks {
         defer { retentionWindow.close() }
         try await capture(retentionHost, to: output.appendingPathComponent("history-retention.png"))
         await model.history.delete(first)
-        try await capture(host, to: output.appendingPathComponent("settings-history-empty.png"))
+        try await capture(host, to: output.appendingPathComponent("history-empty.png"))
         await model.shutdown()
-        print("History layout checks passed: isolated persistence/search/delete; offscreen populated, search, no-match, deletion, empty and retention captures. Hidden rendering omits sidebar material; live entry points, resizing and action clicks remain unverified.")
+        print("History layout checks passed: isolated persistence/search/delete; offscreen populated, search, no-match, deletion, empty and retention captures. Hidden rendering omits window materials; live entry points, resizing and action clicks remain unverified.")
     }
 
     @MainActor private static func capture(_ view: NSView, to url: URL) async throws {

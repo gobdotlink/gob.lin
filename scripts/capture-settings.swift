@@ -2,7 +2,8 @@ import AppKit
 import GoblinCore
 import SwiftUI
 
-/// Production Settings views with isolated synthetic data and no system services.
+/// Production views with isolated synthetic data and no system services: Settings, History, the
+/// popover, first run and every overlay phase, in light and dark.
 @main
 struct SettingsCapture {
     @MainActor static func main() throws {
@@ -26,92 +27,99 @@ struct SettingsCapture {
                 accessibilityPermission: .denied, inputMonitoringPermission: .denied,
                 microphoneNames: ["Preview microphone"], defaultMicrophoneName: "Preview microphone"))
         precondition(model.overlay.position == .top, "Saved overlay position must apply before Settings or Preview opens")
+        let emptyDirectory = directory.appendingPathComponent("empty", isDirectory: true)
+        let empty = AppModel(dataDirectory: emptyDirectory, defaults: defaults, servicesEnabled: false)
         let lifecycle = GoblinApplicationDelegate()
         lifecycle.model = model
         app.delegate = lifecycle
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 840),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 760),
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.title = "gob.lin — Settings capture"
-        window.contentView = NSHostingView(rootView: SettingsView(model: model).allowsHitTesting(false))
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        app.activate()
-        print("Preview PID \(getpid()), window \(window.windowNumber)")
+        window.titlebarAppearsTransparent = true
+        if !CommandLine.arguments.contains("--offscreen") {
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+            app.activate()
+        }
         let destination = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "docs/screenshots", isDirectory: true)
+        let offscreen = CommandLine.arguments.contains("--offscreen")
         var captureFailed = false
         let capture = Task { @MainActor in
             do {
-                try await Task.sleep(for: .milliseconds(700))
-                precondition(model.dictionary.entries.count == 3 && model.dictionary.available)
                 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-                let phases: [(OverlayPhase, String)] = [(.arming, "arming"), (.listening, "listening"),
-                    (.transcribing, "transcribing"), (.polishing, "polishing"), (.error("polish failed — pasted raw"), "error")]
-                if !CommandLine.arguments.contains("--transition-only") {
-                    let pages: [(SettingsSection, String)] = [(.general, "general"), (.audio, "audio"), (.model, "model"),
-                        (.dictionary, "dictionary"), (.rewrite, "rewrite"), (.tone, "tone"), (.history, "history"), (.insights, "insights"),
-                        (.overlay, "overlay"), (.diagnostics, "diagnostics"), (.about, "about")]
-                    precondition(Set(pages.map(\.0)) == Set(SettingsSection.allCases))
-                    for (page, name) in pages {
+                try await seedHistory(model.history)
+                precondition(model.dictionary.entries.count == 3 && model.dictionary.available)
+                var window = window
+                @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false) async throws {
+                    // A fresh window per shot, so one view's toolbar never leaks into the next capture.
+                    window.orderOut(nil)
+                    window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                        styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                    window.isReleasedWhenClosed = false
+                    window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                    window.title = "gob.lin — \(name)"
+                    window.setContentSize(size)
+                    window.contentView = NSHostingView(rootView: view.allowsHitTesting(false))
+                    if offscreen {
+                        // Rendered off the visible desktop: nothing flashes on screen or takes focus.
+                        window.setFrameOrigin(NSPoint(x: -20_000, y: 0))
+                        window.orderBack(nil)
+                    } else {
+                        window.center()
+                        window.makeKeyAndOrderFront(nil)
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                    try await Task.sleep(for: .milliseconds(700))
+                    try snapshot(window, to: destination.appendingPathComponent("design-\(name).png"), live: !offscreen)
+                    print("Captured \(name)")
+                }
+                let only = CommandLine.arguments.dropFirst(2).first { !$0.hasPrefix("--") }
+                func wanted(_ group: String) -> Bool { only == nil || only == group }
+
+                if wanted("settings") {
+                    for page in SettingsSection.allCases {
                         model.settingsSelection = page
-                        if page == .diagnostics {
-                            model.diagnostics.report(.modelUnavailable)
-                            model.diagnostics.recordTimings(DictationTimings(asrMilliseconds: 180, rewriteMilliseconds: 12))
-                        }
-                        try await Task.sleep(for: .milliseconds(700))
-                        try snapshot(window, to: destination.appendingPathComponent("gob-22-settings-\(name).png"))
-                        print("Captured \(page.rawValue)")
+                        if page == .diagnostics { model.diagnostics.report(.modelUnavailable) }
+                        try await shoot("settings-\(page.rawValue.lowercased())", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 900, height: 1080))
                     }
-                    window.title = "gob.lin — Branding and menu capture"
-                    window.setContentSize(NSSize(width: 660, height: 760))
-                    window.contentView = NSHostingView(rootView: BrandCaptureView(model: model).allowsHitTesting(false))
-                    window.center()
-                    try await Task.sleep(for: .milliseconds(700))
-                    try snapshot(window, to: destination.appendingPathComponent("gob-19-brand-menu-final.png"))
-                    print("Captured production wordmark, four status images, and production menu view")
-                    window.setContentSize(NSSize(width: 620, height: 370))
-                    window.center()
-                    for (phase, name) in phases {
-                        window.title = "gob.lin — Overlay \(name) capture"
-                        let overlay = OverlayModel()
-                        overlay.phase = phase
-                        overlay.audioLevel = phase == .listening ? 0.65 : 0
-                        overlay.committedText = phase == .listening ? "Ship the small things. Keep your hands on the keyboard." : ""
-                        overlay.tentativeText = phase == .listening ? "Let the goblin do the typing." : ""
-                        window.contentView = NSHostingView(rootView: DictationOverlay(model: overlay)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity).background(GoblinBrand.surface).allowsHitTesting(false))
-                        try await Task.sleep(for: .milliseconds(700))
-                        try snapshot(window, to: destination.appendingPathComponent("gob-12-overlay-\(name)-final.png"))
-                        print("Captured production overlay \(name) view")
+                    for page in [SettingsSection.general, .cleanup, .about] {
+                        model.settingsSelection = page
+                        try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 900, height: 1080), dark: true)
+                    }
+                    model.diagnostics.resolve(.model)
+                }
+                if wanted("history") {
+                    model.historyScope = .all
+                    try await shoot("history", HistoryWindow(model: model), size: NSSize(width: 1100, height: 720))
+                    try await shoot("history-dark", HistoryWindow(model: model), size: NSSize(width: 1100, height: 720), dark: true)
+                    model.historyScope = .insights
+                    try await shoot("history-insights", HistoryWindow(model: model), size: NSSize(width: 1100, height: 720))
+                    model.historyScope = .all
+                    try await shoot("history-empty", HistoryWindow(model: empty), size: NSSize(width: 900, height: 560))
+                    try await shoot("history-narrow", HistoryWindow(model: model), size: NSSize(width: 880, height: 600))
+                }
+                if wanted("popover") {
+                    try await shoot("popover", popover(model), size: NSSize(width: 420, height: 720))
+                    model.diagnostics.report(.requiredPermissionsMissing)
+                    model.diagnostics.report(.rewriteConfiguration)
+                    try await shoot("popover-attention-dark", popover(model), size: NSSize(width: 420, height: 720), dark: true)
+                    model.diagnostics.resolve(.permissions)
+                    model.diagnostics.resolve(.rewrite)
+                }
+                if wanted("onboarding") {
+                    for step in OnboardingView.Step.allCases {
+                        try await shoot("onboarding-\(step.rawValue + 1)", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 560))
+                    }
+                    try await shoot("onboarding-1-dark", OnboardingView(model: model, startAt: .permissions), size: NSSize(width: 660, height: 560), dark: true)
+                }
+                if wanted("overlay") {
+                    for (name, overlay) in overlayPhases() {
+                        try await shoot("overlay-\(name)", ZStack { Wallpaper(); DictationOverlay(model: overlay) },
+                                        size: DictationOverlay.panelSize, dark: name.hasSuffix("dark"))
                     }
                 }
-                window.setContentSize(NSSize(width: 620, height: 370))
-                window.center()
-                let sharedOverlay = OverlayModel()
-                let sharedHost = NSHostingView(rootView: DictationOverlay(model: sharedOverlay)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(GoblinBrand.surface).allowsHitTesting(false))
-                window.contentView = sharedHost
-                for (phase, name) in phases {
-                    window.title = "gob.lin — Overlay \(name) capture"
-                    sharedOverlay.phase = phase
-                    sharedOverlay.audioLevel = phase == .listening ? 0.65 : 0
-                    sharedOverlay.committedText = phase == .listening ? "Ship the small things. Keep your hands on the keyboard." : ""
-                    sharedOverlay.tentativeText = phase == .listening ? "Let the goblin do the typing." : ""
-                    try await Task.sleep(for: .milliseconds(700))
-                }
-                try snapshot(window, to: destination.appendingPathComponent("gob-12-transition-before-redraw.png"), redraw: false)
-                invalidateTree(sharedHost)
-                sharedHost.layoutSubtreeIfNeeded()
-                sharedHost.display()
-                window.displayIfNeeded()
-                try await Task.sleep(for: .milliseconds(100))
-                guard let bitmap = sharedHost.bitmapImageRepForCachingDisplay(in: sharedHost.bounds) else { throw CaptureError.screenshot }
-                sharedHost.cacheDisplay(in: sharedHost.bounds, to: bitmap)
-                guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CaptureError.screenshot }
-                try png.write(to: destination.appendingPathComponent("gob-12-transition-after-redraw-bitmap.png"))
-                try snapshot(window, to: destination.appendingPathComponent("gob-12-transition-after-redraw-window.png"))
-                print("Captured reused overlay host after polishing→error, before redraw and after full layout/display with fresh bitmap")
-            } catch { captureFailed = true; print("Settings capture failed: \(error)") }
+            } catch { captureFailed = true; print("Capture failed: \(error)") }
             await model.shutdown()
+            await empty.shutdown()
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
             _ = Timer.scheduledTimer(withTimeInterval: 0, repeats: false) { _ in
@@ -119,7 +127,7 @@ struct SettingsCapture {
             }
         }
         // Run-loop delivery lets the real delegate's MainActor shutdown finish during terminateLater.
-        let timeout = Timer(timeInterval: 45, repeats: false) { _ in
+        let timeout = Timer(timeInterval: 180, repeats: false) { _ in
             MainActor.assumeIsolated {
                 UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
                 try? FileManager.default.removeItem(at: directory)
@@ -127,55 +135,117 @@ struct SettingsCapture {
             }
         }
         RunLoop.main.add(timeout, forMode: .common)
-        withExtendedLifetime((lifecycle, model, window)) { app.run() }
+        withExtendedLifetime((lifecycle, model, empty, window)) { app.run() }
         capture.cancel()
         timeout.invalidate()
         if captureFailed { exit(1) }
     }
+
+    @MainActor private static func seedHistory(_ history: HistoryModel) async throws {
+        let now = Date()
+        let entries: [(String, String, String, String, Double, Double, Bool, String?)] = [
+            ("Mail", "com.apple.mail", "um so can we push the design review to thursday like i want the overlay sorted before anyone sees it and uh and the menu still needs a pass on the copy",
+             "Can we push the design review to Thursday? I want the overlay sorted before anyone sees it, and the menu still needs a pass on the copy.", 9, 60, true, nil),
+            ("Slack", "com.tinyspeck.slackmacgap", "looks good to me ship it once notarisation passes", "Looks good to me. Ship it once notarisation passes.", 5, 600, false, nil),
+            ("Xcode", "com.apple.dt.Xcode", "mirror the overlay when the caret sits in the bottom right corner", "Mirror the overlay when the caret sits in the bottom-right corner.", 6, 1500, false, nil),
+            ("Messages", "com.apple.MobileSMS", "on my way grab me a flat white", "On my way. Grab me a flat white?", 3, 3600, true, nil),
+            ("Terminal", "com.apple.Terminal", "fix the clipboard restore race when secure input is on", "fix the clipboard restore race when secure input is on", 4, 90_000, false,
+             DiagnosticFailure.insertionTargetChanged.message),
+            ("Safari", "com.apple.Safari", "best low profile mechanical keyboard", "best low profile mechanical keyboard", 2, 100_000, false, nil),
+        ]
+        for (name, bundle, raw, final, duration, age, starred, warning) in entries.reversed() {
+            let entry = HistoryEntry(rawText: raw, finalText: final, tone: "formal", polished: raw != final,
+                                     targetBundleIdentifier: bundle, targetApplicationName: name,
+                                     createdAt: now.addingTimeInterval(-age), audioDuration: duration, model: "parakeet-tdt-v3",
+                                     latencies: DictationTimings(captureMilliseconds: duration * 1000, asrMilliseconds: 142, rewriteMilliseconds: raw != final ? 386 : 0, insertionMilliseconds: 9),
+                                     starred: starred, processingWarning: warning)
+            guard await history.record(entry) else { throw CaptureError.seed }
+        }
+    }
+
+    @MainActor private static func popover(_ model: AppModel) -> some View {
+        ZStack(alignment: .top) {
+            Wallpaper()
+            MenuPopover(model: model)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .padding(.top, 24)
+        }
+    }
+
+    @MainActor private static func overlayPhases() -> [(String, OverlayModel)] {
+        func make(_ phase: OverlayPhase, committed: String = "", tentative: String = "", level: Double = 0.6,
+                  configure: (OverlayModel) -> Void = { _ in }) -> OverlayModel {
+            let model = OverlayModel()
+            model.presented = true
+            model.phase = .arming
+            if phase != .arming { model.phase = .listening }
+            model.committedText = committed
+            model.tentativeText = tentative
+            for value in [0.2, 0.5, 0.8, 0.45, level] { model.audioLevel = value }
+            model.phase = phase
+            model.audioSeconds = 7
+            configure(model)
+            return model
+        }
+        let words = "Cut the export redesign instead. Keep the onboarding, it's what people"
+        let long = "so the build goes out tonight. Keep the onboarding, it's what people see first, and we'll move export to next week, because the copy pass on the menu still needs a day"
+        return [
+            ("arming", make(.arming)),
+            ("listening", make(.listening, committed: words, tentative: " see first")),
+            ("listening-long", make(.listening, committed: long, tentative: " or two")),
+            ("listening-dark", make(.listening, committed: words, tentative: " see first")),
+            ("handsfree", make(.listening, committed: "Second point: the overlay copy needs one more pass", tentative: " before anyone sees it") { $0.handsFree = true }),
+            ("transcribing", make(.transcribing, committed: words + " see first.")),
+            ("polishing", make(.polishing, committed: "so um cut the export redesign instead keep the onboarding it's what people see first") { $0.cleanupLabel = "Light · Cerebras" }),
+            ("inserted", make(.inserted(OverlayResult(application: "Team chat", words: 23, seconds: 0.59)))),
+            ("milestone", make(.milestone(words: 10_000))),
+            ("error-cleanup", make(.error(OverlayNotice(.rewriteTimeout)))),
+            ("error-microphone", make(.error(OverlayNotice(.microphoneUnavailable)))),
+            ("error-secure", make(.error(OverlayNotice(.secureInputEnabled)))),
+            ("mirrored", make(.listening, committed: "Sounds good, send it", tentative: " over") { $0.mirrored = true }),
+            ("top", make(.listening, committed: "Top-right, under the menu bar") { $0.edge = .top }),
+        ]
+    }
+
     @MainActor private static func invalidateTree(_ view: NSView) {
         view.needsLayout = true
         view.needsDisplay = true
         for child in view.subviews { invalidateTree(child) }
     }
 
-    @MainActor private static func snapshot(_ window: NSWindow, to file: URL, redraw: Bool = true) throws {
-        if redraw, let view = window.contentView {
+    @MainActor private static func snapshot(_ window: NSWindow, to file: URL, live: Bool = true) throws {
+        if let view = window.contentView {
             invalidateTree(view)
             view.layoutSubtreeIfNeeded()
             view.display()
             window.displayIfNeeded()
         }
+        if live {
         let screenshot = Process()
         screenshot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        screenshot.arguments = ["-x", "-l", String(window.windowNumber), file.path]
+        screenshot.arguments = ["-x", "-o", "-l", String(window.windowNumber), file.path]
         try screenshot.run()
         screenshot.waitUntilExit()
-        guard screenshot.terminationStatus == 0 else { throw CaptureError.screenshot }
+        guard screenshot.terminationStatus != 0 else { return }
+        }
+        // A locked or sleeping display can't be captured; render the view offscreen instead.
+        // Window materials and chrome are missing from these, so prefer a live capture when possible.
+        guard let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw CaptureError.screenshot }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CaptureError.screenshot }
+        try png.write(to: file)
     }
 
-    enum CaptureError: Error { case screenshot }
+    enum CaptureError: Error { case screenshot, seed }
 }
 
-/// Uses the production menu extracted into the build directory with only its visibility changed.
-private struct BrandCaptureView: View {
-    @ObservedObject var model: AppModel
+/// A desktop-ish backdrop so translucent surfaces have something to sit on.
+private struct Wallpaper: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            GoblinWordmark().fixedSize()
-            HStack(spacing: 28) {
-                ForEach(MascotState.allCases, id: \.self) { state in
-                    VStack(spacing: 8) {
-                        Image(nsImage: GoblinBrand.menuImage(state)).renderingMode(.original)
-                        Text(state.rawValue.capitalized).font(.caption)
-                    }
-                }
-            }
-            Divider()
-            Text("Menu").font(.headline)
-            VStack(alignment: .leading, spacing: 14) { GoblinMenu(model: model) }
-                .buttonStyle(.plain)
-            Spacer(minLength: 0)
-        }.padding(32).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(GoblinBrand.surface).preferredColorScheme(.dark)
+        LinearGradient(colors: [Color(red: 0.5, green: 0.6, blue: 0.56), Color(red: 0.3, green: 0.42, blue: 0.38)],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(RadialGradient(colors: [Color(red: 0.78, green: 0.7, blue: 0.56).opacity(0.7), .clear],
+                                    center: .topTrailing, startRadius: 0, endRadius: 420))
     }
 }
