@@ -2,14 +2,31 @@ import Foundation
 
 public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     // Keep the fast inference providers at the top of the selector.
-    case cerebras, groq, openAI, openRouter, zai, local, custom
+    case cerebras, groq, sambaNova, openAI, anthropic, gemini, mistral, xai, zai, openRouter, requesty, vercel, local, custom
     public var id: String { rawValue }
+
+    public var group: RewriteProviderGroup {
+        switch self {
+        case .cerebras, .groq, .sambaNova: .fast
+        case .openAI, .anthropic, .gemini, .mistral, .xai, .zai: .labs
+        case .openRouter, .requesty, .vercel: .routers
+        case .local: .local
+        case .custom: .custom
+        }
+    }
 
     public var title: String {
         switch self {
         case .cerebras: "Cerebras"
         case .groq: "Groq"
+        case .sambaNova: "SambaNova"
         case .openAI: "OpenAI"
+        case .anthropic: "Anthropic"
+        case .gemini: "Google Gemini"
+        case .mistral: "Mistral"
+        case .xai: "xAI"
+        case .requesty: "Requesty"
+        case .vercel: "Vercel AI Gateway"
         case .openRouter: "OpenRouter"
         case .zai: "Z.AI"
         case .local: "Local"
@@ -21,7 +38,14 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         switch self {
         case .cerebras: "https://api.cerebras.ai/v1"
         case .groq: "https://api.groq.com/openai/v1"
+        case .sambaNova: "https://api.sambanova.ai/v1"
         case .openAI: "https://api.openai.com/v1"
+        case .anthropic: "https://api.anthropic.com/v1"
+        case .gemini: "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .mistral: "https://api.mistral.ai/v1"
+        case .xai: "https://api.x.ai/v1"
+        case .requesty: "https://router.requesty.ai/v1"
+        case .vercel: "https://ai-gateway.vercel.sh/v1"
         case .openRouter: "https://openrouter.ai/api/v1"
         case .zai: "https://api.z.ai/api/paas/v4"
         case .local: "http://localhost:11434/v1"
@@ -40,7 +64,7 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .openRouter: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
                            RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
         case .zai: [RewriteModelPreset(id: "glm-4.7-flash", title: "GLM 4.7 Flash", reasoning: .off)]
-        case .local, .custom: []
+        case .sambaNova, .anthropic, .gemini, .mistral, .xai, .requesty, .vercel, .local, .custom: []
         }
     }
 
@@ -53,7 +77,15 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .zai: "The Flash preset requests thinking off. Other GLM models may require thinking."
         case .local: "An OpenAI-compatible server on this Mac. A local server may not need an API key."
         case .custom: "Use any OpenAI-compatible chat completions endpoint."
+        case .sambaNova, .anthropic, .gemini, .mistral, .xai, .requesty, .vercel: ""
         }
+    }
+
+    /// Request headers that carry the API key. Anthropic's own API uses its key header and a version.
+    public func authorizationHeaders(apiKey: String) -> [String: String] {
+        guard !apiKey.isEmpty else { return [:] }
+        if self == .anthropic { return ["x-api-key": apiKey, "anthropic-version": "2023-06-01"] }
+        return ["Authorization": "Bearer " + apiKey]
     }
 
     public static func matching(baseURL: String) -> Self {
@@ -66,6 +98,20 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
                                      reasoning: models.first?.reasoning ?? .providerDefault,
                                      temperature: models.first.map { $0.temperature } ?? 0,
                                      extraRequestJSON: models.first?.extraRequestJSON ?? "")
+    }
+}
+
+public enum RewriteProviderGroup: String, CaseIterable, Sendable, Identifiable {
+    case fast, labs, routers, local, custom
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .fast: "Fast inference"
+        case .labs: "Model makers"
+        case .routers: "Routers"
+        case .local: "On this Mac"
+        case .custom: "Custom"
+        }
     }
 }
 

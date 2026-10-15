@@ -146,15 +146,25 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         return body
     }
 
-    public func endpoint() throws -> URL {
+    /// The completion endpoint. Anthropic is called through its own Messages API.
+    public func endpoint() throws -> URL { try providerURL(appending: provider == .anthropic ? "messages" : "chat/completions") }
+
+    /// The model list endpoint, derived from the same address.
+    public func modelsEndpoint() throws -> URL { try providerURL(appending: "models") }
+
+    private func providerURL(appending leaf: String) throws -> URL {
         guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = components.scheme?.lowercased(), let host = components.host,
               components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
               scheme == "https" || (scheme == "http" && ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host)) else {
             throw RewriteFailure.configuration("Use an HTTPS provider URL, or HTTP on localhost for a local provider.")
         }
-        let path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = "/" + (path.hasSuffix("chat/completions") ? path : [path, "chat/completions"].filter { !$0.isEmpty }.joined(separator: "/"))
+        var path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Accept a pasted endpoint as well as a base address.
+        if let known = ["chat/completions", "messages", "models"].first(where: { path == $0 || path.hasSuffix("/" + $0) }) {
+            path = String(path.dropLast(known.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        components.path = "/" + [path, leaf].filter { !$0.isEmpty }.joined(separator: "/")
         guard let url = components.url else { throw RewriteFailure.configuration("The provider URL is invalid.") }
         return url
     }
@@ -296,7 +306,7 @@ public actor RewriteClient {
                 request.timeoutInterval = max(0.001, Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18)
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue("gob.lin/\(GoblinMetadata.version) (macOS dictation)", forHTTPHeaderField: "User-Agent")
-                if !apiKey.isEmpty { request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization") }
+                for (field, value) in settings.provider.authorizationHeaders(apiKey: apiKey) { request.setValue(value, forHTTPHeaderField: field) }
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
                 let (data, response) = try await fetch(request, deadline: deadline)
                 guard ContinuousClock.now < deadline else { throw RewriteFailure.timeout }
@@ -378,7 +388,7 @@ public actor RewriteClient {
 }
 
 // Never forward a user transcript or authorization header to a provider's redirect target.
-private final class NoRewriteRedirects: NSObject, URLSessionTaskDelegate {
+final class NoRewriteRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
