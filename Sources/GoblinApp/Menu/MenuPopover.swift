@@ -78,7 +78,7 @@ struct MenuPopover: View {
                     StatusLight(state: status.light, size: 7)
                     if status.light == .ready, model.mascotState == .idle {
                         Text("Ready · hold")
-                        KeyCap(model.hotkeys.shortcut == .fn ? "fn" : model.hotkeys.shortcut.label, small: true)
+                        KeyCombo(label: model.hotkeys.shortcut == .fn ? "fn" : model.hotkeys.shortcut.label, small: true)
                         Text("to talk")
                     } else {
                         Text(model.mascotState == .recording ? "Listening…" : model.mascotState == .transcribing ? "Writing it out…"

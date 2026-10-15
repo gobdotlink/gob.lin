@@ -175,10 +175,11 @@ struct OnboardingView: View {
             headline("Pick your talk key.", Text("Hold it to talk, let go to type. Tap it to keep listening hands-free."))
             Plate {
                 VStack(alignment: .leading, spacing: 14) {
+                    let stacked = hotkeys.shortcut.keys.count > 2
+                    if stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyChecked ? .ready : .off) }
                     HStack(spacing: 16) {
-                        BigKeyCap(label: hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut == .rightOption ? "⌥" : hotkeys.shortcut.label,
-                                  globe: hotkeys.shortcut == .fn, light: keyChecked ? .ready : .off)
-                        Text(hotkeys.shortcut == .fn ? "fn / Globe" : hotkeys.shortcut.label).font(.system(size: 15, weight: .semibold))
+                        if !stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyChecked ? .ready : .off) }
+                        Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
                         Spacer()
                         ShortcutRecorder(service: hotkeys, showsCurrent: false)
                     }
@@ -206,7 +207,7 @@ struct OnboardingView: View {
 
     // MARK: 3 · First take
 
-    private var shortcutName: String { hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label }
+    private var shortcutName: String { hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.title }
 
     private var firstTakeStep: some View {
         VStack(alignment: .leading, spacing: 0) {
