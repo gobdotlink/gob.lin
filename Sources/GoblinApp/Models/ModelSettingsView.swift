@@ -74,18 +74,20 @@ struct ModelSettingsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             Button("Cancel preparation") { service.cancelPreparation() }.disabled(service.activeSessionCount > 0)
-        case .ready: Label("Ready · available offline", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.accent)
-        case .unloading: Label("Unloading idle model…", systemImage: "memorychip")
+        case .ready: StatusRow(.ready, Text("**Ready** · available offline"))
+        case .unloading: StatusRow(.waiting, Text("Unloading idle model…"))
         case .unloaded:
-            Label("Unloaded to free memory", systemImage: "memorychip")
-            Button("Load now") { service.retry() }
+            StatusRow(.ready, Text("**Unloaded** to free memory · wakes when you talk")) {
+                Button("Load Now") { service.retry() }
+            }
         case .cancelling:
-            Label("Cancelling · waiting for model work to finish…", systemImage: "hourglass")
+            StatusRow(.waiting, Text("Cancelling · waiting for model work to finish…"))
         case .cancelled:
-            Label("Preparation cancelled · downloaded files kept", systemImage: "pause.circle")
-            Button("Resume preparation") { service.retry() }
+            StatusRow(.off, Text("Preparation cancelled · downloaded files kept")) {
+                Button("Resume Preparation") { service.retry() }
+            }
         case .failed(let message):
-            Label("Model preparation failed", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            StatusRow(.problem, Text("**Model preparation failed**"))
             Text(message).font(.callout).textSelection(.enabled)
             HStack {
                 Button("Retry") { service.retry() }

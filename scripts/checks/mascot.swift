@@ -8,100 +8,90 @@ struct MascotCheck {
         NSApplication.shared.setActivationPolicy(.prohibited)
         GoblinBrand.registerFonts()
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        do {
-            let model = OverlayModel()
-            model.phase = .listening
-            model.audioLevel = 0.1
-            let view = NSHostingView(rootView: DictationOverlay(model: model))
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440 + 2 * DictationOverlay.shadowMargin, height: 120),
-                styleMask: .borderless, backing: .buffered, defer: false)
-            window.contentView = view
-            defer { window.close() }
-            func advance(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
-            func capture(scale: Int = 1) -> NSBitmapImageRep {
-                view.setFrameSize(view.fittingSize)
-                view.needsLayout = true
-                view.layoutSubtreeIfNeeded()
-                window.displayIfNeeded()
-                precondition(!window.isVisible && !window.isKeyWindow, "Fixture must stay offscreen")
-                let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil,
-                    pixelsWide: Int(view.bounds.width) * scale, pixelsHigh: Int(view.bounds.height) * scale,
-                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                    colorSpaceName: .deviceRGB, bytesPerRow: Int(view.bounds.width) * scale * 4, bitsPerPixel: 32)!
-                bitmap.size = view.bounds.size
-                view.cacheDisplay(in: view.bounds, to: bitmap)
-                return bitmap
-            }
-            func pixels(_ bitmap: NSBitmapImageRep, _ rect: CGRect, scale: Int) -> Data {
-                let crop = bitmap.cgImage!.cropping(to: CGRect(x: rect.minX * Double(scale),
-                    y: rect.minY * Double(scale), width: rect.width * Double(scale), height: rect.height * Double(scale)))!
-                let rep = NSBitmapImageRep(cgImage: crop)
-                return Data(bytes: rep.bitmapData!, count: rep.bytesPerRow * rep.pixelsHigh)
-            }
-            let inset = DictationOverlay.shadowMargin - 8
-            let head = CGRect(x: 196 + inset, y: 8, width: 64, height: 42)
-            // Palms over the pill edge; the head sits behind the pill there, so mouth changes cannot leak in.
-            let hands = CGRect(x: 209 + inset, y: 50, width: 38, height: 4)
-            let waveform = CGRect(x: 24 + inset, y: 64, width: 44, height: 30)
-            advance(0.2)
-            for scale in [1, 2] {
-                model.audioLevel = 0.1
-                advance(0.2)
-                let closed = capture(scale: scale)
-                let closedHead = pixels(closed, head, scale: scale)
-                let steadyHands = pixels(closed, hands, scale: scale)
-                model.audioLevel = 0.6
-                advance(0.2)
-                let speaking = capture(scale: scale)
-                let openHead = pixels(speaking, head, scale: scale)
-                precondition(pixels(closed, waveform, scale: scale) != pixels(speaking, waveform, scale: scale),
-                    "Waveform must still respond to microphone level")
-                precondition(openHead != closedHead, "Mouth must respond to speech")
-                for level in [0.1, 0.14, 0.6, 0.8, 0.15, 0.151, 0.149, 0.0] {
-                    model.audioLevel = level
-                    for _ in 0..<16 {
-                        advance(0.008)
-                        let frame = capture(scale: scale)
-                        precondition(pixels(frame, head, scale: scale) == (level > 0.15 ? openHead : closedHead),
-                            "Level updates must switch mouth pixels discretely without interpolating the head")
-                        precondition(pixels(frame, hands, scale: scale) == steadyHands,
-                            "Level updates must not animate the hands")
-                    }
-                }
-                model.committedText = "A short synthetic sentence."
-                model.textHeight = 44
-                advance(0.1)
-                let small = capture(scale: scale)
-                model.tentativeText = " Another synthetic sentence makes the result area grow."
-                model.textHeight = 130
-                advance(0.1)
-                let large = capture(scale: scale)
-                precondition(large.pixelsHigh > small.pixelsHigh, "Fixture must exercise layout growth")
-                precondition(pixels(large, head, scale: scale) == closedHead,
-                    "Live text growth must preserve head pixels and position within the overlay")
-                precondition(pixels(large, hands, scale: scale) == steadyHands,
-                    "Live text growth must preserve hand pixels and position within the overlay")
-                model.committedText = ""
-                model.tentativeText = ""
-                model.textHeight = 44
-                model.audioLevel = 0.6
-                advance(0.2)
-                model.phase = .transcribing
-                advance(0.02)
-                precondition(pixels(capture(scale: scale), head, scale: scale) == closedHead,
-                    "Mouth must close when listening ends")
-                model.phase = .listening
-                model.audioLevel = 0
-                advance(0.2)
-            }
-            if let path = CommandLine.arguments.dropFirst().first {
-                model.committedText = "A clear result, one sentence at a time."
-                model.audioLevel = 0.6
-                advance(0.2)
-                try capture(scale: 2).representation(using: .png, properties: [:])!
-                    .write(to: URL(fileURLWithPath: path))
-            }
-            print("PASS offscreen mascot: stable head/hands, discrete mouth, live layout growth, phase exit at 1x/2x; Reduce Motion=\(reduceMotion)")
+        let model = OverlayModel()
+        model.presented = true
+        model.phase = .listening
+        let size = DictationOverlay.panelSize
+        let view = NSHostingView(rootView: DictationOverlay(model: model))
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = view
+        defer { window.close() }
+        func advance(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
+        func capture(scale: Int) -> NSBitmapImageRep {
+            view.setFrameSize(size)
+            view.needsLayout = true
+            view.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            precondition(!window.isVisible && !window.isKeyWindow, "Fixture must stay offscreen")
+            let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil,
+                pixelsWide: Int(size.width) * scale, pixelsHigh: Int(size.height) * scale,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: Int(size.width) * scale * 4, bitsPerPixel: 32)!
+            bitmap.size = size
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            return bitmap
         }
+        func pixels(_ bitmap: NSBitmapImageRep, _ rect: CGRect, scale: Int) -> Data {
+            let crop = bitmap.cgImage!.cropping(to: CGRect(x: rect.minX * Double(scale), y: rect.minY * Double(scale),
+                width: rect.width * Double(scale), height: rect.height * Double(scale)))!
+            let rep = NSBitmapImageRep(cgImage: crop)
+            return Data(bytes: rep.bitmapData!, count: rep.bytesPerRow * rep.pixelsHigh)
+        }
+        /// Same sprite where the reference is opaque; the transparent corners may show the bubble's shadow.
+        func sameSprite(_ reference: Data, _ other: Data) -> Bool {
+            guard reference.count == other.count else { return false }
+            return stride(from: 0, to: reference.count, by: 4).allSatisfy { index in
+                reference[index + 3] != 255 || reference[index..<index + 4] == other[index..<index + 4]
+            }
+        }
+        // The goblin sits in the content's bottom-right corner; the bubble fills the column to its left.
+        let margin = DictationOverlay.margin, content = DictationOverlay.contentSize
+        let head = CGRect(x: margin + content.width - 128, y: margin + content.height - 128, width: 128, height: 128)
+        let bubble = CGRect(x: margin, y: margin, width: content.width - 128 - 12, height: content.height)
+        model.committedText = "A short synthetic sentence."
+        advance(0.2)
+        for scale in [1, 2] {
+            model.audioLevel = 0.05
+            advance(0.2)
+            let closed = capture(scale: scale)
+            let closedHead = pixels(closed, head, scale: scale)
+            model.audioLevel = 0.6
+            advance(0.2)
+            let speaking = capture(scale: scale)
+            let openHead = pixels(speaking, head, scale: scale)
+            precondition(openHead != closedHead, "Mouth must respond to speech")
+            precondition(pixels(closed, bubble, scale: scale) != pixels(speaking, bubble, scale: scale), "The meter must respond to level")
+            // Between the thresholds the mouth keeps its current frame, so it never flaps.
+            model.audioLevel = 0.15
+            advance(0.2)
+            precondition(pixels(capture(scale: scale), head, scale: scale) == openHead, "Hysteresis must hold an open mouth at mid level")
+            for level in [0.1, 0.15, 0.6, 0.8, 0.15, 0.05] {
+                model.audioLevel = level
+                for _ in 0..<12 {
+                    advance(0.008)
+                    let frame = pixels(capture(scale: scale), head, scale: scale)
+                    precondition(frame == openHead || frame == closedHead, "Mouth changes must swap frames, never interpolate")
+                }
+                advance(0.1)
+            }
+            model.audioLevel = 0.05
+            advance(0.2)
+            model.tentativeText = " Another synthetic sentence makes the bubble grow by a line or two, then more."
+            advance(0.2)
+            precondition(sameSprite(closedHead, pixels(capture(scale: scale), head, scale: scale)), "Text growth must not move or redraw the goblin")
+            model.phase = .transcribing
+            advance(0.2)
+            let looking = pixels(capture(scale: scale), head, scale: scale)
+            precondition(looking != closedHead && looking != openHead, "Transcribing must show its own face")
+            model.tentativeText = ""
+            model.phase = .listening
+            advance(0.2)
+        }
+        if let path = CommandLine.arguments.dropFirst().first {
+            model.audioLevel = 0.6
+            advance(0.2)
+            try capture(scale: 2).representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+        }
+        print("PASS offscreen mascot: discrete mouth with hysteresis, responsive meter, stable goblin during text growth, transcribing face at 1x/2x; Reduce Motion=\(reduceMotion)")
     }
 }

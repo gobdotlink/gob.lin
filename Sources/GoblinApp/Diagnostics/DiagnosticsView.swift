@@ -12,10 +12,10 @@ struct DiagnosticsView: View {
                     Label {
                         Text(warning.area.title)
                         Text(warning.message)
-                    } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(GoblinBrand.yellow) }
+                    } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LightState.waiting.color) }
                 }
             } else {
-                Label("No active warnings", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.accent)
+                Label("No active warnings", systemImage: "checkmark.circle.fill").foregroundStyle(GoblinBrand.mossText)
             }
         } header: {
             HStack {
@@ -54,7 +54,7 @@ struct DiagnosticsView: View {
                 HStack {
                     Text("Recent errors")
                     Spacer()
-                    Button("Clear recent errors") { model.clearRecentErrors() }
+                    Button("Clear Recent Errors") { model.clearRecentErrors() }.textCase(nil).font(.callout).controlSize(.small)
                 }
             }
         }
@@ -74,12 +74,12 @@ struct DiagnosticsView: View {
             Text("Events include build, launch, operation, and process IDs. Audio, transcripts, keys, credentials, clipboard contents, and device names are excluded. Crash reports are listed for matching and shared separately.")
         }
         Section {
-            Toggle("Include microphone names in copied / exported diagnostics", isOn: $includeDeviceNames).tint(GoblinBrand.tint)
+            Toggle("Include microphone names in copied / exported diagnostics", isOn: $includeDeviceNames)
             HStack {
                 if let message = model.copyMessage { Text(message).foregroundStyle(.secondary) }
                 Spacer()
                 Button("Copy diagnostics", systemImage: "doc.on.doc") { model.copyDiagnostics(includeDeviceNames: includeDeviceNames) }
-                    .buttonStyle(.borderedProminent).tint(GoblinBrand.tint)
+                    .prominent()
             }
         } header: { Text("Share") } footer: {
             Text("Copied diagnostics contain versions, permissions, stage timings, and typed errors. Transcript text, keys, request bodies, and file paths are excluded.")

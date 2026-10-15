@@ -29,6 +29,8 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var isLoading = false
     @Published private(set) var hasMore = false
     @Published var searchText = ""
+    @Published var filter: HistoryFilter = .all
+    @Published private(set) var counts = HistoryCounts()
     @Published var errorMessage: String?
     @Published var retranscribeAction: ReprocessAction?
     @Published var rewriteAction: ReprocessAction?
@@ -91,10 +93,12 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         isLoading = true
         guard let store else { isLoading = false; return }
         do {
-            let result = try await store.entries(matching: searchText, limit: 200)
+            let result = try await store.entries(matching: searchText, filter: filter, limit: 200)
+            let counts = try await store.counts()
             guard id == requestID else { return }
             entries = result
             hasMore = result.count == 200
+            self.counts = counts
         } catch {
             guard id == requestID else { return }
             errorMessage = error.localizedDescription
@@ -109,7 +113,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let offset = entries.count
         isLoading = true
         do {
-            let result = try await store.entries(matching: searchText, limit: 200, offset: offset)
+            let result = try await store.entries(matching: searchText, filter: filter, limit: 200, offset: offset)
             guard id == requestID else { return }
             entries.append(contentsOf: result)
             hasMore = result.count == 200
@@ -125,6 +129,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         do {
             try await store?.setStarred(starred, id: entry.id)
             if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index].starred = starred }
+            if let counts = try? await store?.counts() { self.counts = counts }
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
@@ -136,6 +141,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             isLoading = false
             entries.removeAll { $0.id == entry.id }
             revision += 1
+            if let counts = try? await store?.counts() { self.counts = counts }
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
@@ -168,6 +174,34 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             }
             playingEntryID = entry.id
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
+    }
+
+    /// How far the current recording has played, 0 to 1.
+    var playbackProgress: Double {
+        guard let player, player.duration > 0 else { return 0 }
+        return player.currentTime / player.duration
+    }
+
+    /// Loudness of the saved recording in even slices, 0 to 1, for the detail pane's waveform.
+    func waveform(for entry: HistoryEntry, bars: Int = 72) async -> [Float] {
+        guard entry.audioFilename != nil, let url = try? await store?.audioFileURL(for: entry.id) else { return [] }
+        return await Task.detached(priority: .utility) { Self.peaks(url: url, bars: bars) }.value
+    }
+
+    nonisolated static func peaks(url: URL, bars: Int) -> [Float] {
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(min(file.length, 48_000 * 600))),
+              (try? file.read(into: buffer)) != nil, let samples = buffer.floatChannelData?[0] else { return [] }
+        let count = Int(buffer.frameLength), slice = max(1, count / bars)
+        var levels = stride(from: 0, to: count, by: slice).prefix(bars).map { start -> Float in
+            let end = min(count, start + slice)
+            var sum: Float = 0
+            for index in start..<end { sum += samples[index] * samples[index] }
+            return (sum / Float(end - start)).squareRoot()
+        }
+        let loudest = levels.max() ?? 0
+        if loudest > 0 { levels = levels.map { $0 / loudest } }
+        return levels
     }
 
     func stopAudio() {

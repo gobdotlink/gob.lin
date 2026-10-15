@@ -1,6 +1,31 @@
 import CSQLite
 import Foundation
 
+public enum HistoryFilter: Sendable, Hashable {
+    case all, starred, withWarnings, application(String)
+}
+
+public struct HistoryCounts: Sendable, Equatable {
+    public struct Application: Sendable, Equatable, Identifiable {
+        public var name: String
+        public var bundleIdentifier: String?
+        public var count: Int
+        public var id: String { name }
+        public init(name: String, bundleIdentifier: String?, count: Int) {
+            self.name = name; self.bundleIdentifier = bundleIdentifier; self.count = count
+        }
+    }
+    public var total = 0
+    public var starred = 0
+    public var withWarnings = 0
+    /// Seconds of recorded audio across every entry.
+    public var totalSeconds: Double = 0
+    public var applications: [Application] = []
+    public init(total: Int = 0, starred: Int = 0, withWarnings: Int = 0, totalSeconds: Double = 0, applications: [Application] = []) {
+        self.total = total; self.starred = starred; self.withWarnings = withWarnings; self.totalSeconds = totalSeconds; self.applications = applications
+    }
+}
+
 public actor HistoryStore {
     public nonisolated let directory: URL
     private let database: HistoryDatabase
@@ -55,13 +80,31 @@ public actor HistoryStore {
         }
     }
 
-    public func entries(matching query: String = "", limit: Int = 200, offset: Int = 0) throws -> [HistoryEntry] {
+    public func entries(matching query: String = "", filter: HistoryFilter = .all, limit: Int = 200, offset: Int = 0) throws -> [HistoryEntry] {
         let escaped = query.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
         let pattern = "%\(escaped)%"
-        return try database.query("SELECT metadata FROM entries WHERE raw_text LIKE ? ESCAPE '\\' OR final_text LIKE ? ESCAPE '\\' OR app_name LIKE ? ESCAPE '\\' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
-                                  [.text(pattern), .text(pattern), .text(pattern), .number(Double(max(1, min(limit, 2000)))), .number(Double(max(0, offset)))])
+        var values: [SQLValue] = [.text(pattern), .text(pattern), .text(pattern)]
+        let scope: String
+        switch filter {
+        case .all: scope = ""
+        case .starred: scope = " AND starred = 1"
+        case .withWarnings: scope = " AND json_extract(metadata, '$.processingWarning') IS NOT NULL"
+        case .application(let name): scope = " AND app_name = ?"; values.append(.text(name))
+        }
+        values += [.number(Double(max(1, min(limit, 2000)))), .number(Double(max(0, offset)))]
+        return try database.query("SELECT metadata FROM entries WHERE (raw_text LIKE ? ESCAPE '\\' OR final_text LIKE ? ESCAPE '\\' OR app_name LIKE ? ESCAPE '\\')\(scope) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?", values)
             .map { try decode($0[0]) }
+    }
+
+    /// Sizes of History's smart lists and per-app lists, busiest app first.
+    public func counts() throws -> HistoryCounts {
+        let totals = try database.query("SELECT COUNT(*), COALESCE(SUM(starred), 0), COALESCE(SUM(json_extract(metadata, '$.processingWarning') IS NOT NULL), 0), COALESCE(SUM(json_extract(metadata, '$.audioDuration')), 0) FROM entries").first ?? []
+        let number = { (index: Int) in totals.indices.contains(index) ? Int(totals[index] ?? "") ?? 0 : 0 }
+        let applications = try database.query("SELECT app_name, MAX(json_extract(metadata, '$.targetBundleIdentifier')), COUNT(*) FROM entries WHERE app_name != '' GROUP BY app_name ORDER BY COUNT(*) DESC, app_name")
+            .compactMap { row in row[0].map { HistoryCounts.Application(name: $0, bundleIdentifier: row[1], count: Int(row[2] ?? "") ?? 0) } }
+        let seconds = totals.indices.contains(3) ? Double(totals[3] ?? "") ?? 0 : 0
+        return HistoryCounts(total: number(0), starred: number(1), withWarnings: number(2), totalSeconds: seconds, applications: applications)
     }
 
     public func entry(id: UUID) throws -> HistoryEntry {

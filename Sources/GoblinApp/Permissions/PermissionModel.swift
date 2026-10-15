@@ -44,6 +44,8 @@ final class PermissionModel: ObservableObject {
     var onChange: ((Snapshot, Snapshot) -> Void)?
     var onRevocation: ((Permission) -> Void)?
     var onRetry: (() -> Void)?
+    /// The first-run window's content, supplied by the app so it can reach the talk key and History.
+    var onboardingContent: (() -> AnyView)?
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var activationObserver: NSObjectProtocol?
@@ -166,10 +168,14 @@ final class PermissionModel: ObservableObject {
     func showOnboarding() {
         guard monitorSystem else { return }
         if onboarding == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: OnboardingView(permissions: self)))
+            guard let content = onboardingContent?() else { return }
+            let window = NSWindow(contentViewController: NSHostingController(rootView: content))
             window.title = "Welcome to gob.lin"
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 620, height: 560))
+            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.isMovableByWindowBackground = true
+            window.setContentSize(NSSize(width: 660, height: 548 - 32))
             window.center()
             window.isReleasedWhenClosed = false
             onboarding = NSWindowController(window: window)
@@ -178,6 +184,8 @@ final class PermissionModel: ObservableObject {
         onboarding?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    func closeOnboarding() { onboarding?.close() }
 
     func stop() {
         timer?.invalidate()

@@ -37,7 +37,7 @@ struct OverlayCapture {
                 precondition(!overlay.model.committedText.isEmpty && !overlay.model.tentativeText.isEmpty,
                              "Finalization discarded visible text")
                 overlay.update(.polishing, committed: "Done.", tentative: "", session: session)
-                overlay.update(.error(String(repeating: "Detailed failure message. ", count: 15)), session: session)
+                overlay.update(.error(OverlayNotice(message: String(repeating: "Detailed failure message. ", count: 15))), session: session)
                 window.contentView?.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(80))
                 precondition(window.frame == frame, "An error message shifted the overlay")
