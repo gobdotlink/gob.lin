@@ -29,6 +29,8 @@ final class AppModel: ObservableObject {
     @Published var historyFocus: UUID?
     /// Set by the app scene: opens a window by id and brings gob.lin forward.
     var openWindow: ((String) -> Void)?
+    /// Set by the popover while it's open, so the right-click menu can close it first.
+    var closePopover: (() -> Void)?
     /// While first run is testing the talk key, dictations made with gob.lin in front go here instead of
     /// being refused as a focus change: gob.lin never types into its own windows.
     var onboardingTake: ((OverlayResult, String) -> Void)?
@@ -283,6 +285,12 @@ final class AppModel: ObservableObject {
             }
         }
     }
+
+    /// Recording right now: the menu-bar icon's right-click menu offers to cancel.
+    var isRecording: Bool { activeCapture != nil }
+
+    /// The same as the overlay's close button.
+    func cancelRecording() { if let activeCapture { cancelDictation(activeCapture) } }
 
     private func beginDictation() {
         guard activeCapture == nil else { return }

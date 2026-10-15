@@ -158,6 +158,8 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 
 The ⋯ menu is a plain menu: Permissions… (with the number that are off), Diagnostics…, Copy Diagnostics, Check for Updates…, About gob.lin, and Quit gob.lin ⌘Q.
 
+Right-clicking or Control-clicking the menu-bar icon opens a native menu instead of the popover: Cancel Dictation ⎋ (only while recording), Paste Last Dictation ⌥⇧⌘V, Settings… ⌘,, then the ⋯ menu. Both menus come from the same lists in `Menu/StatusMenu.swift`.
+
 ### Settings
 
 `Sources/GoblinApp/Settings/` and the per-page views.

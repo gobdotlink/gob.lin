@@ -60,7 +60,8 @@ struct MenuPopover: View {
             recent = (try? await model.history.store?.entries(matching: query, limit: 4)) ?? []
         }
         .onChange(of: model.audioPreview.level) { _, level in levels = Array((levels + [level]).suffix(28)) }
-        .onDisappear { if testing { stopTest() } }
+        .onAppear { model.closePopover = { dismiss() } }
+        .onDisappear { model.closePopover = nil; if testing { stopTest() } }
     }
 
     private struct RecentQuery: Equatable { var text: String; var revision: Int }
@@ -89,14 +90,13 @@ struct MenuPopover: View {
             }
             Spacer(minLength: 6)
             Menu {
-                Button(missingPermissions == 0 ? "Permissions…" : "Permissions… (\(missingPermissions) off)") { close { model.permissions.showOnboarding() } }
-                Button("Diagnostics…") { close { model.openSettings(.diagnostics) } }
-                Button("Copy Diagnostics") { model.diagnostics.copyDiagnostics() }
-                Divider()
-                Button("Check for Updates…") { close { model.openSettings(.about); model.updates.check() } }.disabled(model.updates.isBusy)
-                Button("About gob.lin") { close { model.openSettings(.about) } }
-                Divider()
-                Button("Quit gob.lin") { NSApp.terminate(nil) }.keyboardShortcut("q")
+                ForEach(Array(model.moreMenu.enumerated()), id: \.offset) { index, section in
+                    if index > 0 { Divider() }
+                    ForEach(section, id: \.title) { command in
+                        Button(command.title) { close(command.perform) }
+                            .keyboardShortcut(command.shortcut).disabled(!command.enabled)
+                    }
+                }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
                     .frame(width: 28, height: 28).background(.quaternary, in: Circle())
@@ -105,10 +105,6 @@ struct MenuPopover: View {
             .accessibilityLabel("More")
         }
         .padding(.horizontal, 6).padding(.top, 4).padding(.bottom, 2)
-    }
-
-    private var missingPermissions: Int {
-        (model.permissions.snapshot.microphone == .authorized ? 0 : 1) + (model.permissions.snapshot.accessibility ? 0 : 1)
     }
 
     // MARK: Problems

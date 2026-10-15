@@ -5,10 +5,16 @@ final class GoblinApplicationDelegate: NSObject, NSApplicationDelegate {
     weak var model: AppModel?
     private var terminating = false
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        StatusMenu.install { [weak self] in self?.model }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }
         guard !terminating else { return .terminateLater }
         if !model.history.pending.isEmpty || model.insertion.hasRecoveryClipboard {
+            // Quit can come from a menu that left gob.lin in the background; bring the question forward.
+            NSApp.activate()
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Unsaved data remains in gob.lin"
