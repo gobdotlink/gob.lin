@@ -20,7 +20,7 @@ extension AppModel {
              MenuCommand(title: "Copy Diagnostics") { self.diagnostics.copyDiagnostics() }],
             [MenuCommand(title: "Check for Updates…", enabled: !updates.isBusy) { self.openSettings(.about); self.updates.check() },
              MenuCommand(title: "About gob.lin") { self.openSettings(.about) }],
-            [MenuCommand(title: "Quit gob.lin", shortcut: KeyboardShortcut("q")) { NSApp.terminate(nil) }],
+            [MenuCommand(title: "Quit gob.lin", shortcut: KeyboardShortcut("q")) { UpdateChecker.requestTermination() }],
         ]
     }
 
@@ -43,15 +43,13 @@ enum StatusMenu {
         _ = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { event in
             guard event.type == .rightMouseDown || event.modifierFlags.contains(.control) else { return event }
             let handled = MainActor.assumeIsolated { () -> Bool in
-                guard let button = event.window?.contentView?.statusBarButton else { return false }
-                // After the click returns, so the menu's tracking loop doesn't run inside the event monitor.
-                Task {
-                    guard let model = model(), let window = button.window else { return }
-                    model.closePopover?()
-                    button.highlight(true)
-                    NSMenu(model.statusMenu).popUp(positioning: nil, at: NSPoint(x: window.frame.minX, y: window.frame.minY - 4), in: nil)
-                    button.highlight(false)
-                }
+                guard let button = event.window?.contentView?.statusBarButton, let window = button.window, let model = model() else { return false }
+                model.closePopover?()
+                // Tracked right here, never from a task or the main queue: the menu's loop would hold the
+                // main actor, and the talk key's release and Esc would wait until it closed.
+                button.highlight(true)
+                NSMenu(model.statusMenu).popUp(positioning: nil, at: NSPoint(x: window.frame.minX, y: window.frame.minY - 4), in: nil)
+                button.highlight(false)
                 return true
             }
             return handled ? nil : event
