@@ -177,12 +177,11 @@ struct NativeDictationCheck {
                 post(down: true)
                 try await wait("capture during model reload", seconds: 5) { model.overlay.model.phase == .listening }
                 try await play(source)
-                let height = model.overlay.model.textHeight
                 let previousText = model.overlay.model.committedText + model.overlay.model.tentativeText
                 post(down: false)
                 try await wait("visible finalization", seconds: 2) { model.overlay.model.phase == .transcribing || model.overlay.model.phase == .polishing }
-                guard model.overlay.model.textHeight == height,
-                      !(model.overlay.model.committedText + model.overlay.model.tentativeText).isEmpty,
+                // The panel is a fixed size, so only the words need checking here.
+                guard !(model.overlay.model.committedText + model.overlay.model.tentativeText).isEmpty,
                       !previousText.isEmpty else { throw CheckFailure("Finalization discarded the visible live text") }
                 try await Task.sleep(for: .milliseconds(90))
                 await tap()

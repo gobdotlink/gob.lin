@@ -20,10 +20,6 @@ struct InsightsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(title: SettingsSection.insights.rawValue, comment: SettingsSection.insights.comment) {
-                if loading { ProgressView().controlSize(.small) }
-                Button("Refresh insights", systemImage: "arrow.clockwise") { refresh() }.labelStyle(.iconOnly)
-            }
             Form {
                 if let error {
                     Section {
@@ -36,7 +32,15 @@ struct InsightsView: View {
                     Section { Text("Loading local history…").foregroundStyle(.secondary) }
                 }
             }
-            .formStyle(.grouped).scrollContentBackground(.hidden)
+            .formStyle(PlateFormStyle())
+        }
+        .toolbar {
+            // Keeps refresh and search together at the trailing end, as in the dictation lists.
+            ToolbarSpacer(.flexible)
+            ToolbarItem {
+                if loading { ProgressView().controlSize(.small) }
+                else { Button("Refresh Insights", systemImage: "arrow.clockwise") { refresh() } }
+            }
         }
         .task(id: Request(day: selectedDay, revision: history.revision, refresh: refreshID)) { await load() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
@@ -67,7 +71,7 @@ struct InsightsView: View {
         Section("Words per day · last 7 days") {
             Chart(data.days) { day in
                 BarMark(x: .value("Day", day.date.formatted(.dateTime.weekday(.abbreviated))), y: .value("Words", day.words))
-                    .foregroundStyle(GoblinBrand.accent)
+                    .foregroundStyle(GoblinBrand.moss)
                     .annotation(position: .top) { Text(day.words.formatted()).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                     .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
                     .accessibilityValue("\(day.words) words")
@@ -88,7 +92,7 @@ struct InsightsView: View {
                 RectangleMark(xStart: .value("Hour start", hour.date),
                               xEnd: .value("Hour end", min(hour.date.addingTimeInterval(3600), data.calendar.dateInterval(of: .day, for: hour.date)!.end)),
                               yStart: .value("Words", 0), yEnd: .value("Words", hour.words))
-                    .foregroundStyle(GoblinBrand.accent)
+                    .foregroundStyle(GoblinBrand.moss)
                     .accessibilityLabel(hour.date.formatted(.dateTime.hour().minute().timeZone(.specificName(.short))))
                     .accessibilityValue("\(hour.words) words")
             }
@@ -109,7 +113,7 @@ struct InsightsView: View {
                         Text("\(app.words.formatted()) words · \((Double(app.words) / Double(max(1, data.totalWords))).formatted(.percent.precision(.fractionLength(0))))")
                             .foregroundStyle(.secondary).monospacedDigit()
                     }
-                    ProgressView(value: Double(app.words), total: Double(max(1, data.totalWords))).tint(GoblinBrand.accent)
+                    ProgressView(value: Double(app.words), total: Double(max(1, data.totalWords))).tint(GoblinBrand.moss)
                         .accessibilityLabel(app.name).accessibilityValue("\(app.words) words")
                 }
                 .padding(.vertical, 4)

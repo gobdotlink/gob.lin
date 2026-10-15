@@ -91,7 +91,7 @@ struct IconCheck {
             precondition(icon.representations.contains { $0.pixelsWide == 16 })
             precondition(icon.representations.contains { $0.pixelsWide == 1024 })
             for size in [16, 32, 128, 256, 512, 1024] { _ = pixels(icon, size: size) }
-            for name in ["goblin-shut", "goblin-yap", "hands", "goblin-menu", "goblin-menu@2x"] {
+            for name in ["goblin-shut", "goblin-yap", "goblin-look", "hand-grip", "goblin-menu", "goblin-menu@2x"] {
                 let packaged = app.resourceURL!.appendingPathComponent("Assets/" + name + ".png")
                 let packagedBytes = try Data(contentsOf: packaged)
                 let sourceBytes = try Data(contentsOf: assets.appendingPathComponent(name + ".png"))
@@ -135,9 +135,9 @@ struct IconCheck {
         try FileManager.default.removeItem(at: menu)
         checkMenuStates()
         try FileManager.default.removeItem(at: assets)
-        precondition(GoblinBrand.sprite("hands").accessibilityDescription == "gob.lin artwork unavailable")
+        precondition(GoblinBrand.sprite("hand-grip").accessibilityDescription == "gob.lin artwork unavailable")
         checkMenuStates()
-        _ = pixels(GoblinBrand.sprite("hands"), size: 64)
+        _ = pixels(GoblinBrand.sprite("hand-grip"), size: 64)
         print("PASS production menu states at 1x/2x; visible fallback for missing/corrupt sprites and missing Assets")
     }
 }

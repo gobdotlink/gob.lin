@@ -1,24 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build
+swift build --product GoblinApp
 binary_directory=$(swift build --show-bin-path)
 preview='.build/settings-capture/gob.lin Settings Capture.app'
 mkdir -p "$preview/Contents/MacOS" "$preview/Contents/Resources"
-sources=()
-while IFS= read -r source; do sources+=("$source"); done < <(rg --files Sources/GoblinApp -g '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
-mkdir -p .build/settings-capture
-python3 - <<'PYTHON'
+objects="$binary_directory/settings-capture-objects.txt"
+python3 - "$binary_directory" "$objects" <<'PY'
 from pathlib import Path
-source = Path("Sources/GoblinApp/GoblinApp.swift").read_text()
-menu = source[source.index("private struct GoblinMenu: View {"):]
-menu = menu.replace("private struct GoblinMenu: View {", "struct GoblinMenu: View {", 1)
-Path(".build/settings-capture/ProductionMenu.swift").write_text("import AppKit\nimport GoblinCore\nimport SwiftUI\n" + menu)
-PYTHON
+import sys
+root = Path(sys.argv[1])
+objects = (root / 'GoblinApp.product/Objects.LinkFileList').read_text().splitlines()
+Path(sys.argv[2]).write_text('\n'.join('"' + p + '"' for p in objects if '/GoblinApp.build/' not in p) + '\n')
+PY
+sources=()
+while IFS= read -r source; do sources+=("$source"); done < <(find Sources/GoblinApp -name '*.swift' | sort | sed '/\/GoblinApp.swift$/d')
 swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx26.0 \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
-    "${sources[@]}" scripts/capture-settings.swift .build/settings-capture/ProductionMenu.swift \
-    "$binary_directory"/GoblinCore.build/*.swift.o "$binary_directory"/GoblinEngines.build/*.swift.o \
+    -I .build/checkouts/FluidAudio/Sources/MachTaskSelfWrapper/include \
+    -I .build/checkouts/FluidAudio/Sources/FastClusterWrapper/include \
+    "${sources[@]}" scripts/capture-settings.swift "@$objects" -lc++ -lsqlite3 \
     -o "$preview/Contents/MacOS/SettingsCapture"
 cp -R Sources/GoblinApp/Assets "$preview/Contents/Resources/"
 cat > "$preview/Contents/Info.plist" <<'PLIST'

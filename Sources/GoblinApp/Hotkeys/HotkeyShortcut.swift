@@ -1,8 +1,8 @@
 import AppKit
 import Carbon
 
-struct HotkeyShortcut: Codable, Equatable, Sendable {
-    enum Modifier: String, Codable, Sendable { case fn, rightOption, option, command, control, shift }
+struct HotkeyShortcut: Codable, Hashable, Sendable {
+    enum Modifier: String, Codable, Hashable, Sendable { case fn, rightOption, option, command, control, shift }
     var keyCode: UInt16?
     var modifiers: UInt64
     var modifier: Modifier?

@@ -119,7 +119,7 @@ struct AudioSettingsView: View {
                 Text("Keep microphone warm between dictations")
                 Text("Retains up to half a second of audio in memory before you press the shortcut.")
             }
-            .tint(GoblinBrand.tint)
+            
         } header: { Text("Input") } footer: {
             Text("Warm mode keeps the orange microphone indicator on; audio is not saved until recording. With warm mode off, wait for Listening before speaking; first launch and Bluetooth can take longer. Opening a Bluetooth microphone can reduce headphone playback quality.")
         }
@@ -160,7 +160,7 @@ struct LevelMeter: View {
         ForEach(0..<segments, id: \.self) { index in
             let position = Double(index) / Double(segments)
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(position < 0.7 ? GoblinBrand.accent : position < 0.9 ? GoblinBrand.yellow : GoblinBrand.red)
+                .fill(position < 0.7 ? GoblinBrand.moss : position < 0.9 ? LightState.waiting.color : LightState.problem.color)
                 .opacity(level > position ? 1 : 0.13)
         }
         }

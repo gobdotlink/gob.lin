@@ -10,16 +10,21 @@ struct GoblinApp: App {
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
         GoblinBrand.registerFonts()
+        // Both sidebars are a fixed 200 pt. AppKit restores a saved split width past SwiftUI's
+        // maximum, so a width saved by an older build would stick.
+        for window in ["history", "settings"] {
+            UserDefaults.standard.removeObject(forKey: "NSSplitView Subview Frames \(window), SidebarNavigationSplitView")
+        }
     }
 
     var body: some Scene {
         let _ = attachLifecycle()
         MenuBarExtra {
-            GoblinMenu(model: model)
+            MenuPopover(model: model)
         } label: {
-            Image(nsImage: GoblinBrand.menuImage(model.mascotState)).renderingMode(.original)
-                .accessibilityLabel("gob.lin " + model.mascotState.rawValue)
+            MenuBarLabel(model: model)
         }
+        .menuBarExtraStyle(.window)
 
         Window("gob.lin Settings", id: "settings") {
             SettingsView(model: model, speechModels: model.speechModels)
@@ -27,74 +32,29 @@ struct GoblinApp: App {
         .defaultSize(width: 940, height: 720)
         .windowResizability(.contentSize)
 
+        Window("History", id: "history") {
+            HistoryWindow(model: model)
+        }
+        .defaultSize(width: 1100, height: 720)
     }
 
     private func attachLifecycle() { lifecycle.model = model }
 }
 
-private struct GoblinMenu: View {
+/// Today's icon, unchanged. It also hands the scene's window opener to the model, because the
+/// label exists from launch while the popover may never have been opened.
+private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        MenuStatus(hotkeys: model.hotkeys, state: model.mascotState)
-        if let warning = model.diagnostics.warningMessage {
-            Label(warning, systemImage: "exclamationmark.triangle")
-        }
-        Divider()
-        Button("Paste last transcript", systemImage: "doc.on.clipboard") { model.pasteLastTranscript() }
-            .disabled(!model.canPasteLastTranscript)
-        ClipboardRecoveryMenu(service: model.insertion)
-        Divider()
-        Button("History", systemImage: "clock") { model.settingsSelection = .history; show("settings") }
-        Button("Insights", systemImage: "chart.bar.xaxis") { model.settingsSelection = .insights; show("settings") }
-        Button("Settings…", systemImage: "gearshape") { show("settings") }
-            .keyboardShortcut(",")
-        Divider()
-        Button("Permissions & onboarding…", systemImage: "hand.raised") { model.permissions.showOnboarding() }
-        Button("Diagnostics…", systemImage: "stethoscope") { model.settingsSelection = .diagnostics; show("settings") }
-        Button("Copy diagnostics", systemImage: "doc.on.doc") { model.diagnostics.copyDiagnostics() }
-        Divider()
-        if let version = model.updates.availableVersion {
-            Button("Install v\(version) & relaunch", systemImage: "arrow.down.circle") { model.updates.install() }
-                .disabled(model.updates.isBusy || !model.canInstallUpdate)
-        }
-        Button(model.updates.isBusy ? model.updates.status : "Check for updates…", systemImage: "arrow.clockwise") {
-            model.settingsSelection = .about
-            show("settings")
-            model.updates.check()
-        }.disabled(model.updates.isBusy)
-        Divider()
-        Button("Quit gob.lin", systemImage: "power") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
-    }
-
-    private func show(_ id: String) {
-        openWindow(id: id)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-}
-
-/// First menu line: what gob.lin is doing right now.
-private struct MenuStatus: View {
-    @ObservedObject var hotkeys: HotkeyService
-    let state: MascotState
-
-    var body: some View {
-        switch state {
-        case .idle: Text("Ready · hold \(hotkeys.shortcut.label) to talk")
-        case .recording: Text("Dictating…")
-        case .transcribing: Text("Transcribing…")
-        case .warning: Text("Needs attention")
-        }
-    }
-}
-
-private struct ClipboardRecoveryMenu: View {
-    @ObservedObject var service: TextInsertionService
-    var body: some View {
-        if service.hasRecoveryClipboard {
-            Button("Restore previous clipboard", systemImage: "arrow.uturn.backward") { service.restorePreviousClipboard() }.disabled(service.busy)
-        }
+        Image(nsImage: GoblinBrand.menuImage(model.mascotState)).renderingMode(.original)
+            .accessibilityLabel("gob.lin " + model.mascotState.rawValue)
+            .onAppear {
+                model.openWindow = { id in
+                    openWindow(id: id)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
     }
 }

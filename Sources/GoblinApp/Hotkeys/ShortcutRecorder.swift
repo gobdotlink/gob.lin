@@ -39,16 +39,18 @@ struct ShortcutRecorder: View {
     @State private var monitor: Any?
     @State private var candidate: HotkeyShortcut?
     @State private var hint = ""
+    /// Off when a big keycap beside the recorder already shows the key.
+    var showsCurrent = true
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             HStack(spacing: 10) {
                 if service.recorderActive {
-                    Text("press keys…").font(.callout.monospaced()).foregroundStyle(GoblinBrand.accent)
-                } else {
+                    Text("press keys…").font(.callout.monospaced()).foregroundStyle(GoblinBrand.mossText)
+                } else if showsCurrent {
                     KeyCombo(label: service.shortcut.label)
                 }
-                Button(service.recorderActive ? "Cancel" : "Record shortcut") {
+                Button(service.recorderActive ? "Cancel" : "Record New Key…") {
                     if service.recorderActive { end() } else { begin() }
                 }
             }
