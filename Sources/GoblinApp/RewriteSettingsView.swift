@@ -20,6 +20,7 @@ struct RewriteSettingsView: View {
     @State private var listing: ModelListing?
     @State private var loadingModels = false
     @State private var refreshes = 0
+    @FocusState private var modelFieldFocused: Bool
     @State private var handledRefreshes = 0
 
     init(defaults: UserDefaults = .standard, inspectCredentials: Bool = true, onSaved: @escaping () -> Void = {},
@@ -81,7 +82,8 @@ struct RewriteSettingsView: View {
                             chooseModel(typed)
                         } else { settings.model = typed }
                     }), prompt: Text("model-id"))
-                        .labelsHidden().font(.body.monospaced()).autocorrectionDisabled().frame(width: 190)
+                        .labelsHidden().font(.body.monospaced()).autocorrectionDisabled().frame(width: 300)
+                        .focused($modelFieldFocused)
                         .textInputSuggestions {
                             ForEach(modelSuggestions) { option in
                                 Text("\(Text(option.id).monospaced())  \(Text(option.name ?? "").foregroundStyle(.secondary))")
@@ -98,11 +100,14 @@ struct RewriteSettingsView: View {
                         }
                         if !listedModels.isEmpty {
                             Section("From \(modelSourceName)") {
-                                ForEach(listedModels) { option in
-                                    Button { chooseModel(option.id) } label: {
-                                        Text(option.name ?? option.id)
-                                        if option.name != nil { Text(option.id) }
+                                // Router lists run to hundreds of vendor/model ids, so long lists nest by vendor.
+                                if listedModels.count > 40 {
+                                    ForEach(vendorMenus, id: \.vendor) { group in
+                                        Menu(group.vendor) { ForEach(group.models) { modelButton($0, vendor: group.vendor) } }
                                     }
+                                    ForEach(listedModels.filter { !$0.id.contains("/") }) { modelButton($0) }
+                                } else {
+                                    ForEach(listedModels) { modelButton($0) }
                                 }
                             }
                         }
@@ -274,6 +279,18 @@ struct RewriteSettingsView: View {
         return (shownListing?.models ?? []).filter { !presets.contains($0.id) }
     }
 
+    private var vendorMenus: [(vendor: String, models: [RewriteModelOption])] {
+        Dictionary(grouping: listedModels.filter { $0.id.contains("/") }) { String($0.id.prefix { $0 != "/" }) }
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }.map { ($0.key, $0.value) }
+    }
+
+    private func modelButton(_ option: RewriteModelOption, vendor: String? = nil) -> some View {
+        Button { chooseModel(option.id) } label: {
+            Text(option.name ?? vendor.map { String(option.id.dropFirst($0.count + 1)) } ?? option.id)
+            if option.name != nil || vendor != nil { Text(option.id) }
+        }
+    }
+
     private var modelHost: String? { try? settings.endpoint().host() }
 
     /// Local and Custom go by their host, so the sentence names something real.
@@ -320,7 +337,8 @@ struct RewriteSettingsView: View {
             }
         } else if let listing = shownListing, !listing.models.isEmpty {
             let model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !model.isEmpty, !listing.models.contains(where: { $0.id == model }) {
+            // Wait until editing ends: a half-typed id is never listed.
+            if !modelFieldFocused, !model.isEmpty, !listing.models.contains(where: { $0.id == model }) {
                 StatusRow(.waiting, Text("\(name) doesn't list \(Text(model).monospaced())\(listing.source.key.isEmpty ? "" : " for this key"). It might still work."))
             }
         }
