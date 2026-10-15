@@ -94,13 +94,14 @@ struct Plate<Content: View>: View {
 /// A shortcut drawn as physical keys: "⌥⇧Space" becomes ⌥ ⇧ Space.
 struct KeyCombo: View {
     let label: String
+    var small = false
 
     var body: some View {
         let modifiers = label.prefix { "⌃⌥⇧⌘".contains($0) }
         let key = label.dropFirst(modifiers.count)
-        HStack(spacing: 3) {
-            ForEach(Array(modifiers.enumerated()), id: \.offset) { KeyCap(String($0.element)) }
-            if !key.isEmpty { KeyCap(String(key)) }
+        HStack(spacing: small ? 2 : 3) {
+            ForEach(Array(modifiers.enumerated()), id: \.offset) { KeyCap(String($0.element), small: small) }
+            if !key.isEmpty { KeyCap(String(key), small: small) }
         }
         .accessibilityElement(children: .ignore).accessibilityLabel(label)
     }
@@ -125,27 +126,47 @@ struct KeyCap: View {
     }
 }
 
-/// The talk key the way the keyboard draws it, with a light that is green once macOS lets gob.lin hear it.
-struct BigKeyCap: View {
-    let label: String
-    var globe = false
+/// The talk key the way the keyboard draws it, one cap per key, with a light that is green once macOS lets gob.lin hear it.
+struct TalkKeyCaps: View {
+    let shortcut: HotkeyShortcut
     var light: LightState = .ready
 
     var body: some View {
+        let keys = shortcut.keys
+        HStack(spacing: 6) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+                BigKeyCap(symbol: key.symbol, word: key.word, globe: shortcut.modifier == .fn, light: index == 0 ? light : nil)
+            }
+        }
+        .accessibilityElement(children: .ignore).accessibilityLabel(shortcut.title)
+    }
+}
+
+struct BigKeyCap: View {
+    let symbol: String
+    var word = ""
+    var globe = false
+    var light: LightState?
+
+    var body: some View {
+        let ink = Color.black.opacity(0.86)
         RoundedRectangle(cornerRadius: 9, style: .continuous)
             .fill(LinearGradient(colors: [.white, Color(white: 0.945)], startPoint: .top, endPoint: .bottom))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(.black.opacity(0.2), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.08), radius: 0, y: 2)
             .shadow(color: .black.opacity(0.06), radius: 5, y: 4)
-            .overlay(alignment: .topTrailing) {
-                Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(.black.opacity(0.86)).padding(.top, 7).padding(.trailing, 9)
+            .overlay(alignment: word.isEmpty && !globe ? .center : .topTrailing) {
+                // Modifiers and fn print small in the corner; an ordinary key prints big in the middle.
+                Text(symbol).font(.system(size: word.isEmpty && !globe && symbol.count == 1 ? 17 : 12, weight: .medium)).foregroundStyle(ink)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .padding(.top, word.isEmpty && !globe ? 0 : 7).padding(.horizontal, word.isEmpty && !globe ? 6 : 9)
             }
-            .overlay(alignment: .topLeading) { StatusLight(state: light, size: 5).padding(.top, 9).padding(.leading, 10) }
+            .overlay(alignment: .topLeading) { if let light { StatusLight(state: light, size: 5).padding(.top, 9).padding(.leading, 10) } }
             .overlay(alignment: .bottomLeading) {
-                if globe { Image(systemName: "globe").font(.system(size: 13)).foregroundStyle(.black.opacity(0.86)).padding(.leading, 9).padding(.bottom, 8) }
+                if globe { Image(systemName: "globe").font(.system(size: 13)).foregroundStyle(ink).padding(.leading, 9).padding(.bottom, 8) }
+                else if !word.isEmpty { Text(word).font(.system(size: 9, weight: .medium)).foregroundStyle(ink).lineLimit(1).fixedSize().padding(.leading, 7).padding(.bottom, 7) }
             }
             .frame(width: 60, height: 56)
-            .accessibilityElement(children: .ignore).accessibilityLabel(label)
     }
 }
 
