@@ -107,9 +107,9 @@ struct SettingsCapture {
                 }
                 if wanted("onboarding") {
                     for step in OnboardingView.Step.allCases {
-                        try await shoot("onboarding-\(step.rawValue + 1)", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 560))
+                        try await shoot("onboarding-\(step.rawValue + 1)", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 516))
                     }
-                    try await shoot("onboarding-1-dark", OnboardingView(model: model, startAt: .permissions), size: NSSize(width: 660, height: 560), dark: true)
+                    try await shoot("onboarding-1-dark", OnboardingView(model: model, startAt: .permissions), size: NSSize(width: 660, height: 516), dark: true)
                 }
                 if wanted("overlay") {
                     for (name, overlay) in overlayPhases() {

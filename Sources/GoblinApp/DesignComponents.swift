@@ -59,6 +59,7 @@ struct StatusRow<Trailing: View>: View {
             Spacer(minLength: 8)
             trailing.font(.callout).foregroundStyle(.secondary)
         }
+        .containerValue(\.statusRow, true)
     }
 }
 
@@ -107,13 +108,15 @@ struct KeyCombo: View {
 
 struct KeyCap: View {
     let label: String
-    init(_ label: String) { self.label = label }
+    /// 17 pt instead of 20, for a key inside a line of small text.
+    var small = false
+    init(_ label: String, small: Bool = false) { self.label = label; self.small = small }
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Text(label)
-            .font(.system(size: 11, weight: .medium))
-            .padding(.horizontal, 5).frame(minWidth: 20, minHeight: 20)
+            .font(.system(size: small ? 10 : 11, weight: .medium))
+            .padding(.horizontal, small ? 4 : 5).frame(minWidth: small ? 17 : 20, minHeight: small ? 17 : 20)
             .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(
                 scheme == .dark ? LinearGradient(colors: [Color(white: 0.24), Color(white: 0.2)], startPoint: .top, endPoint: .bottom)
                                 : LinearGradient(colors: [.white, Color(white: 0.945)], startPoint: .top, endPoint: .bottom)))
@@ -200,36 +203,9 @@ struct PlateFormStyle: FormStyle {
     func makeBody(configuration: Configuration) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(sections: configuration.content) { section in
-                    if section.containerValues.plateless {
-                        section.content.frame(maxWidth: .infinity).padding(.top, 14)
-                    } else {
-                    if !section.header.isEmpty {
-                        section.header
-                            .font(.system(size: 10, weight: .semibold)).tracking(0.85).textCase(.uppercase)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 14).padding(.top, 22).padding(.bottom, 8)
-                    } else {
-                        Spacer().frame(height: 14)
-                    }
-                    Group(subviews: section.content) { rows in
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                if index > 0 { Hairline().padding(.horizontal, 14) }
-                                row.padding(.vertical, 6)
-                                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                                    .padding(.horizontal, 14)
-                            }
-                        }
-                        .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
-                        .shadow(color: .black.opacity(0.035), radius: 1, y: 1)
-                    }
-                    if !section.footer.isEmpty {
-                        section.footer.font(.system(size: 11.5)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 14).padding(.top, 7)
-                    }
+                Group(sections: configuration.content) { sections in
+                    ForEach(Array(sections.enumerated()), id: \.element.id) { position, section in
+                        Self.section(section, first: position == 0)
                     }
                 }
             }
@@ -238,6 +214,40 @@ struct PlateFormStyle: FormStyle {
         .labeledContentStyle(PlateLabeledContentStyle())
         .disclosureGroupStyle(RowDisclosureStyle())
         .toggleStyle(PlateToggleStyle())
+    }
+
+    @ViewBuilder private static func section(_ section: SectionConfiguration, first: Bool) -> some View {
+        if section.containerValues.plateless {
+            section.content.frame(maxWidth: .infinity).padding(.top, 14)
+        } else {
+            if !section.header.isEmpty {
+                // The first header sits 6 pt under the toolbar; later ones leave 22 pt above.
+                section.header
+                    .font(.system(size: 10, weight: .semibold)).tracking(0.85).textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 14).padding(.top, first ? 6 : 22).padding(.bottom, 8)
+            } else {
+                Spacer().frame(height: first ? 6 : 14)
+            }
+            Group(subviews: section.content) { rows in
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 { Hairline().padding(.horizontal, 14) }
+                        row.padding(.vertical, 9)
+                            .frame(maxWidth: .infinity, minHeight: row.containerValues.statusRow ? 36 : 42, alignment: .leading)
+                            .padding(.horizontal, 14)
+                    }
+                }
+                .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.035), radius: 1, y: 1)
+            }
+            if !section.footer.isEmpty {
+                section.footer.font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.top, 7)
+            }
+        }
     }
 }
 
@@ -310,6 +320,8 @@ struct RowDisclosureStyle: DisclosureGroupStyle {
 extension ContainerValues {
     /// A Settings section drawn straight on the case, without a plate (About's hero and side-by-side plates).
     @Entry var plateless: Bool = false
+    /// Status rows are shorter than control rows in a plate.
+    @Entry var statusRow: Bool = false
 }
 
 /// A sidebar row: a neutral grey fill when selected, with the glyph in moss. A List's selection is
@@ -349,6 +361,8 @@ extension SidebarRow where Trailing == EmptyView {
 struct ToolbarTitle: ToolbarContent {
     let title: String
     var subtitle: String?
+    /// Inset from the sidebar's edge: 24 over a Settings page, 16 over the History list.
+    var leading: CGFloat = 24
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
@@ -356,7 +370,8 @@ struct ToolbarTitle: ToolbarContent {
                 Text(title).font(.system(size: 15, weight: .semibold))
                 if let subtitle { Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit() }
             }
-            .padding(.leading, 6)
+            // The navigation slot already starts 6 pt past the sidebar.
+            .padding(.leading, leading - 6)
         }
         .sharedBackgroundVisibility(.hidden)
     }

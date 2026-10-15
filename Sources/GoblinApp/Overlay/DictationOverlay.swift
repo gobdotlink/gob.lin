@@ -92,8 +92,8 @@ private struct OverlayBubble: View {
             .fixedSize(horizontal: compact, vertical: true)
             .background {
                 shape.fill(.ultraThinMaterial)
-                    .overlay(shape.fill(GoblinBrand.bubble.opacity(0.9)))
-                    .overlay(shape.strokeBorder(borderColor, lineWidth: 1))
+                    .overlay(shape.fill(GoblinBrand.bubble))
+                    .overlay(shape.strokeBorder(borderColor, lineWidth: 0.5))
                     .shadow(color: glow, radius: 16)
                     .shadow(color: .black.opacity(0.3), radius: 14, y: 8)
             }

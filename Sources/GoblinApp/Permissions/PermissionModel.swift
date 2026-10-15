@@ -175,7 +175,7 @@ final class PermissionModel: ObservableObject {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             window.isMovableByWindowBackground = true
-            window.setContentSize(NSSize(width: 660, height: 560))
+            window.setContentSize(NSSize(width: 660, height: 548 - 32))
             window.center()
             window.isReleasedWhenClosed = false
             onboarding = NSWindowController(window: window)

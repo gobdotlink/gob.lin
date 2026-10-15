@@ -35,7 +35,9 @@ struct InsightsView: View {
             .formStyle(PlateFormStyle())
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            // Keeps refresh and search together at the trailing end, as in the dictation lists.
+            ToolbarSpacer(.flexible)
+            ToolbarItem {
                 if loading { ProgressView().controlSize(.small) }
                 else { Button("Refresh Insights", systemImage: "arrow.clockwise") { refresh() } }
             }

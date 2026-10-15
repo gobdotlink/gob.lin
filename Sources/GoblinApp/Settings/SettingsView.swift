@@ -45,7 +45,9 @@ struct SettingsView: View {
             }
             .arrowKeySelection(SettingsSection.allCases, selection: $model.settingsSelection)
             .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter(status: model.status) }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 260)
+            // The column width alone doesn't hold; the content's own width pins the split item.
+            .frame(width: 200)
+            .navigationSplitViewColumnWidth(200)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             // The title is a toolbar item, so the toolbar stays and the sidebar runs up behind the traffic
@@ -60,6 +62,9 @@ struct SettingsView: View {
                 .toolbar { ToolbarTitle(title: section.rawValue) }
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
+        // With the toolbar background hidden, scrolled rows would show through the title; the hard
+        // edge cuts them off at the toolbar instead.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         // Grouped Forms center a ~700pt column in wider windows; capping the width keeps every
         // page on the same margins (System Settings is fixed-width too).
         .frame(minWidth: 820, maxWidth: 960, minHeight: 620)
@@ -226,88 +231,96 @@ private struct AboutSettingsView: View {
             VStack(spacing: 0) {
                 PixelSprite(sprite: .shut, scale: 2)
                 GoblinWordmark(size: 48).padding(.top, 10)
-                Text("Version \(updates.currentVersion)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Text(versionLine).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
                     .textSelection(.enabled).padding(.top, 8)
                 GoblinTagline(size: 22, cursor: true).padding(.top, 14)
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 8)
+            .frame(maxWidth: .infinity).padding(.top, 4)
         }
         .containerValue(\.plateless, true)
         Section {
+            // Equal-height panels, like the two columns of a grid.
             HStack(alignment: .top, spacing: 12) {
-                Plate(padding: 16) {
-                    VStack(alignment: .leading, spacing: 14) {
+                Plate(padding: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text("Lives in your menu bar. Listens only while you hold the key. Turns speech into text on this Mac, and only sends text out if you turn on Cleanup. Has strong opinions about “um”.")
-                            .fixedSize(horizontal: false, vertical: true)
-                        Hairline()
+                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                        Hairline().padding(.top, 14)
                         HStack(alignment: .top) {
                             stat(totalWords.map { $0.formatted() } ?? "—", "words yapped")
                             stat(history.counts.total.formatted(), "dictations")
                             stat("0 s", "audio uploaded")
                         }
+                        .padding(.top, 12)
                     }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
                 Plate(padding: 0) {
                     VStack(spacing: 0) {
                         spec("Recognition", "Parakeet TDT v3, on this Mac")
-                        Hairline().padding(.horizontal, 16)
+                        Hairline()
                         spec("Runs on", "Core ML")
-                        Hairline().padding(.horizontal, 16)
+                        Hairline()
                         spec("Model size", modelSize ?? "—")
-                        Hairline().padding(.horizontal, 16)
+                        Hairline()
                         spec("Languages", "25 European languages")
-                        Hairline().padding(.horizontal, 16)
+                        Hairline()
                         spec("Network", "Not needed. Cleanup is opt-in.")
                     }
+                    .padding(.horizontal, 16).padding(.vertical, 4)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 10)
+            .task(id: history.revision) { totalWords = try? await history.store?.insights().totalWords }
+            .task { modelSize = await Self.modelSize() }
         }
         .containerValue(\.plateless, true)
         Section {
             HStack(spacing: 8) {
                 Button("Check for Updates…") { updates.check() }.disabled(updates.isBusy)
-                Button("Licences") { open("Third-party-notices.md") }
+                Menu("Licences") {
+                    if let directory = GoblinBrand.assetDirectory {
+                        Button("gob.lin · Apache License 2.0") { NSWorkspace.shared.open(directory.appendingPathComponent("Apache-LICENSE.txt")) }
+                        Button("Third-Party Notices") { NSWorkspace.shared.open(directory.appendingPathComponent("Third-party-notices.md")) }
+                        Button("Workbench · SIL Open Font License 1.1") { NSWorkspace.shared.open(directory.appendingPathComponent("Workbench-OFL.txt")) }
+                        Button("VT323 · SIL Open Font License 1.1") { NSWorkspace.shared.open(directory.appendingPathComponent("VT323-OFL.txt")) }
+                    }
+                }
+                .menuIndicator(.hidden).fixedSize()
                 Button("Data Folder", systemImage: "folder") {
                     if let folder = try? HistoryStore.defaultDirectory() { NSWorkspace.shared.open(folder) }
                 }
                 Spacer()
-                Text("Apache 2.0 · fonts under OFL 1.1").font(.caption).foregroundStyle(.secondary)
+                Text("Apache 2.0 · fonts under OFL 1.1").font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
             .padding(.top, 2)
         }
         .containerValue(\.plateless, true)
+        // Only when there's something to do: an update to install, a failure, or a token to save.
         UpdateSettingsView(updates: updates)
-        Section {
-            if let directory = GoblinBrand.assetDirectory {
-                licence("Project licence", "Apache License 2.0", directory.appendingPathComponent("Apache-LICENSE.txt"))
-                licence("Third-party notices", "Bundled components", directory.appendingPathComponent("Third-party-notices.md"))
-                licence("Workbench", "SIL Open Font License 1.1", directory.appendingPathComponent("Workbench-OFL.txt"))
-                licence("VT323", "SIL Open Font License 1.1", directory.appendingPathComponent("VT323-OFL.txt"))
-            } else {
-                Text("Apache License 2.0 · Workbench and VT323: SIL Open Font License 1.1")
-            }
-            LabeledContent("Logs") {
-                Button("Open Console") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")) }
-            }
-        } header: { CapsHeader("Licences and logs") }
-        .task(id: history.revision) {
-            totalWords = try? await history.store?.insights().totalWords
-        }
-        .task { modelSize = await Self.modelSize() }
     }
 
-    private func open(_ asset: String) {
-        if let url = GoblinBrand.assetDirectory?.appendingPathComponent(asset) { NSWorkspace.shared.open(url) }
+    private var versionLine: String {
+        let version = "Version \(updates.currentVersion)"
+        switch updates.phase {
+        case .upToDate: return version + " · up to date"
+        case .checking: return version + " · checking…"
+        case .available(let next): return version + " · v\(next) is out"
+        default: return version
+        }
     }
 
     private func spec(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).foregroundStyle(.secondary).frame(width: 96, alignment: .leading)
+            Text(label).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
             Text(value).monospacedDigit().fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
         .font(.system(size: 12.5))
-        .padding(.horizontal, 16).padding(.vertical, 9)
+        .padding(.vertical, 8)
     }
 
     /// The downloaded model's size on disk, measured rather than quoted.
@@ -326,19 +339,10 @@ private struct AboutSettingsView: View {
 
     private func stat(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 20, weight: .semibold)).monospacedDigit()
+            Text(label).font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-    }
-
-    private func licence(_ title: String, _ detail: String, _ url: URL) -> some View {
-        LabeledContent {
-            Button("View") { NSWorkspace.shared.open(url) }
-        } label: {
-            Text(title)
-            Text(detail)
-        }
     }
 }

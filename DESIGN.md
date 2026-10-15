@@ -163,7 +163,7 @@ The ⋯ menu is a plain menu: Permissions… (with the number that are off), Dia
 `Sources/GoblinApp/Settings/` and the per-page views.
 
 - **Case and plates:** the window background is the case, and each group is a plate with a 10 pt small-caps label above it.
-- **Window chrome:** the sidebar is always visible (no toggle), with the traffic lights inside it. The page title is the window's toolbar title, level with the traffic lights, and the toolbar draws no band, so the case runs to the top of the window.
+- **Window chrome:** the sidebar is always visible (no toggle), with the traffic lights inside it. The page title is the window's toolbar title, level with the traffic lights, and the toolbar draws no band, so the case runs to the top of the window. Scroll views use the hard top edge effect, so scrolled content stops at the toolbar and never shows through the title.
 - **Status rows:** a group may end with one status row: a light, a sentence, and either a right-aligned detail or one button.
 - **Sidebar:** General, Audio, Model, Dictionary, Cleanup, Tone, History (retention only), Overlay, Diagnostics, About, all with SF Symbols. The footer is a status light, "Ready", and the engine and where it runs ("Parakeet v3 · on this Mac").
 - **General:**

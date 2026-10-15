@@ -32,10 +32,9 @@ struct OnboardingView: View {
             case .hired: hiredStep
             }
         }
-        .padding(.top, step == .hired ? 40 : 54).padding(.horizontal, 44).padding(.bottom, 26)
-        .frame(width: 660, height: 560, alignment: .topLeading)
-        // The title bar is transparent; measure from the window's top edge, as the mockup does.
-        .ignoresSafeArea()
+        // The mockup's 548 pt window measures 54 pt from its top edge; the 32 pt title bar is above this.
+        .padding(.top, step == .hired ? 8 : 22).padding(.horizontal, 44).padding(.bottom, 26)
+        .frame(width: 660, height: 548 - 32, alignment: .topLeading)
         .caseBackground()
         .onChange(of: step, initial: true) { _, step in listen(on: step) }
         .onChange(of: hotkeys.recording) { _, recording in if recording != nil, step == .talkKey { keyChecked = true } }

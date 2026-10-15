@@ -5,29 +5,42 @@ struct UpdateSettingsView: View {
     @State private var token = ""
 
     var body: some View {
-        Section("Updates") {
-            Text(updates.status).foregroundStyle(.secondary).textSelection(.enabled)
-            HStack {
-                Button("Check for updates") { updates.check() }.disabled(updates.isBusy)
-                if let version = updates.availableVersion {
-                    Button("Install v\(version) & relaunch") { updates.install() }.disabled(updates.isBusy)
+        if needed {
+            Section {
+                StatusRow(failed ? .problem : updates.availableVersion == nil ? .waiting : .ready, Text(updates.status)) {
+                    if updates.isBusy { ProgressView().controlSize(.small) }
+                    else if let version = updates.availableVersion {
+                        Button("Install v\(version) & Relaunch") { updates.install() }.prominent()
+                    }
                 }
-                if updates.isBusy { ProgressView().controlSize(.small) }
-            }
-            if updates.ghAuthenticated {
-                Label("Using GitHub CLI authentication", systemImage: "checkmark.circle")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("For private releases, sign in with gh or save a GitHub token with Contents read access to akalikin/gob.lin.")
-                    .font(.callout).foregroundStyle(.secondary)
-                HStack {
-                    SecureField("GitHub token", text: $token)
-                    Button("Save token") { updates.saveToken(token); token = "" }
-                        .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || updates.isBusy)
-                    Button("Remove saved token") { updates.saveToken("") }.disabled(updates.isBusy)
+                if !updates.ghAuthenticated {
+                    LabeledContent {
+                        HStack(spacing: 8) {
+                            SecureField("GitHub token", text: $token).labelsHidden().frame(width: 190)
+                            Button("Save") { updates.saveToken(token); token = "" }
+                                .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || updates.isBusy)
+                            Button("Remove") { updates.saveToken("") }.disabled(updates.isBusy)
+                        }
+                    } label: {
+                        Text("GitHub token")
+                        Text("For private releases: sign in with gh, or save a token with Contents read access to akalikin/gob.lin.")
+                    }
                 }
-            }
-            Link("Release notes", destination: URL(string: "https://github.com/akalikin/gob.lin/releases")!)
+                LabeledContent("Release notes") {
+                    Link("Open on GitHub", destination: URL(string: "https://github.com/akalikin/gob.lin/releases")!)
+                        .foregroundStyle(GoblinBrand.mossText)
+                }
+            } header: { CapsHeader("Updates") }
+        }
+    }
+
+    private var failed: Bool { if case .failed = updates.phase { true } else { false } }
+
+    /// About's version line covers idle, checking and up to date.
+    private var needed: Bool {
+        switch updates.phase {
+        case .idle, .checking, .upToDate: !updates.ghAuthenticated
+        default: true
         }
     }
 }

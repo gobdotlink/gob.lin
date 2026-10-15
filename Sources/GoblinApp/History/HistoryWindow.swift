@@ -25,7 +25,9 @@ struct HistoryWindow: View {
         // The sidebar is always there: no toggle, and no collapsing in narrow windows.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             sidebar
-                .navigationSplitViewColumnWidth(min: 200, ideal: 214, max: 260)
+                // The column width alone doesn't hold; the content's own width pins the split item.
+                .frame(width: 200)
+                .navigationSplitViewColumnWidth(200)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
             Group {
@@ -35,21 +37,26 @@ struct HistoryWindow: View {
             .caseBackground()
             .navigationTitle(title)
             .toolbar(removing: .title)
-            .toolbar { ToolbarTitle(title: title, subtitle: subtitle) }
+            .toolbar {
+                ToolbarTitle(title: title, subtitle: subtitle, leading: 16)
+                if filter != nil, let entry = selectedEntry {
+                    // Star, copy and delete sit right before search. They must be declared here, on
+                    // the detail column: from the window's toolbar the spacer centres them instead.
+                    ToolbarSpacer(.flexible)
+                    ToolbarItemGroup {
+                        Button(entry.starred ? "Unstar" : "Star", systemImage: entry.starred ? "star.fill" : "star") {
+                            Task { await history.setStarred(!entry.starred, entry: entry) }
+                        }
+                        Button("Copy", systemImage: "doc.on.doc") { copy(entry.finalText) }
+                        Button("Delete", systemImage: "trash") { deleteCandidate = entry }
+                    }
+                }
+            }
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         .searchable(text: $history.searchText, placement: .toolbar, prompt: "Search dictations")
-        .toolbar {
-            if filter != nil, let entry = selectedEntry {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button(entry.starred ? "Unstar" : "Star", systemImage: entry.starred ? "star.fill" : "star") {
-                        Task { await history.setStarred(!entry.starred, entry: entry) }
-                    }
-                    Button("Copy", systemImage: "doc.on.doc") { copy(entry.finalText) }
-                    Button("Delete", systemImage: "trash") { deleteCandidate = entry }
-                }
-            }
-        }
+        // Scrolled rows stop at the toolbar rather than showing through the title (see Settings).
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .task(id: Query(search: history.searchText, filter: filter ?? .all)) {
             history.filter = filter ?? .all
             await history.reload()
@@ -69,7 +76,8 @@ struct HistoryWindow: View {
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
         }
         .onDisappear { history.stopAudio() }
-        .frame(minWidth: 880, minHeight: 560)
+        // Sidebar 200 + inset 16 + list 330 + rule 1 + detail 420.
+        .frame(minWidth: 970, minHeight: 560)
     }
 
     private var title: String {
@@ -167,7 +175,7 @@ struct HistoryWindow: View {
                         if let entry = selectedEntry { EntryDetail(entry: entry, history: history).id(entry.id) }
                         else { ContentUnavailableView("Pick a dictation", systemImage: "text.alignleft") }
                     }
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
                     .background(GoblinBrand.plate)
                 }
             }
@@ -209,9 +217,15 @@ struct HistoryWindow: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(dayGroups, id: \.day) { group in
                         Text(group.title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
-                        ForEach(group.entries) { entry in
+                            .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 4)
+                        ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
                             EntryRow(entry: entry, selected: entry.id == selectedID)
+                                .overlay(alignment: .top) {
+                                    // A rule under the text column, dropped beside the selected row.
+                                    if index > 0, entry.id != selectedID, group.entries[index - 1].id != selectedID {
+                                        Hairline().padding(.leading, 42)
+                                    }
+                                }
                                 .id(entry.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { selectedID = entry.id }
@@ -268,20 +282,23 @@ private struct EntryRow: View {
                 HStack {
                     Text(entry.targetApplicationName ?? "Unknown app").font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 6)
-                    Text(entry.createdAt, format: .dateTime.hour().minute()).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Text(entry.createdAt, format: .dateTime.hour().minute()).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Text(entry.finalText.isEmpty ? "Empty dictation" : entry.finalText)
                     .font(.system(size: 12.5)).lineLimit(2)
-                    .foregroundStyle(entry.finalText.isEmpty ? .secondary : .primary)
+                    .foregroundStyle(entry.finalText.isEmpty ? .secondary : .primary).opacity(selected ? 1 : 0.86)
                 HStack(spacing: 6) {
                     Text(Duration.seconds(entry.audioDuration.rounded()).formatted(.time(pattern: .minuteSecond))).monospacedDigit()
                     if entry.starred { Image(systemName: "star.fill").foregroundStyle(GoblinBrand.candle).accessibilityLabel("Starred") }
-                    if entry.processingWarning != nil { Label("Warning", systemImage: "exclamationmark.triangle.fill").labelStyle(.titleAndIcon) }
+                    if entry.processingWarning != nil {
+                        Label("Warning", systemImage: "exclamationmark.triangle.fill").labelStyle(.titleAndIcon)
+                            .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(GoblinBrand.candle))
+                    }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.system(size: 11.5)).foregroundStyle(.tertiary).padding(.top, 1)
             }
         }
-        .padding(.vertical, 9).padding(.horizontal, 10)
+        .padding(.vertical, 9).padding(.horizontal, 12)
         .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .environment(\.colorScheme, selected ? .dark : environmentScheme)
         .background(selected ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -358,6 +375,7 @@ private struct EntryDetail: View {
             Button { Task { await history.play(entry) } } label: {
                 Image(systemName: playing ? "stop.fill" : "play.fill")
                     .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .offset(x: playing ? 0 : 1) // a triangle looks off-centre when centred by its box
                     .frame(width: 28, height: 28).background(GoblinBrand.moss, in: Circle())
                     .contentShape(Circle())
             }
@@ -365,6 +383,7 @@ private struct EntryDetail: View {
             .accessibilityLabel(playing ? "Stop audio" : "Play audio")
             TimelineView(.periodic(from: .now, by: playing ? 0.05 : 60)) { _ in
                 let progress = playing ? history.playbackProgress : 0
+                HStack(spacing: 12) {
                 HStack(spacing: 0) {
                     if peaks.isEmpty {
                         Text(entry.audioFilename == nil ? "No recording kept" : "Play the recording").foregroundStyle(.secondary)
@@ -381,7 +400,8 @@ private struct EntryDetail: View {
                 .contentShape(Rectangle())
                 .onTapGesture { if entry.audioFilename != nil { Task { await history.play(entry) } } }
                 Text("\(time(playing ? history.playbackProgress * entry.audioDuration : 0)) / \(time(entry.audioDuration))")
-                    .font(.callout).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                    .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                }
             }
         }
         .task { peaks = await history.waveform(for: entry) }
@@ -425,7 +445,7 @@ private struct EntryDetail: View {
                                                 ("Paste", timings.insertionMilliseconds, Color.secondary.opacity(0.5))]
         let total = timings.processingMilliseconds
         return VStack(alignment: .leading, spacing: 8) {
-            Text("**\(ms(total))** \(entry.targetApplicationName.map { "from key-up to text in \($0)" } ?? "from key-up to text")")
+            Text("**\(ms(total))** \(entry.finalText.isEmpty ? "from key-up to finding nothing to type" : entry.targetApplicationName.map { "from key-up to text in \($0)" } ?? "from key-up to text")")
             GeometryReader { geometry in
                 HStack(spacing: 2) {
                     ForEach(parts.filter { $0.1 > 0 }, id: \.0) { part in

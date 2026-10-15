@@ -10,6 +10,11 @@ struct GoblinApp: App {
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
         GoblinBrand.registerFonts()
+        // Both sidebars are a fixed 200 pt. AppKit restores a saved split width past SwiftUI's
+        // maximum, so a width saved by an older build would stick.
+        for window in ["history", "settings"] {
+            UserDefaults.standard.removeObject(forKey: "NSSplitView Subview Frames \(window), SidebarNavigationSplitView")
+        }
     }
 
     var body: some Scene {
