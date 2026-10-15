@@ -64,7 +64,17 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .openRouter: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
                            RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
         case .zai: [RewriteModelPreset(id: "glm-4.7-flash", title: "GLM 4.7 Flash", reasoning: .off)]
-        case .sambaNova, .anthropic, .gemini, .mistral, .xai, .requesty, .vercel, .local, .custom: []
+        case .sambaNova: [RewriteModelPreset(id: "Meta-Llama-3.3-70B-Instruct", title: "Llama 3.3 70B", reasoning: .off),
+                          RewriteModelPreset(id: "gpt-oss-120b", title: "GPT-OSS 120B", reasoning: .low)]
+        case .anthropic: [RewriteModelPreset(id: "claude-haiku-5-5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
+        case .gemini: [RewriteModelPreset(id: "gemini-3.5-flash-lite", title: "Gemini 3.5 Flash-Lite", reasoning: .off, temperature: nil)]
+        case .mistral: [RewriteModelPreset(id: "mistral-small-2603", title: "Mistral Small 4", reasoning: .off),
+                        RewriteModelPreset(id: "ministral-8b-2512", title: "Ministral 8B", reasoning: .providerDefault)]
+        case .xai: [RewriteModelPreset(id: "grok-4.20-0309-non-reasoning", title: "Grok 4.20 Non-Reasoning", reasoning: .providerDefault)]
+        case .requesty: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off, temperature: nil)]
+        case .vercel: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
+                       RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
+        case .local, .custom: []
         }
     }
 
@@ -77,7 +87,13 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .zai: "The Flash preset requests thinking off. Other GLM models may require thinking."
         case .local: "An OpenAI-compatible server on this Mac. A local server may not need an API key."
         case .custom: "Use any OpenAI-compatible chat completions endpoint."
-        case .sambaNova, .anthropic, .gemini, .mistral, .xai, .requesty, .vercel: ""
+        case .sambaNova: "Fast inference. Llama 3.3 does not reason; GPT-OSS 120B uses Low reasoning."
+        case .anthropic: "Claude Haiku 5.5 is the fastest Claude model. The preset turns thinking off."
+        case .gemini: "Flash-Lite is fast and low cost. Gemini 3 thinking cannot be turned off, so Off requests the minimum."
+        case .mistral: "Mistral Small 4 requests reasoning off; Ministral 8B is a small model without reasoning."
+        case .xai: "The non-reasoning Grok model answers without thinking. Other Grok models cannot turn reasoning off."
+        case .requesty: "A router with one OpenAI-compatible endpoint. Requesty may map reasoning Off to its lowest level."
+        case .vercel: "Access GPT-6 Luna and Claude Haiku with one OpenAI-compatible endpoint."
         }
     }
 
@@ -140,17 +156,29 @@ public enum RewriteReasoning: String, CaseIterable, Codable, Sendable, Identifia
         let effort = self == .automatic ? automaticEffort : (self == .off ? "none" : rawValue)
         guard let effort else { return [:] }
         switch provider {
-        case .openRouter:
+        case .openRouter, .vercel:
             return ["reasoning": effort == "none" ? ["enabled": false] : ["effort": effort]]
         case .zai:
             return effort == "none" ? ["thinking": ["type": "disabled"]] : ["thinking": ["type": "enabled"], "reasoning_effort": effort]
+        case .anthropic:
+            return effort == "none" ? ["thinking": ["type": "disabled"]] : ["output_config": ["effort": effort]]
+        // These accept no "none": Gemini 3 and Grok cannot stop thinking, Mistral has only none/high,
+        // and SambaNova's hybrid models already default to thinking off.
+        case .gemini:
+            return ["reasoning_effort": effort == "none" ? "minimal" : effort]
+        case .xai:
+            return ["reasoning_effort": effort == "none" ? "low" : effort]
+        case .mistral:
+            return ["reasoning_effort": effort == "none" ? "none" : "high"]
+        case .sambaNova:
+            return effort == "none" ? [:] : ["reasoning_effort": effort]
         default:
             return ["reasoning_effort": effort]
         }
     }
 }
 
-/// Non-secret settings are remembered per provider; credentials remain keyed by endpoint in RewriteKeyStore.
+/// Non-secret settings are remembered per provider; RewriteKeyStore keeps one key per provider (Custom per endpoint).
 public struct RewriteProviderConfiguration: Codable, Equatable, Sendable {
     public var baseURL: String
     public var model: String

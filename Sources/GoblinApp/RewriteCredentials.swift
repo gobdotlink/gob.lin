@@ -6,7 +6,8 @@ import GoblinCore
 @MainActor
 final class RewriteCredentials {
     private let load: (RewriteSettings) throws -> String
-    private var endpoint: URL?
+    // Provider and endpoint: Custom and a named provider at the same address hold different keys.
+    private var scope: String?
     private var credential: Result<String, Error>?
 
     init(load: @escaping (RewriteSettings) throws -> String = { try RewriteKeyStore.load(for: $0) }) {
@@ -15,9 +16,9 @@ final class RewriteCredentials {
 
     func prepare(for settings: RewriteSettings) throws {
         guard settings.enabled, settings.cleanup != .none else { reset(); return }
-        let endpoint = try settings.endpoint()
-        guard self.endpoint != endpoint else { return }
-        self.endpoint = endpoint
+        let scope = try Self.scope(settings)
+        guard self.scope != scope else { return }
+        self.scope = scope
         let result = Result { try load(settings) }
         credential = result
         _ = try result.get()
@@ -25,11 +26,13 @@ final class RewriteCredentials {
 
     /// Never read the key store here: processing a transcript must not open an auth dialog.
     func key(for settings: RewriteSettings) throws -> String {
-        guard endpoint == (try settings.endpoint()), let credential else {
+        guard scope == (try Self.scope(settings)), let credential else {
             throw RewriteFailure.configuration("Save AI cleanup settings to authorize the provider key before dictating.")
         }
         return try credential.get()
     }
 
-    func reset() { endpoint = nil; credential = nil }
+    func reset() { scope = nil; credential = nil }
+
+    private static func scope(_ settings: RewriteSettings) throws -> String { settings.provider.rawValue + " " + (try settings.endpoint().absoluteString) }
 }

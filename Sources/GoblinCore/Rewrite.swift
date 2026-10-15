@@ -106,7 +106,7 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         guard Set(parameters.keys).isDisjoint(with: ["model", "messages", "stream"]) else {
             throw RewriteFailure.configuration("Extra options cannot replace model, messages, or stream.")
         }
-        let reasoningKeys: Set<String> = ["reasoning_effort", "reasoning", "thinking", "enable_thinking", "disable_reasoning", "chat_template_kwargs", "thinking_config", "extra_body"]
+        let reasoningKeys: Set<String> = ["reasoning_effort", "reasoning", "thinking", "enable_thinking", "disable_reasoning", "chat_template_kwargs", "thinking_config", "extra_body", "output_config"]
         guard reasoning == .providerDefault || Set(parameters.keys).isDisjoint(with: reasoningKeys) else {
             throw RewriteFailure.configuration("Choose Provider default reasoning before supplying custom reasoning options.")
         }
@@ -116,6 +116,9 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
     public func requestParameters(automaticEffort: String?) throws -> [String: Any] {
         var body: [String: Any] = ["model": model, "stream": false]
         if let temperature { body["temperature"] = temperature }
+        // Required by the Messages API. Thinking counts toward it, and the four-second
+        // deadline ends generation long before this, so it never cuts off a usable reply.
+        if provider == .anthropic { body["max_tokens"] = 4096 }
         body.merge(reasoning.parameters(provider: provider, automaticEffort: automaticEffort)) { _, value in value }
         for (key, value) in try extraRequestParameters() {
             if value is NSNull { body.removeValue(forKey: key) }
@@ -134,7 +137,7 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         }
         // Luna accepts sampling options only with reasoning explicitly disabled.
         // Check each attempt, so Automatic's none -> low retry is compatible too.
-        let luna = provider == .openAI ? "gpt-6-luna" : (provider == .openRouter ? "openai/gpt-6-luna" : "")
+        let luna = provider == .openAI ? "gpt-6-luna" : ([.openRouter, .vercel, .requesty].contains(provider) ? "openai/gpt-6-luna" : "")
         if !luna.isEmpty, model == luna || model.hasPrefix(luna + "-") {
             let routerReasoning = body["reasoning"] as? [String: Any]
             let reasoningOff = body["reasoning_effort"] as? String == "none"
@@ -292,13 +295,19 @@ public actor RewriteClient {
             _ = try settings.extraRequestParameters()
             let scope = EffortScope(endpoint: endpoint, model: settings.model)
             // Only Automatic can relax a rejected setting. Explicit Off/effort choices are never changed.
-            let canRetryEffort = settings.reasoning == .automatic && ![.openRouter, .zai].contains(settings.provider)
+            let canRetryEffort = settings.reasoning == .automatic && ![.openRouter, .vercel, .zai].contains(settings.provider)
             let deadline = ContinuousClock.now.advanced(by: .seconds(Self.hardTimeout))
             var effort = canRetryEffort ? nextEffort(for: scope) : "none"
+            let anthropic = settings.provider == .anthropic
             while true {
                 try Task.checkCancellation()
                 var body = try settings.requestParameters(automaticEffort: effort)
-                body["messages"] = messages
+                if anthropic {
+                    body["system"] = messages.filter { $0["role"] == "system" }.compactMap { $0["content"] }.joined(separator: "\n\n")
+                    body["messages"] = messages.filter { $0["role"] != "system" }
+                } else {
+                    body["messages"] = messages
+                }
                 var request = URLRequest(url: endpoint)
                 request.httpMethod = "POST"
                 let remaining = ContinuousClock.now.duration(to: deadline).components
@@ -312,24 +321,34 @@ public actor RewriteClient {
                 guard ContinuousClock.now < deadline else { throw RewriteFailure.timeout }
                 guard let response = response as? HTTPURLResponse else { throw RewriteFailure.invalidResponse }
                 if !(200..<300).contains(response.statusCode) {
-                    if canRetryEffort, let currentEffort = effort, [400, 422].contains(response.statusCode), rejectsReasoningEffort(data) {
+                    if canRetryEffort, let currentEffort = effort, [400, 422].contains(response.statusCode),
+                       rejectsReasoningEffort(data, anthropic: anthropic) {
                         rejectedEfforts[scope, default: []].insert(currentEffort)
                         effort = nextEffort(for: scope)
                         continue
                     }
                     throw RewriteFailure.httpStatus(response.statusCode)
                 }
-                let reply = try JSONDecoder().decode(ChatResponse.self, from: data)
-                guard let choice = reply.choices.first, choice.finish_reason == nil || choice.finish_reason == "stop",
-                      choice.message.refusal == nil || choice.message.refusal?.isEmpty == true else {
-                    throw RewriteFailure.invalidResponse
+                let text: String, stopped: Bool
+                if anthropic {
+                    let reply = try JSONDecoder().decode(MessagesResponse.self, from: data)
+                    guard reply.stop_reason == "end_turn" || reply.stop_reason == "stop_sequence" else { throw RewriteFailure.invalidResponse }
+                    text = reply.content.filter { $0.type == "text" }.compactMap(\.text).joined()
+                    stopped = true
+                } else {
+                    let reply = try JSONDecoder().decode(ChatResponse.self, from: data)
+                    guard let choice = reply.choices.first, choice.finish_reason == nil || choice.finish_reason == "stop",
+                          choice.message.refusal == nil || choice.message.refusal?.isEmpty == true else {
+                        throw RewriteFailure.invalidResponse
+                    }
+                    text = choice.message.content ?? ""
+                    stopped = choice.finish_reason == "stop"
                 }
                 // Cerebras omits content entirely when the model intentionally emits
                 // nothing. Accept that only with an explicit normal stop and sound-only
                 // input; missing text must never erase substantive dictation.
-                let text = choice.message.content ?? ""
                 if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    guard choice.finish_reason == "stop",
+                    guard stopped,
                           RewritePrompt.permitsEmptyOutput(for: rawText, preferredSpellings: preferredSpellings) else {
                         throw RewriteFailure.invalidResponse
                     }
@@ -353,14 +372,16 @@ public actor RewriteClient {
         return ["none", "low"].first { !rejected.contains($0) }
     }
 
-    private func rejectsReasoningEffort(_ data: Data) -> Bool {
+    private func rejectsReasoningEffort(_ data: Data, anthropic: Bool) -> Bool {
         struct ErrorResponse: Decodable {
             struct Detail: Decodable { var message: String?; var param: String? }
             var error: Detail
         }
         guard let error = try? JSONDecoder().decode(ErrorResponse.self, from: data).error else { return false }
         let message = error.message?.lowercased() ?? ""
+        // Anthropic names the rejected field, e.g. "thinking.type.disabled" or "output_config.effort".
         return error.param == "reasoning_effort" || message.contains("reasoning_effort") || message.contains("reasoning effort")
+            || anthropic && (message.contains("thinking") || message.contains("effort"))
     }
 
     private func fetch(_ request: URLRequest, deadline: ContinuousClock.Instant) async throws -> (Data, URLResponse) {
@@ -384,6 +405,12 @@ public actor RewriteClient {
             var finish_reason: String?
         }
         var choices: [Choice]
+    }
+
+    private struct MessagesResponse: Decodable {
+        struct Block: Decodable { var type: String; var text: String? }
+        var content: [Block]
+        var stop_reason: String?
     }
 }
 
