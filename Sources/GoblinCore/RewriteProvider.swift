@@ -5,6 +5,9 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
     case cerebras, groq, sambaNova, openAI, anthropic, gemini, mistral, xai, zai, openRouter, requesty, vercel, local, custom
     public var id: String { rawValue }
 
+    /// Named services always use their own address; only Local and Custom take one.
+    public var hasFixedAddress: Bool { self != .local && self != .custom }
+
     public var group: RewriteProviderGroup {
         switch self {
         case .cerebras, .groq, .sambaNova: .fast

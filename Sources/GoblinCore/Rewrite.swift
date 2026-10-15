@@ -83,8 +83,10 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
     public mutating func selectProvider(_ next: RewriteProvider) {
         guard next != provider else { return }
         providerConfigurations[provider.rawValue] = configuration
-        // Custom starts with the current configuration so it is easy to adapt a preset.
-        configuration = providerConfigurations[next.rawValue] ?? (next == .custom ? configuration : next.configuration)
+        // Custom starts with the current configuration and address so it is easy to adapt a preset.
+        var current = configuration
+        if provider.hasFixedAddress { current.baseURL = provider.baseURL }
+        configuration = providerConfigurations[next.rawValue] ?? (next == .custom ? current : next.configuration)
         provider = next
     }
 
@@ -156,7 +158,7 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
     public func modelsEndpoint() throws -> URL { try providerURL(appending: "models") }
 
     private func providerURL(appending leaf: String) throws -> URL {
-        guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+        guard var components = URLComponents(string: (provider.hasFixedAddress ? provider.baseURL : baseURL).trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = components.scheme?.lowercased(), let host = components.host,
               components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
               scheme == "https" || (scheme == "http" && ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host)) else {

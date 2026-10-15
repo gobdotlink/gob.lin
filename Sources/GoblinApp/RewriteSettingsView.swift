@@ -67,9 +67,11 @@ struct RewriteSettingsView: View {
                 }
                 .labelsHidden().fixedSize()
             }
-            LabeledContent("Address") {
-                TextField("Address", text: $settings.baseURL, prompt: Text("https://…"))
-                    .labelsHidden().font(.body.monospaced()).autocorrectionDisabled().frame(width: 300)
+            if !settings.provider.hasFixedAddress {
+                LabeledContent("Address") {
+                    TextField("Address", text: $settings.baseURL, prompt: Text("https://…"))
+                        .labelsHidden().font(.body.monospaced()).autocorrectionDisabled().frame(width: 300)
+                }
             }
             LabeledContent("Model") {
                 HStack(spacing: 8) {
@@ -86,7 +88,7 @@ struct RewriteSettingsView: View {
                                     .textInputCompletion(option.id)
                             }
                         }
-                    Menu("Suggested") {
+                    Menu {
                         if !settings.provider.models.isEmpty {
                             Section("Suggested") {
                                 ForEach(settings.provider.models) { preset in
@@ -104,8 +106,11 @@ struct RewriteSettingsView: View {
                                 }
                             }
                         }
+                    } label: {
+                        Label("Choose Model", systemImage: "chevron.down").labelStyle(.iconOnly)
                     }
-                    .fixedSize()
+                    .menuIndicator(.hidden).fixedSize()
+                    .help("Suggested models, then the models \(modelSourceName) offers this key")
                     .disabled(settings.provider.models.isEmpty && listedModels.isEmpty)
                     Button { refreshes += 1 } label: {
                         Label("Refresh Models", systemImage: "arrow.clockwise").labelStyle(.iconOnly)
