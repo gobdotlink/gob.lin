@@ -91,7 +91,8 @@ private struct OverlayBubble: View {
             .frame(width: compact ? nil : DictationOverlay.bubbleWidth, height: compact ? 42 : nil, alignment: .leading)
             .fixedSize(horizontal: compact, vertical: true)
             .background {
-                shape.fill(GoblinBrand.bubble)
+                shape.fill(.ultraThinMaterial)
+                    .overlay(shape.fill(GoblinBrand.bubble.opacity(0.9)))
                     .overlay(shape.strokeBorder(borderColor, lineWidth: 1))
                     .shadow(color: glow, radius: 16)
                     .shadow(color: .black.opacity(0.3), radius: 14, y: 8)

@@ -1,5 +1,6 @@
 import AppKit
 import GoblinCore
+import GoblinEngines
 import ServiceManagement
 import SwiftUI
 
@@ -32,21 +33,31 @@ struct SettingsView: View {
     var body: some View {
         // The sidebar is always there: no toggle, and no collapsing in narrow windows.
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(SettingsSection.allCases, selection: $model.settingsSelection) { section in
-                Label(section.rawValue, systemImage: section.symbol).tag(section)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(SettingsSection.allCases) { item in
+                        SidebarRow(title: item.rawValue, selected: item == section, action: { model.settingsSelection = item }) {
+                            Image(systemName: item.symbol)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10).padding(.top, 4)
             }
+            .arrowKeySelection(SettingsSection.allCases, selection: $model.settingsSelection)
             .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter(status: model.status) }
             .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 260)
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            // The page title lives in the toolbar row, level with the traffic lights; the toolbar
-            // draws no band of its own, so the case runs to the top of the window.
+            // The title is a toolbar item, so the toolbar stays and the sidebar runs up behind the traffic
+            // lights. The toolbar draws no band, so the case reaches the top of the window.
             Form { sectionContents }
                 .formStyle(PlateFormStyle())
                 .id(section)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .caseBackground()
                 .navigationTitle(section.rawValue)
+                .toolbar(removing: .title)
+                .toolbar { ToolbarTitle(title: section.rawValue) }
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         // Grouped Forms center a ~700pt column in wider windows; capping the width keeps every
@@ -208,6 +219,7 @@ private struct AboutSettingsView: View {
     @ObservedObject var updates: UpdateChecker
     @ObservedObject var history: HistoryModel
     @State private var totalWords: Int?
+    @State private var modelSize: String?
 
     var body: some View {
         Section {
@@ -218,34 +230,53 @@ private struct AboutSettingsView: View {
                     .textSelection(.enabled).padding(.top, 8)
                 GoblinTagline(size: 22, cursor: true).padding(.top, 14)
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 12)
+            .frame(maxWidth: .infinity).padding(.vertical, 8)
         }
+        .containerValue(\.plateless, true)
         Section {
-            Text("Lives in your menu bar. Listens only while you hold the key. Turns speech into text on this Mac, and only sends text out if you turn on Cleanup. Has strong opinions about “um”.")
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .top) {
-                stat(totalWords.map { $0.formatted() } ?? "—", "words yapped")
-                stat(history.counts.total.formatted(), "dictations")
-                stat("0 s", "of audio uploaded, ever")
-            }
-        }
-        Section {
-            LabeledContent("Recognition", value: "Parakeet TDT v3, on this Mac")
-            LabeledContent("Runs on", value: "Core ML")
-            LabeledContent("Languages", value: "25 European languages")
-            LabeledContent("Network", value: "Not needed. Cleanup is opt-in.")
-        } header: { CapsHeader("Specs") }
-        UpdateSettingsView(updates: updates)
-        Section {
-            LabeledContent("Dictations and audio") {
-                Button("Open Data Folder") {
-                    if let folder = try? HistoryStore.defaultDirectory() { NSWorkspace.shared.open(folder) }
+            HStack(alignment: .top, spacing: 12) {
+                Plate(padding: 16) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Lives in your menu bar. Listens only while you hold the key. Turns speech into text on this Mac, and only sends text out if you turn on Cleanup. Has strong opinions about “um”.")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Hairline()
+                        HStack(alignment: .top) {
+                            stat(totalWords.map { $0.formatted() } ?? "—", "words yapped")
+                            stat(history.counts.total.formatted(), "dictations")
+                            stat("0 s", "audio uploaded")
+                        }
+                    }
+                }
+                Plate(padding: 0) {
+                    VStack(spacing: 0) {
+                        spec("Recognition", "Parakeet TDT v3, on this Mac")
+                        Hairline().padding(.horizontal, 16)
+                        spec("Runs on", "Core ML")
+                        Hairline().padding(.horizontal, 16)
+                        spec("Model size", modelSize ?? "—")
+                        Hairline().padding(.horizontal, 16)
+                        spec("Languages", "25 European languages")
+                        Hairline().padding(.horizontal, 16)
+                        spec("Network", "Not needed. Cleanup is opt-in.")
+                    }
                 }
             }
-            LabeledContent("Logs") {
-                Button("Open Console") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")) }
+        }
+        .containerValue(\.plateless, true)
+        Section {
+            HStack(spacing: 8) {
+                Button("Check for Updates…") { updates.check() }.disabled(updates.isBusy)
+                Button("Licences") { open("Third-party-notices.md") }
+                Button("Data Folder", systemImage: "folder") {
+                    if let folder = try? HistoryStore.defaultDirectory() { NSWorkspace.shared.open(folder) }
+                }
+                Spacer()
+                Text("Apache 2.0 · fonts under OFL 1.1").font(.caption).foregroundStyle(.secondary)
             }
-        } header: { CapsHeader("Data") }
+            .padding(.top, 2)
+        }
+        .containerValue(\.plateless, true)
+        UpdateSettingsView(updates: updates)
         Section {
             if let directory = GoblinBrand.assetDirectory {
                 licence("Project licence", "Apache License 2.0", directory.appendingPathComponent("Apache-LICENSE.txt"))
@@ -255,15 +286,47 @@ private struct AboutSettingsView: View {
             } else {
                 Text("Apache License 2.0 · Workbench and VT323: SIL Open Font License 1.1")
             }
-        } header: { CapsHeader("Licences") }
+            LabeledContent("Logs") {
+                Button("Open Console") { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")) }
+            }
+        } header: { CapsHeader("Licences and logs") }
         .task(id: history.revision) {
             totalWords = try? await history.store?.insights().totalWords
         }
+        .task { modelSize = await Self.modelSize() }
+    }
+
+    private func open(_ asset: String) {
+        if let url = GoblinBrand.assetDirectory?.appendingPathComponent(asset) { NSWorkspace.shared.open(url) }
+    }
+
+    private func spec(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).foregroundStyle(.secondary).frame(width: 96, alignment: .leading)
+            Text(value).monospacedDigit().fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 12.5))
+        .padding(.horizontal, 16).padding(.vertical, 9)
+    }
+
+    /// The downloaded model's size on disk, measured rather than quoted.
+    private static func modelSize() async -> String? {
+        await Task.detached(priority: .utility) { measure(ParakeetSpeechEngine.defaultModelDirectory) }.value
+    }
+
+    nonisolated private static func measure(_ directory: URL) -> String? {
+        guard let files = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]) else { return nil }
+        var bytes: Int64 = 0
+        while let file = files.nextObject() as? URL {
+            bytes += Int64((try? file.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
+        }
+        return bytes > 0 ? "≈ " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : nil
     }
 
     private func stat(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.title2.weight(.semibold)).monospacedDigit()
+            Text(value).font(.title3.weight(.semibold)).monospacedDigit()
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

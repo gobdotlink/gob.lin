@@ -10,7 +10,8 @@ struct AppStatus {
 
 extension AppModel {
     var status: AppStatus {
-        let model = speechModels.selectedModel.name
+        // "Parakeet v3" fits the sidebar foot; the full name is on the Model page.
+        let model = speechModels.selectedModel.name.replacingOccurrences(of: " TDT", with: "")
         if diagnostics.hasWarning {
             let count = diagnostics.warnings.count
             return AppStatus(light: .waiting, title: "Needs attention", detail: count == 1 ? "1 thing" : "\(count) things")
@@ -32,8 +33,10 @@ extension AppModel {
         case .rewrite: ("Open Cleanup Settings", { [weak self] in self?.openSettings(.cleanup) })
         case .hotkeys: ("Open General Settings", { [weak self] in self?.openSettings(.general) })
         case .history: ("Open History", { [weak self] in self?.openHistory() })
+        // Their copy says the dictation is waiting in History.
+        case .insertion, .trimming: ("Open History", { [weak self] in self?.openHistory(.entries(.withWarnings)) })
         case .dictionary: ("Open Dictionary", { [weak self] in self?.openSettings(.dictionary) })
-        case .secureInput, .trimming, .insertion, .settings, .application: nil
+        case .secureInput, .settings, .application: nil
         }
     }
 

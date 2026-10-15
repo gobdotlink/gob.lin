@@ -176,6 +176,34 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 
+    /// How far the current recording has played, 0 to 1.
+    var playbackProgress: Double {
+        guard let player, player.duration > 0 else { return 0 }
+        return player.currentTime / player.duration
+    }
+
+    /// Loudness of the saved recording in even slices, 0 to 1, for the detail pane's waveform.
+    func waveform(for entry: HistoryEntry, bars: Int = 72) async -> [Float] {
+        guard entry.audioFilename != nil, let url = try? await store?.audioFileURL(for: entry.id) else { return [] }
+        return await Task.detached(priority: .utility) { Self.peaks(url: url, bars: bars) }.value
+    }
+
+    nonisolated static func peaks(url: URL, bars: Int) -> [Float] {
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(min(file.length, 48_000 * 600))),
+              (try? file.read(into: buffer)) != nil, let samples = buffer.floatChannelData?[0] else { return [] }
+        let count = Int(buffer.frameLength), slice = max(1, count / bars)
+        var levels = stride(from: 0, to: count, by: slice).prefix(bars).map { start -> Float in
+            let end = min(count, start + slice)
+            var sum: Float = 0
+            for index in start..<end { sum += samples[index] * samples[index] }
+            return (sum / Float(end - start)).squareRoot()
+        }
+        let loudest = levels.max() ?? 0
+        if loudest > 0 { levels = levels.map { $0 / loudest } }
+        return levels
+    }
+
     func stopAudio() {
         player?.stop()
         player = nil

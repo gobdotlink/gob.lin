@@ -50,12 +50,15 @@ struct StatusRow<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            StatusLight(state: state)
-            text.font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            // Light and words read as one; the trailing control stays its own element.
+            HStack(spacing: 9) {
+                StatusLight(state: state)
+                text.font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
             trailing.font(.callout).foregroundStyle(.secondary)
         }
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -198,6 +201,9 @@ struct PlateFormStyle: FormStyle {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(sections: configuration.content) { section in
+                    if section.containerValues.plateless {
+                        section.content.frame(maxWidth: .infinity).padding(.top, 14)
+                    } else {
                     if !section.header.isEmpty {
                         section.header
                             .font(.system(size: 10, weight: .semibold)).tracking(0.85).textCase(.uppercase)
@@ -210,8 +216,9 @@ struct PlateFormStyle: FormStyle {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                                 if index > 0 { Hairline().padding(.horizontal, 14) }
-                                row.frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                row.padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                                    .padding(.horizontal, 14)
                             }
                         }
                         .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -222,6 +229,7 @@ struct PlateFormStyle: FormStyle {
                         section.footer.font(.system(size: 11.5)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14).padding(.top, 7)
+                    }
                     }
                 }
             }
@@ -296,5 +304,76 @@ struct RowDisclosureStyle: DisclosureGroupStyle {
             .accessibilityAddTraits(configuration.isExpanded ? [.isSelected] : [])
             if configuration.isExpanded { configuration.content }
         }
+    }
+}
+
+extension ContainerValues {
+    /// A Settings section drawn straight on the case, without a plate (About's hero and side-by-side plates).
+    @Entry var plateless: Bool = false
+}
+
+/// A sidebar row: a neutral grey fill when selected, with the glyph in moss. A List's selection is
+/// always the system accent, so the sidebars draw their own rows.
+struct SidebarRow<Icon: View, Trailing: View>: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+    @ViewBuilder var icon: Icon
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                icon.frame(width: 18).foregroundStyle(selected ? GoblinBrand.mossText : .secondary)
+                Text(title).fontWeight(selected ? .medium : .regular).lineLimit(1)
+                Spacer(minLength: 4)
+                trailing.foregroundStyle(.secondary).monospacedDigit()
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 9).frame(height: 28)
+            .background(selected ? AnyShapeStyle(Color.primary.opacity(0.08)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+extension SidebarRow where Trailing == EmptyView {
+    init(title: String, selected: Bool, action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
+        self.init(title: title, selected: selected, action: action, icon: icon) { EmptyView() }
+    }
+}
+
+/// A toolbar title level with the traffic lights, in the size the mockups use, with an optional grey line under it.
+struct ToolbarTitle: ToolbarContent {
+    let title: String
+    var subtitle: String?
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.system(size: 15, weight: .semibold))
+                if let subtitle { Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit() }
+            }
+            .padding(.leading, 6)
+        }
+        .sharedBackgroundVisibility(.hidden)
+    }
+}
+
+/// Moves a selection through an ordered list with the arrow keys.
+extension View {
+    func arrowKeySelection<Item: Equatable>(_ items: [Item], selection: Binding<Item?>) -> some View {
+        focusable().focusEffectDisabled()
+            .onKeyPress(.downArrow) { step(items, selection, by: 1) }
+            .onKeyPress(.upArrow) { step(items, selection, by: -1) }
+    }
+
+    private func step<Item: Equatable>(_ items: [Item], _ selection: Binding<Item?>, by delta: Int) -> KeyPress.Result {
+        guard !items.isEmpty else { return .ignored }
+        let index = selection.wrappedValue.flatMap { items.firstIndex(of: $0) } ?? (delta > 0 ? -1 : items.count)
+        selection.wrappedValue = items[min(items.count - 1, max(0, index + delta))]
+        return .handled
     }
 }

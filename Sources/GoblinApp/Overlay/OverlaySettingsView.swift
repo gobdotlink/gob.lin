@@ -7,12 +7,14 @@ struct OverlaySettingsView: View {
 
     var body: some View {
         Section {
-            Picker("Corner", selection: $position) {
-                Text("Bottom right, above the Dock").tag(OverlayPosition.bottom.rawValue)
-                Text("Top right, below the menu bar").tag(OverlayPosition.top.rawValue)
+            LabeledContent("Corner") {
+                Picker("Corner", selection: $position) {
+                    Text("Bottom right").tag(OverlayPosition.bottom.rawValue)
+                    Text("Top right").tag(OverlayPosition.top.rawValue)
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize().tint(GoblinBrand.moss)
             }
-            .pickerStyle(.radioGroup)
-            StatusRow(.ready, Text("If your cursor is in that corner, I use the left side instead.")) {
+            StatusRow(.ready, Text("Bottom right sits above the Dock; top right sits below the menu bar. If your cursor is in that corner, I use the left side instead.")) {
                 Button("Preview") {
                     overlay.position = OverlayPosition(rawValue: position) ?? .bottom
                     let session = overlay.begin { overlay.hide() }

@@ -34,7 +34,9 @@ struct OnboardingView: View {
         }
         .padding(.top, step == .hired ? 40 : 54).padding(.horizontal, 44).padding(.bottom, 26)
         .frame(width: 660, height: 560, alignment: .topLeading)
-        .background(GoblinBrand.plate)
+        // The title bar is transparent; measure from the window's top edge, as the mockup does.
+        .ignoresSafeArea()
+        .caseBackground()
         .onChange(of: step, initial: true) { _, step in listen(on: step) }
         .onChange(of: hotkeys.recording) { _, recording in if recording != nil, step == .talkKey { keyChecked = true } }
         .onChange(of: permissions.snapshot.ready) { _, ready in if ready { waitingFor = nil } }
@@ -65,7 +67,8 @@ struct OnboardingView: View {
 
     private func stepLabel(_ title: String, _ value: Step) -> some View {
         HStack(spacing: 7) {
-            StatusLight(state: value.rawValue < step.rawValue ? .ready : value == step ? .waiting : .off)
+            StatusLight(state: value.rawValue < step.rawValue || (value == .permissions && permissions.snapshot.ready) ? .ready
+                        : value == step ? .waiting : .off)
             Text(title).fontWeight(value == step ? .semibold : .regular).foregroundStyle(value == step ? .primary : .secondary)
         }
     }
@@ -97,7 +100,7 @@ struct OnboardingView: View {
             Plate(padding: 4) {
                 VStack(spacing: 0) {
                     permissionRow(.microphone, symbol: "mic", title: "Microphone", detail: "Hears you only while the talk key is down.")
-                    Divider().padding(.leading, 72)
+                    Divider().padding(.leading, 110)
                     permissionRow(.accessibility, symbol: "accessibility", title: "Accessibility", detail: "Puts your words wherever the cursor is, and notices the talk key.")
                 }
             }
@@ -140,8 +143,11 @@ struct OnboardingView: View {
                 Text(granted ? "ON" : waiting ? "WAIT" : "OFF").font(.system(size: 9, weight: .semibold)).tracking(0.7).foregroundStyle(.secondary)
             }
             .frame(width: 40)
+            Image(systemName: symbol).font(.system(size: 15)).foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Label(title, systemImage: symbol).font(.system(size: 13, weight: .semibold)).labelStyle(.titleAndIcon)
+                Text(title).font(.system(size: 13, weight: .semibold))
                 Text(detail).font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if waiting {
                     Text("Waiting for System Settings. Flip gob.lin on, then come back. I'll notice.")

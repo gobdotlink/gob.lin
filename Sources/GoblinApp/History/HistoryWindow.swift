@@ -34,6 +34,8 @@ struct HistoryWindow: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .caseBackground()
             .navigationTitle(title)
+            .toolbar(removing: .title)
+            .toolbar { ToolbarTitle(title: title, subtitle: subtitle) }
             .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         .searchable(text: $history.searchText, placement: .toolbar, prompt: "Search dictations")
@@ -80,6 +82,20 @@ struct HistoryWindow: View {
         }
     }
 
+    private var subtitle: String {
+        let counts = history.counts
+        func dictations(_ count: Int) -> String { "\(count.formatted()) \(count == 1 ? "dictation" : "dictations")" }
+        switch model.historyScope {
+        case .insights: return "Counted on this Mac"
+        case .entries(.all):
+            let minutes = Int((counts.totalSeconds / 60).rounded())
+            return minutes > 0 ? "\(dictations(counts.total)) · \(minutes.formatted()) min of talking" : dictations(counts.total)
+        case .entries(.starred): return dictations(counts.starred)
+        case .entries(.withWarnings): return dictations(counts.withWarnings)
+        case .entries(.application(let name)): return dictations(counts.applications.first { $0.name == name }?.count ?? 0)
+        }
+    }
+
     private struct Query: Equatable {
         var search: String
         var filter: HistoryFilter
@@ -88,28 +104,28 @@ struct HistoryWindow: View {
     // MARK: Sidebar
 
     private var sidebar: some View {
-        List(selection: Binding<HistoryScope?>(get: { model.historyScope }, set: { if let scope = $0 { model.historyScope = scope } })) {
-            Label("Insights", systemImage: "chart.bar.xaxis").tag(HistoryScope.insights)
-            Section {
-                counted("All Dictations", "clock", history.counts.total).tag(HistoryScope.all)
-                counted("Starred", "star", history.counts.starred).tag(HistoryScope.entries(.starred))
-                counted("Warnings", "exclamationmark.triangle", history.counts.withWarnings).tag(HistoryScope.entries(.withWarnings))
-            }
-            if !history.counts.applications.isEmpty {
-                Section("Apps") {
+        let scopes: [HistoryScope] = [.insights, .all, .entries(.starred), .entries(.withWarnings)]
+            + history.counts.applications.map { .entries(.application($0.name)) }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 1) {
+                row("Insights", .insights) { Image(systemName: "chart.bar.xaxis") }
+                Spacer().frame(height: 10)
+                row("All Dictations", .all, count: history.counts.total) { Image(systemName: "clock") }
+                row("Starred", .entries(.starred), count: history.counts.starred) { Image(systemName: "star") }
+                row("Warnings", .entries(.withWarnings), count: history.counts.withWarnings) { Image(systemName: "exclamationmark.triangle") }
+                if !history.counts.applications.isEmpty {
+                    Text("Apps").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .padding(.leading, 9).padding(.top, 14).padding(.bottom, 4)
                     ForEach(history.counts.applications) { app in
-                        HStack(spacing: 8) {
+                        row(app.name, .entries(.application(app.name)), count: app.count) {
                             AppIcon(bundleIdentifier: app.bundleIdentifier, size: 18)
-                            Text(app.name).lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(app.count.formatted()).foregroundStyle(.secondary).monospacedDigit()
                         }
-                        .tag(HistoryScope.entries(.application(app.name)))
                     }
                 }
             }
+            .padding(.horizontal, 10).padding(.top, 4)
         }
-        .tint(GoblinBrand.moss)
+        .arrowKeySelection(scopes, selection: Binding(get: { model.historyScope }, set: { if let scope = $0 { model.historyScope = scope } }))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let weekWords, weekWords > 0 {
                 // ponytail: 40 words a minute is a typical typing speed; make it a setting if people ask.
@@ -123,11 +139,9 @@ struct HistoryWindow: View {
         }
     }
 
-    private func counted(_ title: String, _ symbol: String, _ count: Int) -> some View {
-        HStack {
-            Label(title, systemImage: symbol)
-            Spacer(minLength: 4)
-            Text(count.formatted()).foregroundStyle(.secondary).monospacedDigit()
+    private func row<Icon: View>(_ title: String, _ scope: HistoryScope, count: Int? = nil, @ViewBuilder icon: () -> Icon) -> some View {
+        SidebarRow(title: title, selected: model.historyScope == scope, action: { model.historyScope = scope }, icon: icon) {
+            if let count { Text(count.formatted()) }
         }
     }
 
@@ -145,10 +159,12 @@ struct HistoryWindow: View {
                     ContentUnavailableView("Nothing here yet", systemImage: "tray")
                 }
             } else {
-                HSplitView {
-                    entryList.frame(minWidth: 260, idealWidth: 320, maxWidth: 400, maxHeight: .infinity)
+                // A fixed list column, so switching lists never changes its width.
+                HStack(spacing: 0) {
+                    entryList.frame(width: 330)
+                    Rectangle().fill(.primary.opacity(0.1)).frame(width: 1)
                     Group {
-                        if let entry = selectedEntry { EntryDetail(entry: entry, history: history, copy: copy) }
+                        if let entry = selectedEntry { EntryDetail(entry: entry, history: history).id(entry.id) }
                         else { ContentUnavailableView("Pick a dictation", systemImage: "text.alignleft") }
                     }
                     .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
@@ -186,27 +202,39 @@ struct HistoryWindow: View {
         }
     }
 
+    /// The selected row is a solid moss fill with white text, like a native list in an accent colour.
     private var entryList: some View {
-        List(selection: $selectedID) {
-            ForEach(dayGroups, id: \.day) { group in
-                Section(group.title) {
-                    ForEach(group.entries) { EntryRow(entry: $0).tag($0.id) }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(dayGroups, id: \.day) { group in
+                        Text(group.title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+                        ForEach(group.entries) { entry in
+                            EntryRow(entry: entry, selected: entry.id == selectedID)
+                                .id(entry.id)
+                                .contentShape(Rectangle())
+                                .onTapGesture { selectedID = entry.id }
+                                .contextMenu {
+                                    Button("Copy") { copy(entry.finalText) }
+                                    Button(entry.starred ? "Unstar" : "Star") { Task { await history.setStarred(!entry.starred, entry: entry) } }
+                                    Button("Re-transcribe") { Task { await history.reprocess(entry, transcribe: true) } }
+                                        .disabled(history.retranscribeAction == nil || entry.audioFilename == nil)
+                                    Divider()
+                                    Button("Delete…", role: .destructive) { deleteCandidate = entry }
+                                }
+                        }
+                    }
+                    if history.hasMore {
+                        Button("Load Older Dictations") { Task { await history.loadMore() } }
+                            .padding(16)
+                    }
                 }
+                .padding(.horizontal, 6).padding(.bottom, 12)
             }
-            if history.hasMore {
-                Button("Load Older Dictations") { Task { await history.loadMore() } }
-            }
-        }
-        .tint(GoblinBrand.moss)
-        .contextMenu(forSelectionType: UUID.self) { ids in
-            if let id = ids.first, let entry = history.entries.first(where: { $0.id == id }) {
-                Button("Copy") { copy(entry.finalText) }
-                Button(entry.starred ? "Unstar" : "Star") { Task { await history.setStarred(!entry.starred, entry: entry) } }
-                Button("Re-transcribe") { Task { await history.reprocess(entry, transcribe: true) } }
-                    .disabled(history.retranscribeAction == nil || entry.audioFilename == nil)
-                Divider()
-                Button("Delete…", role: .destructive) { deleteCandidate = entry }
-            }
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+            .arrowKeySelection(history.entries.map(\.id), selection: $selectedID)
+            .onChange(of: selectedID) { _, id in if let id { proxy.scrollTo(id) } }
         }
     }
 
@@ -231,6 +259,7 @@ struct HistoryWindow: View {
 
 private struct EntryRow: View {
     let entry: HistoryEntry
+    var selected = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -252,15 +281,22 @@ private struct EntryRow: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 9).padding(.horizontal, 10)
+        .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .environment(\.colorScheme, selected ? .dark : environmentScheme)
+        .background(selected ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
+
+    @Environment(\.colorScheme) private var environmentScheme
 }
 
 private struct EntryDetail: View {
     let entry: HistoryEntry
     @ObservedObject var history: HistoryModel
-    let copy: (String) -> Void
+    @State private var showRaw = true
+    @State private var peaks: [Float] = []
 
     var body: some View {
         ScrollView {
@@ -280,25 +316,10 @@ private struct EntryDetail: View {
                     .font(.system(size: 17)).lineSpacing(3).textSelection(.enabled)
                     .foregroundStyle(entry.finalText.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 16)
-                Button { Task { await history.play(entry) } } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: history.playingEntryID == entry.id ? "stop.fill" : "play.fill")
-                            .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 28, height: 28).background(GoblinBrand.moss, in: Circle())
-                        Text(entry.audioFilename == nil ? "No recording kept" : history.playingEntryID == entry.id ? "Playing the recording…" : "Play the recording")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(Duration.seconds(entry.audioDuration.rounded()).formatted(.time(pattern: .minuteSecond)))
-                            .foregroundStyle(.secondary).monospacedDigit()
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).disabled(entry.audioFilename == nil)
-                .accessibilityLabel(history.playingEntryID == entry.id ? "Stop audio" : "Play audio")
-                .padding(.top, 14)
+                playback.padding(.top, 14)
                 facts.padding(.top, 18)
                 if entry.latencies.processingMilliseconds > 0 { latency.padding(.top, 18) }
-                DisclosureGroup("What you said") {
+                DisclosureGroup("What you said", isExpanded: $showRaw) {
                     Group {
                         if entry.rawText != entry.finalText, !entry.rawText.isEmpty { InlineDiff(from: entry.rawText, to: entry.finalText) }
                         else { Text(entry.rawText.isEmpty ? "No text" : entry.rawText) }
@@ -326,9 +347,48 @@ private struct EntryDetail: View {
             Button("Rewrite", systemImage: "wand.and.stars") { Task { await history.reprocess(entry, transcribe: false) } }
                 .disabled(history.rewriteAction == nil)
                 .help(history.rewriteAction == nil ? "Turn on Cleanup to rewrite dictations." : "Save a cleaned-up copy as a new dictation. This one stays.")
-            Button("Copy", systemImage: "doc.on.doc") { copy(entry.finalText) }
         }
         .fixedSize()
+    }
+
+    /// Play button, the recording's waveform filling as it plays, and the time.
+    private var playback: some View {
+        let playing = history.playingEntryID == entry.id
+        return HStack(spacing: 12) {
+            Button { Task { await history.play(entry) } } label: {
+                Image(systemName: playing ? "stop.fill" : "play.fill")
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 28, height: 28).background(GoblinBrand.moss, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain).disabled(entry.audioFilename == nil)
+            .accessibilityLabel(playing ? "Stop audio" : "Play audio")
+            TimelineView(.periodic(from: .now, by: playing ? 0.05 : 60)) { _ in
+                let progress = playing ? history.playbackProgress : 0
+                HStack(spacing: 0) {
+                    if peaks.isEmpty {
+                        Text(entry.audioFilename == nil ? "No recording kept" : "Play the recording").foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                    } else {
+                        ForEach(Array(peaks.enumerated()), id: \.offset) { index, peak in
+                            Capsule().fill(Double(index) / Double(peaks.count) < progress ? AnyShapeStyle(GoblinBrand.mossText) : AnyShapeStyle(.tertiary))
+                                .frame(width: 2, height: max(3, CGFloat(peak) * 26))
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .frame(height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture { if entry.audioFilename != nil { Task { await history.play(entry) } } }
+                Text("\(time(playing ? history.playbackProgress * entry.audioDuration : 0)) / \(time(entry.audioDuration))")
+                    .font(.callout).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+            }
+        }
+        .task { peaks = await history.waveform(for: entry) }
+    }
+
+    private func time(_ seconds: Double) -> String {
+        Duration.seconds(seconds.rounded()).formatted(.time(pattern: .minuteSecond))
     }
 
     private var seconds: String { entry.audioDuration.formatted(.number.precision(.fractionLength(0))) }

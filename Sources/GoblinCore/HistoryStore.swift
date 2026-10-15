@@ -18,9 +18,11 @@ public struct HistoryCounts: Sendable, Equatable {
     public var total = 0
     public var starred = 0
     public var withWarnings = 0
+    /// Seconds of recorded audio across every entry.
+    public var totalSeconds: Double = 0
     public var applications: [Application] = []
-    public init(total: Int = 0, starred: Int = 0, withWarnings: Int = 0, applications: [Application] = []) {
-        self.total = total; self.starred = starred; self.withWarnings = withWarnings; self.applications = applications
+    public init(total: Int = 0, starred: Int = 0, withWarnings: Int = 0, totalSeconds: Double = 0, applications: [Application] = []) {
+        self.total = total; self.starred = starred; self.withWarnings = withWarnings; self.totalSeconds = totalSeconds; self.applications = applications
     }
 }
 
@@ -97,11 +99,12 @@ public actor HistoryStore {
 
     /// Sizes of History's smart lists and per-app lists, busiest app first.
     public func counts() throws -> HistoryCounts {
-        let totals = try database.query("SELECT COUNT(*), COALESCE(SUM(starred), 0), COALESCE(SUM(json_extract(metadata, '$.processingWarning') IS NOT NULL), 0) FROM entries").first ?? []
+        let totals = try database.query("SELECT COUNT(*), COALESCE(SUM(starred), 0), COALESCE(SUM(json_extract(metadata, '$.processingWarning') IS NOT NULL), 0), COALESCE(SUM(json_extract(metadata, '$.audioDuration')), 0) FROM entries").first ?? []
         let number = { (index: Int) in totals.indices.contains(index) ? Int(totals[index] ?? "") ?? 0 : 0 }
         let applications = try database.query("SELECT app_name, MAX(json_extract(metadata, '$.targetBundleIdentifier')), COUNT(*) FROM entries WHERE app_name != '' GROUP BY app_name ORDER BY COUNT(*) DESC, app_name")
             .compactMap { row in row[0].map { HistoryCounts.Application(name: $0, bundleIdentifier: row[1], count: Int(row[2] ?? "") ?? 0) } }
-        return HistoryCounts(total: number(0), starred: number(1), withWarnings: number(2), applications: applications)
+        let seconds = totals.indices.contains(3) ? Double(totals[3] ?? "") ?? 0 : 0
+        return HistoryCounts(total: number(0), starred: number(1), withWarnings: number(2), totalSeconds: seconds, applications: applications)
     }
 
     public func entry(id: UUID) throws -> HistoryEntry {

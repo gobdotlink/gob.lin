@@ -13,6 +13,7 @@ struct MenuPopover: View {
     @State private var levels = Array(repeating: 0.0, count: 28)
     @State private var testing = false
     @State private var hovered: UUID?
+    @FocusState private var searching: Bool
 
     var body: some View {
         VStack(spacing: 8) {
@@ -81,6 +82,7 @@ struct MenuPopover: View {
                     }
                 }
                 .font(.system(size: 12)).foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
             }
             Spacer(minLength: 6)
             Menu {
@@ -153,6 +155,8 @@ struct MenuPopover: View {
                             Spacer(minLength: 0)
                         }
                         .contentShape(Rectangle())
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Microphone, \(deviceName)")
                     }
                     .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
                 }
@@ -208,7 +212,6 @@ struct MenuPopover: View {
     private var cleanup: some View {
         let settings = RewriteSettingsStore.load(defaults: model.defaults)
         let on = settings.enabled && settings.cleanup != .none
-        let detail = !on ? "Off" : settings.cleanup.title.count > 8 ? settings.cleanup.title : "\(settings.cleanup.title) · \(settings.provider.title)"
         return HStack(spacing: 0) {
             Button { toggleCleanup(settings) } label: {
                 circle("wand.and.stars", on: on)
@@ -231,13 +234,18 @@ struct MenuPopover: View {
                 HStack(spacing: 4) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Cleanup").font(.system(size: 13, weight: .semibold))
-                        Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                        ViewThatFits(in: .horizontal) {
+                            Text(on ? "\(settings.cleanup.title) · \(settings.provider.title)" : "Off")
+                            Text(on ? settings.cleanup.title : "Off")
+                        }
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                 }
                 .padding(.trailing, 12).frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
         }
@@ -288,6 +296,7 @@ struct MenuPopover: View {
             .padding(.horizontal, 12).frame(height: 52)
             .moduleBackground(padded: false)
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .accessibilityElement(children: .combine)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
     }
@@ -300,8 +309,10 @@ struct MenuPopover: View {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField(model.history.counts.total > 0 ? "Search \(model.history.counts.total.formatted()) dictations" : "Search dictations", text: $query)
-                    .textFieldStyle(.plain)
+                    .textFieldStyle(.plain).focused($searching)
+                Text("⌘F").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
+            .background { Button("Search") { searching = true }.keyboardShortcut("f").hidden() }
             .padding(.horizontal, 9).frame(height: 30)
             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .padding(.bottom, 4)
@@ -323,7 +334,7 @@ struct MenuPopover: View {
     /// Click a row to open it in History; hover shows copy and star.
     private func recentRow(_ entry: HistoryEntry) -> some View {
         HStack(spacing: 10) {
-            AppIcon(bundleIdentifier: entry.targetBundleIdentifier, size: 20)
+            AppIcon(bundleIdentifier: entry.targetBundleIdentifier, size: 24)
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.finalText.isEmpty ? "Empty dictation" : entry.finalText).lineLimit(1)
                 Text("\(entry.targetApplicationName ?? "Unknown app") · \(entry.createdAt.formatted(.relative(presentation: .named)))")
@@ -351,7 +362,9 @@ struct MenuPopover: View {
         .contentShape(Rectangle())
         .onHover { hovered = $0 ? entry.id : (hovered == entry.id ? nil : hovered) }
         .onTapGesture { close { model.openHistory(.all, focus: entry.id) } }
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction { close { model.openHistory(.all, focus: entry.id) } }
     }
 
     // MARK: Pieces
@@ -427,9 +440,16 @@ private extension View {
     func moduleBackground(attention: Bool = false, padded: Bool = true) -> some View {
         padding(.horizontal, padded ? 12 : 0).padding(.vertical, padded ? 10 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(attention ? AnyShapeStyle(LightState.waiting.color.opacity(0.13)) : AnyShapeStyle(.background.opacity(0.55)),
+            .background(attention ? AnyShapeStyle(LightState.waiting.color.opacity(0.13)) : AnyShapeStyle(PopoverModule.fill),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(attention ? LightState.waiting.color.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 0.5))
     }
+}
+
+private enum PopoverModule {
+    /// Light glass in light mode, a faint lift in dark: modules sit on the panel rather than sinking into it.
+    static let fill = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.075) : NSColor(white: 1, alpha: 0.62)
+    })
 }
