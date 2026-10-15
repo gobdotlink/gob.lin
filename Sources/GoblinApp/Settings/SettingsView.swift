@@ -123,9 +123,9 @@ private struct GeneralSettingsView: View {
     var body: some View {
         Section {
             HStack(spacing: 16) {
-                BigKeyCap(label: keycapLabel, globe: hotkeys.shortcut == .fn, light: keyLight)
+                TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyLight)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(hotkeys.shortcut == .fn ? "fn / Globe" : hotkeys.shortcut.label).font(.system(size: 15, weight: .semibold))
+                    Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
                     Text("Hold to talk, let go to type. Tap once to keep listening hands-free, and tap again to finish.")
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -189,13 +189,6 @@ private struct GeneralSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
     }
 
-    private var keycapLabel: String {
-        switch hotkeys.shortcut {
-        case .fn: "fn"
-        case .rightOption: "⌥"
-        default: hotkeys.shortcut.label
-        }
-    }
 
     private var keyLight: LightState {
         if hotkeys.secureInput || hotkeys.status == "Waiting for permissions" { return .waiting }

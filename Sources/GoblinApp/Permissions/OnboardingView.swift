@@ -176,9 +176,8 @@ struct OnboardingView: View {
             Plate {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 16) {
-                        BigKeyCap(label: hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut == .rightOption ? "⌥" : hotkeys.shortcut.label,
-                                  globe: hotkeys.shortcut == .fn, light: keyChecked ? .ready : .off)
-                        Text(hotkeys.shortcut == .fn ? "fn / Globe" : hotkeys.shortcut.label).font(.system(size: 15, weight: .semibold))
+                        TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyChecked ? .ready : .off)
+                        Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
                         Spacer()
                         ShortcutRecorder(service: hotkeys, showsCurrent: false)
                     }
@@ -206,7 +205,7 @@ struct OnboardingView: View {
 
     // MARK: 3 · First take
 
-    private var shortcutName: String { hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label }
+    private var shortcutName: String { hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.title }
 
     private var firstTakeStep: some View {
         VStack(alignment: .leading, spacing: 0) {
