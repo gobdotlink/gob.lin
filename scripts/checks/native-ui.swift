@@ -176,6 +176,7 @@ final class Driver: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { _ in Driver.menusOpened += 1 }
+        lifecycle.applicationDidFinishLaunching(notification)
         Task { @MainActor in await Driver.run() }
     }
 
@@ -516,6 +517,24 @@ final class Driver: NSObject, NSApplicationDelegate {
         NSApp.windows.first { $0.title == "Welcome to gob.lin" }?.performClose(nil)
         try? await Task.sleep(for: .milliseconds(300))
 
+        // Right-click on the menu-bar icon: closes the popover and opens the shared status menu.
+        _ = await openPopover()
+        if let frame = statusItem()?.frame {
+            let before = menusOpened
+            let point = CGPoint(x: frame.midX, y: frame.midY)
+            CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right)?.post(tap: .cghidEventTap)
+            CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right)?.post(tap: .cghidEventTap)
+            let opened = await untilAX(2) { menusOpened > before }
+            check("right-click opens the status menu", opened != nil)
+            check("right-click closes the popover", await until(2) { window("MenuBarExtra") == nil } != nil)
+            try? await Task.sleep(for: .milliseconds(300))
+            await choose("Settings")
+            let settings = await until(3) { window("settings")?.isKeyWindow == true && model.settingsSelection == .general }
+            check("status menu ▸ Settings… opens Settings", settings != nil)
+            window("settings")?.performClose(nil)
+            _ = await until(2) { window("settings") == nil }
+        } else { check("status item frame", false) }
+
         // 14. Paste Last Dictation into another app: focus returns there first.
         let targetURL = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Native Target.app")
         let targetText = targetURL.deletingLastPathComponent().appendingPathComponent("target-text.txt")
@@ -533,13 +552,23 @@ final class Driver: NSObject, NSApplicationDelegate {
             let pasted = await untilAX(5) { ((try? String(contentsOf: targetText, encoding: .utf8)) ?? "").contains("Probe paste text alpha bravo.") }
             check("Paste Last Dictation lands in the previous app", pasted != nil, "target: \((try? String(contentsOf: targetText, encoding: .utf8)) ?? "none")")
             record("pasteMs", pasted ?? -1)
-            let outcome = await MainActor.run { model.insertion.status }
-            record("insertionStatus", outcome)
-            _ = await until(3) { !model.insertion.hasRecoveryClipboard && !model.insertion.busy }
+            let verified = await until(3) {
+                guard case .success = model.insertion.outcome else { return false }
+                return !model.insertion.hasRecoveryClipboard && !model.insertion.busy
+            }
+            // A focus change during the paste (for example someone using the desktop) leaves it unverified.
+            check("pasted text verified and clipboard restored", verified != nil, model.insertion.status)
             NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == "app.goblin.native-dictation-target" }.forEach { $0.terminate() }
         } else { record("pasteTest", "skipped: target app missing") }
 
-        // Done: write results, then quit through the real termination path.
+        // Done: write results, then quit through the real termination path. Pending saves or a held
+        // clipboard copy make Quit ask first, so record them.
+        if model.insertion.hasRecoveryClipboard {
+            // Otherwise Quit stops to ask about the recovery copy; give the person their clipboard back.
+            model.insertion.restorePreviousClipboard()
+            _ = await until(2) { !model.insertion.hasRecoveryClipboard }
+            record("restoredPreviousClipboardBeforeQuit", true)
+        }
         let summary: [String: Any] = ["failures": failures, "report": report, "log": log]
         try? JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
             .write(to: Probe.results.appendingPathComponent("ui-result.json"))
