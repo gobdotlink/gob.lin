@@ -3,81 +3,67 @@ import GoblinCore
 import SwiftUI
 
 /// The popover behind the menu-bar icon: everything used daily, one click deep.
+/// Each module observes only the models it shows, so a meter tick or a hovered row redraws
+/// that module rather than the whole popover.
 struct MenuPopover: View {
-    @ObservedObject var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @AppStorage("audio.inputDeviceUID") private var deviceUID = ""
-    @AppStorage(DictationTone.preferenceKey) private var toneRaw = DictationTone.formal.rawValue
-    @State private var query = ""
-    @State private var recent: [HistoryEntry] = []
-    @State private var levels = Array(repeating: 0.0, count: 28)
-    @State private var testing = false
-    @State private var hovered: UUID?
+    let model: AppModel
     @State private var height: CGFloat = 0
-    @FocusState private var searching: Bool
 
     var body: some View {
         VStack(spacing: 8) {
-            header
-            ForEach(model.diagnostics.warnings, id: \.area) { problem($0) }
-            if model.insertion.hasRecoveryClipboard {
-                module(attention: true) {
-                    moduleRow(symbol: "doc.on.clipboard", attention: true, title: "Your last dictation is on the clipboard",
-                              detail: "What you'd copied before is kept.") {
-                        Button("Restore Previous Clipboard") { model.insertion.restorePreviousClipboard() }.disabled(model.insertion.busy)
-                    }
-                }
-            }
-            if let version = model.updates.availableVersion {
-                module {
-                    HStack(spacing: 10) {
-                        circle("arrow.down.circle", on: false)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("gob.lin \(version) is ready").font(.system(size: 13, weight: .semibold))
-                            Text("Restarting takes a second.").font(.system(size: 11.5)).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 6)
-                        Button("Restart") { model.updates.install() }
-                            .prominent().disabled(model.updates.isBusy || !model.canInstallUpdate)
-                    }
-                }
-            }
-            microphone
-            HStack(spacing: 8) { cleanup; tone }
-            recents
-            VStack(spacing: 0) {
-                menuItem("Paste Last Dictation", shortcut: "⌥⇧⌘V") { close { model.pasteLastTranscript() } }
-                    .disabled(!model.canPasteLastTranscript)
-                menuItem("Settings…", shortcut: "⌘,") { close { model.openSettings(.general) } }
-            }
-            .padding(.top, 2)
+            PopoverHeader(model: model)
+            PopoverNotices(model: model)
+            PopoverMicrophone(preview: model.audioPreview)
+            HStack(spacing: 8) { PopoverCleanup(model: model); PopoverTone() }
+            PopoverRecents(model: model)
+            PopoverFooter(model: model)
         }
         .padding(8)
         .frame(width: 360)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .background(PopoverWindowFit(height: height))
-        .task(id: RecentQuery(text: query, revision: model.history.revision)) {
-            recent = (try? await model.history.store?.entries(matching: query, limit: 4)) ?? []
-        }
-        .onChange(of: model.audioPreview.level) { _, level in levels = Array((levels + [level]).suffix(28)) }
-        .onDisappear { if testing { stopTest() } }
+    }
+}
+
+private extension DismissAction {
+    /// Closes the popover and runs the action straight away: windows activate gob.lin themselves.
+    func then(_ action: () -> Void) {
+        callAsFunction()
+        action()
+    }
+}
+
+// MARK: Header
+
+private struct PopoverHeader: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject private var diagnostics: DiagnosticsModel
+    @ObservedObject private var speechModels: SpeechModelService
+    @ObservedObject private var hotkeys: HotkeyService
+    @ObservedObject private var permissions: PermissionModel
+    @ObservedObject private var updates: UpdateChecker
+    @Environment(\.dismiss) private var dismiss
+
+    init(model: AppModel) {
+        self.model = model
+        _diagnostics = ObservedObject(wrappedValue: model.diagnostics)
+        _speechModels = ObservedObject(wrappedValue: model.speechModels)
+        _hotkeys = ObservedObject(wrappedValue: model.hotkeys)
+        _permissions = ObservedObject(wrappedValue: model.permissions)
+        _updates = ObservedObject(wrappedValue: model.updates)
     }
 
-    private struct RecentQuery: Equatable { var text: String; var revision: Int }
-
-    // MARK: Header
-
-    private var header: some View {
+    var body: some View {
         let status = model.status
         return HStack(spacing: 10) {
-            PixelSprite(sprite: model.diagnostics.hasWarning ? .side : .shut, scale: 0.5)
+            PixelSprite(sprite: diagnostics.hasWarning ? .side : .shut, scale: 0.5)
             VStack(alignment: .leading, spacing: 5) {
                 GoblinWordmark(size: 16)
                 HStack(spacing: 6) {
                     StatusLight(state: status.light, size: 7)
                     if status.light == .ready, model.mascotState == .idle {
                         Text("Ready · hold")
-                        KeyCap(model.hotkeys.shortcut == .fn ? "fn" : model.hotkeys.shortcut.label, small: true)
+                        KeyCap(hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label, small: true)
                         Text("to talk")
                     } else {
                         Text(model.mascotState == .recording ? "Listening…" : model.mascotState == .transcribing ? "Writing it out…"
@@ -89,12 +75,12 @@ struct MenuPopover: View {
             }
             Spacer(minLength: 6)
             Menu {
-                Button(missingPermissions == 0 ? "Permissions…" : "Permissions… (\(missingPermissions) off)") { close { model.permissions.showOnboarding() } }
-                Button("Diagnostics…") { close { model.openSettings(.diagnostics) } }
-                Button("Copy Diagnostics") { model.diagnostics.copyDiagnostics() }
+                Button(missingPermissions == 0 ? "Permissions…" : "Permissions… (\(missingPermissions) off)") { dismiss.then { permissions.showOnboarding() } }
+                Button("Diagnostics…") { dismiss.then { model.openSettings(.diagnostics) } }
+                Button("Copy Diagnostics") { diagnostics.copyDiagnostics() }
                 Divider()
-                Button("Check for Updates…") { close { model.openSettings(.about); model.updates.check() } }.disabled(model.updates.isBusy)
-                Button("About gob.lin") { close { model.openSettings(.about) } }
+                Button("Check for Updates…") { dismiss.then { model.openSettings(.about); updates.check() } }.disabled(updates.isBusy)
+                Button("About gob.lin") { dismiss.then { model.openSettings(.about) } }
                 Divider()
                 Button("Quit gob.lin") { NSApp.terminate(nil) }.keyboardShortcut("q")
             } label: {
@@ -108,17 +94,59 @@ struct MenuPopover: View {
     }
 
     private var missingPermissions: Int {
-        (model.permissions.snapshot.microphone == .authorized ? 0 : 1) + (model.permissions.snapshot.accessibility ? 0 : 1)
+        (permissions.snapshot.microphone == .authorized ? 0 : 1) + (permissions.snapshot.accessibility ? 0 : 1)
+    }
+}
+
+// MARK: Notices
+
+/// Problems, the clipboard recovery notice and a waiting update: only there when needed.
+private struct PopoverNotices: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject private var diagnostics: DiagnosticsModel
+    @ObservedObject private var insertion: TextInsertionService
+    @ObservedObject private var updates: UpdateChecker
+    @ObservedObject private var history: HistoryModel
+    @Environment(\.dismiss) private var dismiss
+
+    init(model: AppModel) {
+        self.model = model
+        _diagnostics = ObservedObject(wrappedValue: model.diagnostics)
+        _insertion = ObservedObject(wrappedValue: model.insertion)
+        _updates = ObservedObject(wrappedValue: model.updates)
+        // Pending saves block installing an update.
+        _history = ObservedObject(wrappedValue: model.history)
     }
 
-    // MARK: Problems
+    var body: some View {
+        ForEach(diagnostics.warnings, id: \.area) { problem($0) }
+        if insertion.hasRecoveryClipboard {
+            moduleRow(symbol: "doc.on.clipboard", attention: true, title: "Your last dictation is on the clipboard",
+                      detail: "What you'd copied before is kept.") {
+                Button("Restore Previous Clipboard") { insertion.restorePreviousClipboard() }.disabled(insertion.busy)
+            }
+            .moduleBackground(attention: true)
+        }
+        if let version = updates.availableVersion {
+            HStack(spacing: 10) {
+                circle("arrow.down.circle", on: false)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("gob.lin \(version) is ready").font(.system(size: 13, weight: .semibold))
+                    Text("Restarting takes a second.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 6)
+                Button("Restart") { updates.install() }
+                    .prominent().disabled(updates.isBusy || !model.canInstallUpdate)
+            }
+            .moduleBackground()
+        }
+    }
 
     private func problem(_ failure: DiagnosticFailure) -> some View {
-        module(attention: true) {
-            moduleRow(symbol: symbol(for: failure.area), attention: true, title: failure.plainWords.title, detail: failure.plainWords.detail) {
-                if let fix = model.fix(for: failure) { Button(fix.title) { close(fix.action) } }
-            }
+        moduleRow(symbol: symbol(for: failure.area), attention: true, title: failure.plainWords.title, detail: failure.plainWords.detail) {
+            if let fix = model.fix(for: failure) { Button(fix.title) { dismiss.then(fix.action) } }
         }
+        .moduleBackground(attention: true)
     }
 
     private func symbol(for area: DiagnosticArea) -> String {
@@ -135,11 +163,18 @@ struct MenuPopover: View {
         case .trimming, .settings, .application: "exclamationmark.triangle"
         }
     }
+}
 
-    // MARK: Microphone
+// MARK: Microphone
 
-    /// Always the same height: the meter shows flat until the button is held, so the popover never resizes.
-    private var microphone: some View {
+/// Always the same height: the meter shows flat until the button is held, so the popover never resizes.
+private struct PopoverMicrophone: View {
+    @ObservedObject var preview: AudioPreviewModel
+    @AppStorage("audio.inputDeviceUID") private var deviceUID = ""
+    @State private var levels = Array(repeating: 0.0, count: 28)
+    @State private var testing = false
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 circle("mic", on: testing)
@@ -148,7 +183,7 @@ struct MenuPopover: View {
                     Menu {
                         Picker("Microphone", selection: $deviceUID) {
                             Text("Follow System Default").tag("")
-                            ForEach(model.audioPreview.devices) { Text($0.name).tag($0.uid) }
+                            ForEach(preview.devices) { Text($0.name).tag($0.uid) }
                         }
                         .pickerStyle(.inline).labelsHidden()
                     } label: {
@@ -186,33 +221,41 @@ struct MenuPopover: View {
             }
             .frame(height: 26)
             .accessibilityHidden(true)
-            Text(model.audioPreview.error ?? (testing ? "Level only. Nothing is recorded or saved." : "Hold the button to check your mic. Nothing is saved."))
+            Text(preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : "Hold the button to check your mic. Nothing is saved."))
                 .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
         }
         .moduleBackground()
-        .onAppear { model.audioPreview.refresh() }
+        .onAppear { preview.refresh() }
+        .onChange(of: preview.level) { _, level in levels = Array((levels + [level]).suffix(28)) }
+        .onDisappear { if testing { stopTest() } }
     }
 
     private var deviceName: String {
-        model.audioPreview.devices.first { $0.uid == deviceUID }?.name ?? (deviceUID.isEmpty ? "System Default" : "Saved microphone")
+        preview.devices.first { $0.uid == deviceUID }?.name ?? (deviceUID.isEmpty ? "System Default" : "Saved microphone")
     }
 
     private func startTest() {
         guard !testing else { return }
         testing = true
         levels = Array(repeating: 0, count: levels.count)
-        model.audioPreview.start(uid: deviceUID)
+        preview.start(uid: deviceUID)
     }
 
     private func stopTest() {
         testing = false
-        model.audioPreview.stop()
+        preview.stop()
     }
+}
 
-    // MARK: Cleanup and tone
+// MARK: Cleanup and tone
 
-    /// The circle switches cleanup on or off; the rest of the tile opens the level menu.
-    private var cleanup: some View {
+/// The circle switches cleanup on or off; the rest of the tile opens the level menu.
+private struct PopoverCleanup: View {
+    /// Observed for refreshConfiguration, which announces saved cleanup settings.
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
         let settings = RewriteSettingsStore.load(defaults: model.defaults)
         let on = settings.enabled && settings.cleanup != .none
         return HStack(spacing: 0) {
@@ -232,7 +275,7 @@ struct MenuPopover: View {
                 }
                 .pickerStyle(.inline).labelsHidden()
                 Divider()
-                Button("Cleanup Settings…") { close { model.openSettings(.cleanup) } }
+                Button("Cleanup Settings…") { dismiss.then { model.openSettings(.cleanup) } }
             } label: {
                 HStack(spacing: 4) {
                     VStack(alignment: .leading, spacing: 1) {
@@ -263,7 +306,7 @@ struct MenuPopover: View {
         let local = ["localhost", "127.0.0.1", "[::1]", "::1"].contains((try? settings.endpoint())?.host ?? "")
         let hasKey = local || (model.servicesEnabled && (try? RewriteKeyStore.load(for: settings, defaults: model.defaults))?.isEmpty == false)
         guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, hasKey else {
-            close { model.openSettings(.cleanup) }
+            dismiss.then { model.openSettings(.cleanup) }
             return
         }
         changed.enabled = true
@@ -277,9 +320,13 @@ struct MenuPopover: View {
             model.reloadRewriteCredentials()
         } catch { model.showFailure(.settingsSaveFailed) }
     }
+}
 
-    /// The whole tile opens the tone menu.
-    private var tone: some View {
+/// The whole tile opens the tone menu.
+private struct PopoverTone: View {
+    @AppStorage(DictationTone.preferenceKey) private var toneRaw = DictationTone.formal.rawValue
+
+    var body: some View {
         let selected = DictationTone(rawValue: toneRaw) ?? .formal
         return Menu {
             Picker("Tone", selection: $toneRaw) {
@@ -303,15 +350,31 @@ struct MenuPopover: View {
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
     }
+}
 
-    // MARK: Recents
+// MARK: Recents
 
-    /// Four rows' worth of space whatever the search finds, so typing never resizes the popover.
-    private var recents: some View {
+/// Four rows' worth of space whatever the search finds, so typing never resizes the popover.
+private struct PopoverRecents: View {
+    let model: AppModel
+    @ObservedObject private var history: HistoryModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var recent: [HistoryEntry] = []
+    @FocusState private var searching: Bool
+
+    init(model: AppModel) {
+        self.model = model
+        _history = ObservedObject(wrappedValue: model.history)
+    }
+
+    private struct RecentQuery: Equatable { var text: String; var revision: Int }
+
+    var body: some View {
         VStack(spacing: 2) {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(model.history.counts.total > 0 ? "Search \(model.history.counts.total.formatted()) dictations" : "Search dictations", text: $query)
+                TextField(history.counts.total > 0 ? "Search \(history.counts.total.formatted()) dictations" : "Search dictations", text: $query)
                     .textFieldStyle(.plain).focused($searching)
                 Text("⌘F").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
@@ -325,17 +388,33 @@ struct MenuPopover: View {
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).padding(.horizontal, 4)
                 }
-                ForEach(recent) { entry in recentRow(entry) }
+                ForEach(recent) { entry in
+                    RecentRow(entry: entry, open: { dismiss.then { model.openHistory(.all, focus: entry.id) } }, star: {
+                        Task { await history.setStarred(!entry.starred, entry: entry); await reload() }
+                    })
+                }
             }
             .frame(height: 4 * 42, alignment: .top)
-            menuItem("All History", chevron: true) { close { model.openHistory() } }
-            menuItem("Insights", chevron: true) { close { model.openHistory(.insights) } }
+            menuItem("All History", chevron: true) { dismiss.then { model.openHistory() } }
+            menuItem("Insights", chevron: true) { dismiss.then { model.openHistory(.insights) } }
         }
         .moduleBackground()
+        .task(id: RecentQuery(text: query, revision: history.revision)) { await reload() }
     }
 
-    /// Click a row to open it in History; hover shows copy and star.
-    private func recentRow(_ entry: HistoryEntry) -> some View {
+    private func reload() async {
+        recent = (try? await history.store?.entries(matching: query, limit: 4)) ?? []
+    }
+}
+
+/// Click a row to open it in History; hover shows copy and star.
+private struct RecentRow: View {
+    let entry: HistoryEntry
+    let open: () -> Void
+    let star: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
         HStack(spacing: 10) {
             AppIcon(bundleIdentifier: entry.targetBundleIdentifier, size: 24)
             VStack(alignment: .leading, spacing: 1) {
@@ -344,16 +423,14 @@ struct MenuPopover: View {
                     .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if hovered == entry.id {
+            if hovered {
                 Button("Copy", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(entry.finalText, forType: .string)
                 }
                 .labelStyle(.iconOnly).buttonStyle(.borderless)
-                Button(entry.starred ? "Unstar" : "Star", systemImage: entry.starred ? "star.fill" : "star") {
-                    Task { await model.history.setStarred(!entry.starred, entry: entry); recent = (try? await model.history.store?.entries(matching: query, limit: 4)) ?? [] }
-                }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
+                Button(entry.starred ? "Unstar" : "Star", systemImage: entry.starred ? "star.fill" : "star", action: star)
+                    .labelStyle(.iconOnly).buttonStyle(.borderless)
             } else if entry.starred {
                 Image(systemName: "star.fill").foregroundStyle(GoblinBrand.candle).accessibilityLabel("Starred")
             }
@@ -361,63 +438,77 @@ struct MenuPopover: View {
         .font(.system(size: 13))
         .padding(.vertical, 5).padding(.horizontal, 4)
         .frame(height: 40)
-        .background(hovered == entry.id ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(hovered ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
-        .onHover { hovered = $0 ? entry.id : (hovered == entry.id ? nil : hovered) }
-        .onTapGesture { close { model.openHistory(.all, focus: entry.id) } }
+        .onHover { hovered = $0 }
+        .onTapGesture(perform: open)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { close { model.openHistory(.all, focus: entry.id) } }
+        .accessibilityAction { open() }
     }
+}
 
-    // MARK: Pieces
+// MARK: Footer
 
-    private func module<Content: View>(attention: Bool = false, @ViewBuilder content: () -> Content) -> some View {
-        content().moduleBackground(attention: attention)
-    }
+private struct PopoverFooter: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
 
-    private func moduleRow<Action: View>(symbol: String, attention: Bool, title: String, detail: String,
-                                         @ViewBuilder action: () -> Action) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 14))
-                .foregroundStyle(attention ? LightState.waiting.color : .primary)
-                .frame(width: 30, height: 30)
-                .background(attention ? AnyShapeStyle(LightState.waiting.color.opacity(0.2)) : AnyShapeStyle(.quaternary), in: Circle())
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                action().controlSize(.small).padding(.top, 5)
-            }
+    var body: some View {
+        VStack(spacing: 0) {
+            menuItem("Paste Last Dictation", shortcut: "⌥⇧⌘V", action: paste)
+                .disabled(!model.canPasteLastTranscript)
+            menuItem("Settings…", shortcut: "⌘,") { dismiss.then { model.openSettings(.general) } }
         }
+        .padding(.top, 2)
     }
 
-    private func circle(_ symbol: String, on: Bool) -> some View {
-        Image(systemName: symbol).font(.system(size: 14))
-            .foregroundStyle(on ? .white : .primary)
-            .frame(width: 30, height: 30)
-            .background(on ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.quaternary), in: Circle())
-    }
-
-    private func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                Spacer()
-                if let shortcut { Text(shortcut).foregroundStyle(.tertiary) }
-                if chevron { Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary) }
-            }
-            .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
-        }
-        .buttonStyle(MenuRowStyle())
-    }
-
-    /// Closes the popover and hands focus back to the app the person was in, so a paste lands
-    /// there rather than in gob.lin. New windows activate gob.lin again themselves.
-    private func close(_ action: @escaping () -> Void) {
+    /// Hands focus back to the app the person was in first, so the paste lands there rather than in gob.lin.
+    private func paste() {
         dismiss()
         NSApp.deactivate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { action() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { model.pasteLastTranscript() }
     }
+}
+
+// MARK: Pieces
+
+@MainActor
+private func moduleRow<Action: View>(symbol: String, attention: Bool, title: String, detail: String,
+                                     @ViewBuilder action: () -> Action) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+        Image(systemName: symbol).font(.system(size: 14))
+            .foregroundStyle(attention ? LightState.waiting.color : .primary)
+            .frame(width: 30, height: 30)
+            .background(attention ? AnyShapeStyle(LightState.waiting.color.opacity(0.2)) : AnyShapeStyle(.quaternary), in: Circle())
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            action().controlSize(.small).padding(.top, 5)
+        }
+    }
+}
+
+@MainActor
+private func circle(_ symbol: String, on: Bool) -> some View {
+    Image(systemName: symbol).font(.system(size: 14))
+        .foregroundStyle(on ? .white : .primary)
+        .frame(width: 30, height: 30)
+        .background(on ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.quaternary), in: Circle())
+}
+
+@MainActor
+private func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = false, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+        HStack {
+            Text(title)
+            Spacer()
+            if let shortcut { Text(shortcut).foregroundStyle(.tertiary) }
+            if chevron { Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary) }
+        }
+        .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+    }
+    .buttonStyle(MenuRowStyle())
 }
 
 private struct MenuRowStyle: ButtonStyle {

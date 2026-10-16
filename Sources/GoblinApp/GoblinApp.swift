@@ -46,9 +46,11 @@ struct GoblinApp: App {
 private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    /// Drawn once per state: building it reads the artwork from disk.
+    @MainActor private static var images: [MascotState: NSImage] = [:]
 
     var body: some View {
-        Image(nsImage: GoblinBrand.menuImage(model.mascotState)).renderingMode(.original)
+        Image(nsImage: image).renderingMode(.original)
             .accessibilityLabel("gob.lin " + model.mascotState.rawValue)
             .onAppear {
                 model.openWindow = { id in
@@ -56,5 +58,12 @@ private struct MenuBarLabel: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }
             }
+    }
+
+    private var image: NSImage {
+        if let image = Self.images[model.mascotState] { return image }
+        let image = GoblinBrand.menuImage(model.mascotState)
+        Self.images[model.mascotState] = image
+        return image
     }
 }

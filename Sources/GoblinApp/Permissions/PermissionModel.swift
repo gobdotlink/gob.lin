@@ -44,6 +44,8 @@ final class PermissionModel: ObservableObject {
     var onChange: ((Snapshot, Snapshot) -> Void)?
     var onRevocation: ((Permission) -> Void)?
     var onRetry: (() -> Void)?
+    /// After every poll, changed or not.
+    var onRefresh: (() -> Void)?
     /// The first-run window's content, supplied by the app so it can reach the talk key and History.
     var onboardingContent: (() -> AnyView)?
     private var timer: Timer?
@@ -85,12 +87,14 @@ final class PermissionModel: ObservableObject {
     func refresh() {
         guard monitorSystem else { return }
         updateSnapshot(Self.readSnapshot())
+        onRefresh?()
     }
 
     func updateSnapshot(_ new: Snapshot) {
         let old = snapshot
-        snapshot = new
+        // Polled every second: publishing an unchanged snapshot re-renders every view that shows it.
         guard old != new else { return }
+        snapshot = new
         if old.accessibility && !new.accessibility { revoked(.accessibility) }
         if old.microphone == .authorized && new.microphone != .authorized { revoked(.microphone) }
         if let lastRevoked, new.isGranted(lastRevoked) { self.lastRevoked = nil }

@@ -57,20 +57,30 @@ final class DiagnosticsModel: ObservableObject {
             .info("\(message, privacy: .public)")
     }
 
-    func refresh(permissions: PermissionModel.Snapshot? = nil, secureInput: Bool? = nil, engineStatus: DiagnosticEngineStatus? = nil) {
+    typealias Microphones = (names: [String], defaultName: String?)
+
+    /// Device discovery goes through CoreAudio, which can stall; callers on the main actor fetch it elsewhere.
+    nonisolated static func discoverMicrophones() -> Microphones {
+        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+        return (discovery.devices.map(\.localizedName), AVCaptureDevice.default(for: .audio)?.localizedName)
+    }
+
+    func refresh(permissions: PermissionModel.Snapshot? = nil, secureInput: Bool? = nil, engineStatus: DiagnosticEngineStatus? = nil,
+                 microphones: Microphones? = nil) {
         guard readSystemEnvironment else { return }
         let microphone = permissions?.microphone ?? AVCaptureDevice.authorizationStatus(for: .audio)
         let accessibility = permissions?.accessibility ?? AXIsProcessTrusted()
         let inputMonitoring = permissions?.inputMonitoring ?? CGPreflightListenEventAccess()
-        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+        let microphones = microphones ?? Self.discoverMicrophones()
         let previous = environment
-        environment = DiagnosticEnvironment(microphonePermission: Self.permissionStatus(microphone),
+        let current = DiagnosticEnvironment(microphonePermission: Self.permissionStatus(microphone),
             accessibilityPermission: accessibility ? .granted : .denied,
             inputMonitoringPermission: inputMonitoring ? .granted : .denied,
-            microphoneNames: discovery.devices.map(\.localizedName),
-            defaultMicrophoneName: AVCaptureDevice.default(for: .audio)?.localizedName,
+            microphoneNames: microphones.names,
+            defaultMicrophoneName: microphones.defaultName,
             secureInput: secureInput ?? IsSecureEventInputEnabled(),
             engineStatus: engineStatus ?? environment.engineStatus)
+        if current != previous { environment = current }
         if previous.microphonePermission != environment.microphonePermission || previous.accessibilityPermission != environment.accessibilityPermission || previous.inputMonitoringPermission != environment.inputMonitoringPermission {
             var details = DevelopmentDetails()
             details.microphone = environment.microphonePermission

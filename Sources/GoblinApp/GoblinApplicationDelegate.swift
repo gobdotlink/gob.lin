@@ -25,9 +25,20 @@ final class GoblinApplicationDelegate: NSObject, NSApplicationDelegate {
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
         }
         terminating = true
+        // A microphone stuck inside CoreAudio never finishes shutting down; quit anyway after a few seconds.
+        var replied = false
+        let reply = {
+            guard !replied else { return }
+            replied = true
+            sender.reply(toApplicationShouldTerminate: true)
+        }
         Task { @MainActor in
             await model.shutdown()
-            sender.reply(toApplicationShouldTerminate: true)
+            reply()
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            reply()
         }
         return .terminateLater
     }
