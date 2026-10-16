@@ -54,34 +54,6 @@ public enum AudioInputDevices {
         return AudioInputResolution(requestedUID: uid, device: device)
     }
 
-    static func select(_ device: AudioInputDevice, input: AVAudioInputNode) throws {
-        guard let unit = input.audioUnit else { throw AudioCaptureFailure(.deviceUnavailable) }
-        var id = device.id
-        guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                                   &id, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else {
-            throw AudioCaptureFailure(.deviceUnavailable)
-        }
-    }
-
-    static func matchesRunningStream(_ engine: AVAudioEngine, device: AudioInputDevice, format: AVAudioFormat, inputFormat: AVAudioFormat) -> Bool {
-        let input = engine.inputNode
-        // Hardware and tap channel counts can differ after a device selection. Compare each with its own baseline.
-        let current = input.inputFormat(forBus: 0)
-        guard engine.isRunning, current.sampleRate == inputFormat.sampleRate, current.channelCount == inputFormat.channelCount,
-              input.outputFormat(forBus: 0).isEqual(format), let unit = input.audioUnit else { return false }
-        var id = AudioDeviceID(0)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        guard AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, &size) == noErr,
-              id == device.id else { return false }
-        var alive: UInt32 = 0
-        var address = property(kAudioDevicePropertyDeviceIsAlive)
-        size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &alive) == noErr, alive != 0 else { return false }
-        var running: UInt32 = 0
-        size = UInt32(MemoryLayout<UInt32>.size)
-        return AudioUnitGetProperty(unit, kAudioOutputUnitProperty_IsRunning, kAudioUnitScope_Global, 0, &running, &size) == noErr && running != 0
-    }
-
     public static func loudestChannelRMS(_ buffer: AVAudioPCMBuffer) -> Double {
         guard let channels = buffer.floatChannelData, buffer.frameLength > 0 else { return 0 }
         var loudest = 0.0
@@ -102,7 +74,7 @@ public enum AudioInputDevices {
         return level.isFinite ? max(0, min(1, level)) : 0
     }
 
-    private static func property(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+    fileprivate static func property(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
     }
 
@@ -112,5 +84,134 @@ public enum AudioInputDevices {
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
         return value?.takeRetainedValue() as String?
+    }
+}
+
+/// A HAL input unit opened on one device before it initializes. An engine input node binds the system
+/// default first: with a Bluetooth headset as default, that switches the headset to its call profile and
+/// the engine's own default tracking races a later device change, which once stalled the main thread.
+final class AudioInputUnit: @unchecked Sendable {
+    let device: AudioInputDevice
+    /// The device's current rate and channel count, delivered as non-interleaved Float32.
+    let format: AVAudioFormat
+    private let unit: AudioUnit
+    // Render-thread state between start and stop; touched elsewhere only before start.
+    private let chunk: AVAudioPCMBuffer
+    private let slice: UnsafeMutableAudioBufferListPointer
+    private let target: AVAudioFrameCount
+    private var chunkTime = AudioTimeStamp()
+    private var delivered = false
+    private var processor: CaptureProcessor?
+    private var listeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+    private var started = false
+    private var closed = false
+
+    init(device: AudioInputDevice) throws {
+        var description = AudioComponentDescription(componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_HALOutput,
+                                                    componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+        var instance: AudioComponentInstance?
+        guard let component = AudioComponentFindNext(nil, &description),
+              AudioComponentInstanceNew(component, &instance) == noErr, let unit = instance else { throw AudioCaptureFailure(.deviceUnavailable) }
+        // Enable input and disable output before choosing the device, so an input-only device is accepted.
+        var enable: UInt32 = 1, disable: UInt32 = 0, id = device.id
+        var hardware = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enable, 4) == noErr,
+              AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &disable, 4) == noErr,
+              AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, 4) == noErr,
+              AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1, &hardware, &size) == noErr else {
+            AudioComponentInstanceDispose(unit); throw AudioCaptureFailure(.deviceUnavailable)
+        }
+        // Input cannot change rate inside the unit; keep the hardware rate and every channel.
+        guard hardware.mSampleRate > 0, hardware.mChannelsPerFrame > 0,
+              let layout = AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | hardware.mChannelsPerFrame),
+              case let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: hardware.mSampleRate, interleaved: false, channelLayout: layout),
+              let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(hardware.mSampleRate)),
+              AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, format.streamDescription, size) == noErr else {
+            AudioComponentInstanceDispose(unit); throw AudioCaptureFailure(.invalidFormat)
+        }
+        self.device = device; self.unit = unit; self.format = format; self.chunk = chunk
+        slice = AudioBufferList.allocate(maximumBuffers: Int(format.channelCount))
+        target = AVAudioFrameCount(format.sampleRate / 10)
+        var callback = AURenderCallbackStruct(inputProc: { refCon, flags, time, bus, frames, _ in
+            Unmanaged<AudioInputUnit>.fromOpaque(refCon).takeUnretainedValue().render(flags, time, bus, frames)
+        }, inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
+        guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0,
+                                   &callback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)) == noErr,
+              AudioUnitInitialize(unit) == noErr else { close(); throw AudioCaptureFailure(.startFailed) }
+    }
+
+    deinit { close(); free(slice.unsafeMutablePointer) }
+
+    func start(delivering processor: CaptureProcessor) throws {
+        guard !closed else { throw AudioCaptureFailure(.startFailed) }
+        guard !started else { return }
+        self.processor = processor
+        guard AudioOutputUnitStart(unit) == noErr else { throw AudioCaptureFailure(.startFailed) }
+        started = true
+    }
+
+    /// Still running on the opened device in its opening format.
+    var isHealthy: Bool {
+        guard !closed else { return false }
+        var running: UInt32 = 0, current = AudioDeviceID(0), alive: UInt32 = 0, hardware = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<UInt32>.size), formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        var address = AudioInputDevices.property(kAudioDevicePropertyDeviceIsAlive)
+        return AudioUnitGetProperty(unit, kAudioOutputUnitProperty_IsRunning, kAudioUnitScope_Global, 0, &running, &size) == noErr && running != 0
+            && AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &current, &size) == noErr && current == device.id
+            && AudioObjectGetPropertyData(current, &address, 0, nil, &size, &alive) == noErr && alive != 0
+            && AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1, &hardware, &formatSize) == noErr
+            && hardware.mSampleRate == format.sampleRate && hardware.mChannelsPerFrame == format.channelCount
+    }
+
+    /// Calls `changed` on the main queue when the device goes away or its input format may have changed.
+    func observeChanges(_ changed: @escaping @Sendable () -> Void) {
+        for (selector, scope) in [(kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal),
+                                  (kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal),
+                                  (kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeInput)] {
+            var address = AudioInputDevices.property(selector, scope: scope)
+            let block: AudioObjectPropertyListenerBlock = { _, _ in changed() }
+            if AudioObjectAddPropertyListenerBlock(device.id, &address, .main, block) == noErr { listeners.append((address, block)) }
+        }
+    }
+
+    /// Synchronous: no render callback runs after this returns.
+    func close() {
+        guard !closed else { return }
+        closed = true
+        for (address, block) in listeners {
+            var address = address
+            AudioObjectRemovePropertyListenerBlock(device.id, &address, .main, block)
+        }
+        listeners.removeAll()
+        AudioOutputUnitStop(unit); AudioUnitUninitialize(unit); AudioComponentInstanceDispose(unit)
+    }
+
+    private func render(_ flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>, _ time: UnsafePointer<AudioTimeStamp>,
+                        _ bus: UInt32, _ frames: UInt32) -> OSStatus {
+        guard let processor, frames > 0 else { return noErr }
+        // A sample-time jump ends the chunk early, so the processor sees the gap instead of joined audio.
+        // Bluetooth input skips about 100 ms once while its link starts; before any delivery nothing is lost.
+        if chunk.frameLength > 0, time.pointee.mSampleTime != chunkTime.mSampleTime + Double(chunk.frameLength) {
+            if delivered { deliver(to: processor) } else { chunk.frameLength = 0 }
+        }
+        guard chunk.frameLength + frames <= chunk.frameCapacity else { processor.interrupt(.bufferOverflow); return kAudioUnitErr_TooManyFramesToProcess }
+        if chunk.frameLength == 0 { chunkTime = time.pointee }
+        let channels = chunk.floatChannelData!
+        for channel in 0..<slice.count {
+            slice[channel] = AudioBuffer(mNumberChannels: 1, mDataByteSize: frames * 4, mData: channels[channel] + Int(chunk.frameLength))
+        }
+        let status = AudioUnitRender(unit, flags, time, bus, frames, slice.unsafeMutablePointer)
+        guard status == noErr else { processor.interrupt(.configurationChanged); return status }
+        chunk.frameLength += frames
+        // Hand over about 100 ms at a time, like an engine tap: stop and backlog bounds downstream assume it.
+        if chunk.frameLength + frames > target { deliver(to: processor) }
+        return noErr
+    }
+
+    private func deliver(to processor: CaptureProcessor) {
+        // receive copies the samples, so the chunk refills immediately.
+        processor.receive(chunk, time: AVAudioTime(audioTimeStamp: &chunkTime, sampleRate: format.sampleRate))
+        chunk.frameLength = 0; delivered = true
     }
 }

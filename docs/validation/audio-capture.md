@@ -1,6 +1,6 @@
 # Audio capture validation
 
-The capture service produces ordered 16 kHz mono Float32 frames and writes them to a private WAV before delivery. The settings level preview and dictation share one microphone engine. Explicit warm mode keeps up to 500 ms of pre-roll in memory and keeps the system microphone indicator on. Cold starts remain arming until actual converted samples arrive; speech before the microphone opens cannot be recovered.
+The capture service produces ordered 16 kHz mono Float32 frames and writes them to a private WAV before delivery. The settings level preview and dictation share one microphone input. Explicit warm mode keeps up to 500 ms of pre-roll in memory and keeps the system microphone indicator on. Cold starts remain arming until actual converted samples arrive; speech before the microphone opens cannot be recovered.
 
 ## Executed checks
 
@@ -57,3 +57,17 @@ A short signed native comparison used six varied capture lengths and the current
 These observations establish the buffered-input loss mechanism for this probe. They do not explain prior recognition-ending mismatches or prove physical word preservation. Full hotkey-release-to-text latency remains unverified: the existing 40 ms release hold-back plus the slowest measured capture stop leaves almost no room under the 150 ms target. No target was relaxed. Other hardware clock mappings, external-device delivery timing, actual sleep/unplug, and a new 30-minute run were not tested in this correction. The earlier 30-minute evidence applies to its stated revision.
 
 Successful preview input now clears only the exact stale unavailable-selection fallback warning. Other errors remain visible. The app build checks this adapter; physical device reconnection was not exercised.
+
+## Pinned device input
+
+Capture used to open the engine input node, which binds the system default input before the selected device can be set. With AirPods connected as the default input and the DJI selected, the system log showed the same sequence in two app hangs. The node opened a default-device aggregate of the AirPods input and output, and the AirPods switched to their 24 kHz call profile. gob.lin then selected the DJI while the engine's own thread reselected the rebuilt aggregate. The engine logged a device error, and the main thread made no further progress until the app was force-quit, 13 s and 32 s later.
+
+Capture now opens a HAL input unit, enables input, disables output and sets the resolved device before initializing it. The system default is never opened unless it is the resolved device. The unit delivers the device's own rate and channels as non-interleaved Float32 in chunks of at most 100 ms. These match the previous tap buffers, so the stop deadline and the live-frame backlog keep their measured margins. A sample-time gap after the first delivered chunk ends that chunk and still fails the recording. Bluetooth input skips about 100 ms once, at the second or third callback, before anything has been delivered; that partial chunk is discarded. Device listeners for liveness, nominal rate and input stream configuration replace the engine configuration notification. They keep the existing guard: only a stopped unit, a changed or dead device, or a changed rate or channel count interrupts capture.
+
+Timestamp probe on this Mac, 3 s per device: built-in and DJI input stayed contiguous at 512 frames, with host-time error at most 0.29 µs and 2.38 µs against a 20.8 µs sample period. AirPods input at 24 kHz jumped by 2,258–2,475 frames once, at callback 2 or 3, then stayed contiguous.
+
+Native capture probe after the change, with AirPods as the default input and output: the selected DJI passed cold and restart, and warm capture kept 8,000 pre-roll samples. Missing-UID fallback to the AirPods passed with 46,400 nonzero samples. Cancellation removed its partial file. Throughout the DJI scenarios, the AirPods output stayed at 48 kHz and their input was never running. Built-in input delivered digital silence with the lid closed, as before.
+
+Real app: with AirPods connected and the DJI selected, three dictations started with first audio after 178–217 ms, opened only the DJI, and left the AirPods at 48 kHz. A preview and a dictation with the AirPods input selected also completed; the first dictation's audio arrived after 475 ms. No default-device aggregate was created.
+
+Still untested: physical unplug during capture, an actual sample-rate change, sleep and wake with this input path, and built-in speech with the lid open. Opening the device remains on the main actor; with a Bluetooth input selected, audio starts about 0.2–0.5 s after the device opens.
