@@ -140,6 +140,25 @@ isolated target afterward. Optional `durations.json` beside the bundles, contain
 checks use the granted microphone and clipboard, so run them in a reserved native
 session. An unsigned Xcode product is compile-only and must not request grants.
 
+## Running the native UI probe
+
+The UI probe runs the production popover, Settings and History scenes with private
+preferences and data, and drives them through Accessibility, clicks and keystrokes.
+It checks the popover opening, live updates and idle churn, Hold to Test, search,
+the cleanup switch, every Settings page, warm microphone, the level preview,
+History, Insights, the More menu, Paste Last Dictation into the isolated target,
+and quitting. It moves the pointer and types, so leave the desktop alone while it runs.
+
+```sh
+scripts/build-native-ui-check.sh /path/to/private-ui-check-output
+scripts/launch.sh /path/to/private-ui-check-output/gob.lin.app
+```
+
+The probe opens the isolated target itself, writes private `results/ui-result.json`
+with timings (and `results/progress.log` as it goes, plus window snapshots), and
+quits through the app's normal termination path. Offscreen snapshots cannot draw
+the sidebar and toolbar glass, so those areas show blank.
+
 ## Integrated correction checks
 
 Automatic monitoring suspension and capture interruption now stop, drain and save
