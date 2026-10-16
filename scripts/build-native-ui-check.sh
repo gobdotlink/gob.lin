@@ -2,7 +2,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 check_root="${1:?Usage: scripts/build-native-ui-check.sh private-output-directory}"
-identity="${GOBLIN_SIGNING_IDENTITY:-35C9398B32E42C118938453577678911498A00C4}"
+identity="${GOBLIN_SIGNING_IDENTITY:-gob.lin Local Development}"
+# The signing requirement pins the certificate, so a name is resolved to its SHA-1 fingerprint.
+if [[ ! "$identity" =~ ^[[:xdigit:]]{40}$ ]]; then
+    name="$identity"
+    identity=$(security find-identity -v -p codesigning | awk -v quoted="\"$name\"" 'index($0, quoted) && length($2) == 40 { print $2; exit }')
+    if [ -z "$identity" ]; then
+        printf 'No valid signing identity matches "%s". Set GOBLIN_SIGNING_IDENTITY to a certificate name or SHA-1 fingerprint.\n' "$name" >&2
+        exit 1
+    fi
+fi
 if pgrep -x GoblinApp >/dev/null || pgrep -x NativeTarget >/dev/null; then
     printf 'Close existing app/check instances before rebuilding native check bundles.\n' >&2
     exit 1
