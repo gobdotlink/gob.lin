@@ -86,7 +86,7 @@ struct NativeDictationCheck {
                 }
                 post(down: true)
                 try await wait("native hotkey capture readiness", seconds: 5) { model.overlay.model.phase == .listening }
-                if let input = AudioCaptureService.shared.inputResolution {
+                if let input = await AudioCaptureService.shared.inputResolution {
                     report["inputDevice"] = input.device.name
                     report["inputUsedFallback"] = input.usedFallback
                     report["inputFollowsSystemDefault"] = input.requestedUID.isEmpty
@@ -223,9 +223,14 @@ struct NativeDictationCheck {
                 post(down: true)
                 try await wait("final cancel capture readiness", seconds: 5) { model.overlay.model.phase == .listening }
                 model.audioPreview.start(uid: defaults.string(forKey: "audio.inputDeviceUID") ?? "")
-                guard model.audioPreview.running else { throw CheckFailure("Settings preview could not join active capture") }
+                // The preview opens on the capture thread.
+                do { try await wait("Settings preview joining active capture", seconds: 2) { model.audioPreview.running } }
+                catch { throw CheckFailure("Settings preview could not join active capture: \(model.audioPreview.error ?? "no error")") }
                 model.audioPreview.stop()
-                guard model.hotkeys.recording != nil else { throw CheckFailure("Closing preview stopped dictation") }
+                // Closing it is asynchronous too; give it time to land before checking the capture survived.
+                try await Task.sleep(for: .milliseconds(300))
+                guard model.hotkeys.recording != nil, model.overlay.model.phase == .listening,
+                      await AudioCaptureService.shared.activeSessionID != nil else { throw CheckFailure("Closing preview stopped dictation") }
                 report["sharedPreviewPreservedCapture"] = true
                 try await play(source)
                 post(down: false)

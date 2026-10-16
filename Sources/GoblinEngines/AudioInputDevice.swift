@@ -164,14 +164,17 @@ final class AudioInputUnit: @unchecked Sendable {
             && hardware.mSampleRate == format.sampleRate && hardware.mChannelsPerFrame == format.channelCount
     }
 
-    /// Calls `changed` on the main queue when the device goes away or its input format may have changed.
+    // Off the main queue, so a blocked main thread never holds up a device change.
+    private static let listenerQueue = DispatchQueue(label: "app.goblin.capture-device-changes")
+
+    /// Calls `changed` on a private queue when the device goes away or its input format may have changed.
     func observeChanges(_ changed: @escaping @Sendable () -> Void) {
         for (selector, scope) in [(kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal),
                                   (kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal),
                                   (kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeInput)] {
             var address = AudioInputDevices.property(selector, scope: scope)
             let block: AudioObjectPropertyListenerBlock = { _, _ in changed() }
-            if AudioObjectAddPropertyListenerBlock(device.id, &address, .main, block) == noErr { listeners.append((address, block)) }
+            if AudioObjectAddPropertyListenerBlock(device.id, &address, Self.listenerQueue, block) == noErr { listeners.append((address, block)) }
         }
     }
 
@@ -181,7 +184,7 @@ final class AudioInputUnit: @unchecked Sendable {
         closed = true
         for (address, block) in listeners {
             var address = address
-            AudioObjectRemovePropertyListenerBlock(device.id, &address, .main, block)
+            AudioObjectRemovePropertyListenerBlock(device.id, &address, Self.listenerQueue, block)
         }
         listeners.removeAll()
         AudioOutputUnitStop(unit); AudioUnitUninitialize(unit); AudioComponentInstanceDispose(unit)

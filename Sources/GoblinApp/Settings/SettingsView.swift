@@ -44,7 +44,7 @@ struct SettingsView: View {
                 .padding(.horizontal, 10).padding(.top, 4)
             }
             .arrowKeySelection(SettingsSection.allCases, selection: $model.settingsSelection)
-            .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter(status: model.status) }
+            .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter(model: model) }
             // The column width alone doesn't hold; the content's own width pins the split item.
             .frame(width: 200)
             .navigationSplitViewColumnWidth(200)
@@ -94,10 +94,19 @@ struct SettingsView: View {
 
 /// Sidebar foot: what gob.lin is doing, as a light and two short lines.
 private struct StatusFooter: View {
-    let status: AppStatus
+    let model: AppModel
+    @ObservedObject private var diagnostics: DiagnosticsModel
+    @ObservedObject private var speechModels: SpeechModelService
+
+    init(model: AppModel) {
+        self.model = model
+        _diagnostics = ObservedObject(wrappedValue: model.diagnostics)
+        _speechModels = ObservedObject(wrappedValue: model.speechModels)
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
+        let status = model.status
+        return HStack(alignment: .top, spacing: 9) {
             StatusLight(state: status.light).padding(.top, 4)
             VStack(alignment: .leading, spacing: 1) {
                 Text(status.title).font(.system(size: 12, weight: .medium))
@@ -112,13 +121,23 @@ private struct StatusFooter: View {
 }
 
 private struct GeneralSettingsView: View {
-    @ObservedObject var model: AppModel
+    let model: AppModel
+    @ObservedObject private var hotkeys: HotkeyService
+    @ObservedObject private var insertion: TextInsertionService
+    @ObservedObject private var permissions: PermissionModel
     @AppStorage("feedbackSoundsEnabled") private var sounds = true
     @AppStorage("audio.pauseMediaWhileDictating") private var pauseMedia = false
-    @State private var loginEnabled = false
+    /// The last status read, so a reopened page shows it straight away.
+    @MainActor private static var loginStatus: SMAppService.Status?
+    @State private var loginStatus = GeneralSettingsView.loginStatus
     @State private var loginError: String?
 
-    private var hotkeys: HotkeyService { model.hotkeys }
+    init(model: AppModel) {
+        self.model = model
+        _hotkeys = ObservedObject(wrappedValue: model.hotkeys)
+        _insertion = ObservedObject(wrappedValue: model.insertion)
+        _permissions = ObservedObject(wrappedValue: model.permissions)
+    }
 
     var body: some View {
         Section {
@@ -150,7 +169,7 @@ private struct GeneralSettingsView: View {
             StatusRow(keyLight, Text(keyStatus))
         } header: { CapsHeader("Talk key") }
         Section {
-            Toggle("Open at login", isOn: Binding(get: { loginEnabled }, set: { value in
+            Toggle("Open at login", isOn: Binding(get: { loginStatus == .enabled }, set: { value in
                 Task { @MainActor in
                     do {
                         if value { try SMAppService.mainApp.register() }
@@ -161,7 +180,7 @@ private struct GeneralSettingsView: View {
             })).disabled(!model.servicesEnabled)
             if let loginError {
                 StatusRow(.waiting, Text(loginError)) {
-                    if SMAppService.mainApp.status == .requiresApproval { Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() } }
+                    if loginStatus == .requiresApproval { Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() } }
                 }
             }
             Toggle(isOn: $sounds) {
@@ -172,22 +191,22 @@ private struct GeneralSettingsView: View {
                 Text("Pause media while dictating")
                 Text("Picks up where it left off when you're done, unless you changed what's playing.")
             }
-            Toggle(isOn: Binding(get: { model.insertion.trailingSpace }, set: { model.insertion.trailingSpace = $0 })) {
+            Toggle(isOn: $insertion.trailingSpace) {
                 Text("Add a space after each take")
                 Text("So the next one doesn't run into this one.")
             }
         } header: { CapsHeader("Behaviour") }
         Section {
             LabeledContent("Paste last dictation again") { KeyCombo(label: "⌥⇧⌘V") }
-            StatusRow(insertionLight, Text(model.insertion.status))
-            if model.insertion.hasRecoveryClipboard {
+            StatusRow(insertionLight, Text(insertion.status))
+            if insertion.hasRecoveryClipboard {
                 StatusRow(.waiting, Text("Your last dictation is on the clipboard.")) {
-                    Button("Restore Previous Clipboard") { model.insertion.restorePreviousClipboard() }.disabled(model.insertion.busy)
+                    Button("Restore Previous Clipboard") { insertion.restorePreviousClipboard() }.disabled(insertion.busy)
                 }
             }
-            StatusRow(model.permissions.snapshot.ready ? .ready : .waiting,
+            StatusRow(permissions.snapshot.ready ? .ready : .waiting,
                       Text("**Permissions** · Microphone, Accessibility")) {
-                Button("Open Setup…") { model.permissions.showOnboarding() }
+                Button("Open Setup…") { permissions.showOnboarding() }
             }
         } header: { CapsHeader("Typing it in") }
         .onAppear { refreshLoginStatus() }
@@ -207,14 +226,18 @@ private struct GeneralSettingsView: View {
     }
 
     private var insertionLight: LightState {
-        if case .failure = model.insertion.outcome { return .waiting }
+        if case .failure = insertion.outcome { return .waiting }
         return .ready
     }
 
     private func refreshLoginStatus(error: Error? = nil) {
-        let status = SMAppService.mainApp.status
-        loginEnabled = status == .enabled
-        loginError = status == .requiresApproval ? "Allow gob.lin in Login Items to finish turning this on." : error?.localizedDescription
+        Task {
+            // A round trip to the service manager: off the main thread, so Settings opens without waiting.
+            let status = await Task.detached { SMAppService.mainApp.status }.value
+            Self.loginStatus = status
+            loginStatus = status
+            loginError = status == .requiresApproval ? "Allow gob.lin in Login Items to finish turning this on." : error?.localizedDescription
+        }
     }
 }
 

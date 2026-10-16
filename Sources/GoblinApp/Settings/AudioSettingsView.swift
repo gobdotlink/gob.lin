@@ -12,7 +12,8 @@ final class AudioPreviewModel: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var ready = false
     @Published var error: String?
-    private var previewID: UUID?
+    /// The open preview, resolving to its id once the device is running (nil if it failed or was stopped first).
+    private var preview: Task<UUID?, Never>?
     private var sessionID = UUID()
     private let monitorSystem: Bool
     private weak var diagnostics: DiagnosticsModel?
@@ -22,12 +23,17 @@ final class AudioPreviewModel: ObservableObject {
         if let devices { self.devices = devices }
     }
 
+    /// Lists microphones off the main thread: CoreAudio can stall while devices change.
     func refresh() {
         guard monitorSystem else { return }
-        do { devices = try AudioInputDevices.list() }
-        catch {
-            self.error = "Could not enumerate microphones."
-            log(.deviceEnumerationFailed, severity: .error)
+        Task {
+            let listed = await Task.detached(priority: .userInitiated) { Result { try AudioInputDevices.list() } }.value
+            switch listed {
+            case .success(let listed): if listed != devices { devices = listed }
+            case .failure:
+                error = "Could not enumerate microphones."
+                log(.deviceEnumerationFailed, severity: .error)
+            }
         }
     }
 
@@ -39,48 +45,62 @@ final class AudioPreviewModel: ObservableObject {
         log(.previewRequested, details: details)
         guard monitorSystem else { return }
         refresh()
-        do {
-            previewID = try AudioCaptureService.shared.beginPreview(uid: uid) { [weak self] event in
-                guard let self, self.sessionID == session, self.running else { return }
-                switch event {
-                case .input(let device, let rms):
-                    if !self.ready { self.log(.firstBuffer) }
-                    self.ready = true; self.level = AudioInputDevices.displayLevel(rms: rms)
-                    if device.usedFallback {
-                        self.error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept."
-                    } else if self.error == "Selected microphone is unavailable; preview uses the system default. Your preference is kept." {
-                        self.error = nil
+        let service = AudioCaptureService.shared
+        // Opening the device happens on the capture thread; a stop meanwhile ends whatever it opened.
+        preview = Task { [weak self] in
+            do {
+                let id = try await service.beginPreview(uid: uid) { [weak self] event in
+                    guard let self, self.sessionID == session, self.running else { return }
+                    switch event {
+                    case .input(let device, let rms):
+                        if !self.ready { self.log(.firstBuffer); self.ready = true }
+                        self.level = AudioInputDevices.displayLevel(rms: rms)
+                        if device.usedFallback {
+                            self.error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept."
+                        } else if self.error == "Selected microphone is unavailable; preview uses the system default. Your preference is kept." {
+                            self.error = nil
+                        }
+                    case .failed(let failure):
+                        self.stop(reason: .configurationChanged)
+                        self.error = failure.localizedDescription
+                        self.diagnostics?.report(.microphoneCaptureFailed, operation: session)
                     }
-                case .failed(let failure):
-                    self.stop(reason: .configurationChanged)
-                    self.error = failure.localizedDescription
-                    self.diagnostics?.report(.microphoneCaptureFailed, operation: session)
                 }
-            }
-            running = true; error = nil
-            if let device = AudioCaptureService.shared.inputResolution {
-                details.resolvedDevice = diagnostics?.developmentLog.deviceID(device.device.uid)
-                log(.deviceResolved, details: details)
-                if device.usedFallback {
-                    error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept."
-                    log(.deviceFallback, severity: .warning, details: DevelopmentDetails(reason: .deviceUnavailable))
+                let resolution = await service.inputResolution
+                guard let self, self.sessionID == session else { await service.endPreview(id); return nil }
+                running = true; error = nil
+                if let device = resolution {
+                    details.resolvedDevice = diagnostics?.developmentLog.deviceID(device.device.uid)
+                    log(.deviceResolved, details: details)
+                    if device.usedFallback {
+                        error = "Selected microphone is unavailable; preview uses the system default. Your preference is kept."
+                        log(.deviceFallback, severity: .warning, details: DevelopmentDetails(reason: .deviceUnavailable))
+                    }
                 }
+                log(.engineStarted)
+                if diagnostics?.activeFailures[.microphone] == .microphoneCaptureFailed { diagnostics?.resolve(.microphone) }
+                return id
+            } catch {
+                guard let self, self.sessionID == session else { return nil }
+                self.error = error.localizedDescription
+                log(.previewFailed, severity: .error)
+                diagnostics?.report((error as? AudioCaptureFailure)?.kind == .permissionMissing ? .microphonePermissionMissing : .microphoneCaptureFailed, operation: session)
+                return nil
             }
-            log(.engineStarted)
-            if diagnostics?.activeFailures[.microphone] == .microphoneCaptureFailed { diagnostics?.resolve(.microphone) }
-        } catch {
-            self.error = error.localizedDescription
-            log(.previewFailed, severity: .error)
-            diagnostics?.report((error as? AudioCaptureFailure)?.kind == .permissionMissing ? .microphonePermissionMissing : .microphoneCaptureFailed, operation: session)
         }
     }
 
     func stop(reason: DevelopmentReason = .user) {
-        let hadPreview = previewID != nil
-        if let previewID { AudioCaptureService.shared.endPreview(previewID) }
-        previewID = nil
-        if hadPreview { log(.previewStopped, details: DevelopmentDetails(reason: reason)) }
-        sessionID = UUID(); running = false; ready = false; level = 0
+        if let preview {
+            log(.previewStopped, details: DevelopmentDetails(reason: reason))
+            Task { if let id = await preview.value { await AudioCaptureService.shared.endPreview(id) } }
+        }
+        preview = nil
+        sessionID = UUID()
+        // Assign only what changed: each published write re-renders the views showing the preview.
+        if running { running = false }
+        if ready { ready = false }
+        if level != 0 { level = 0 }
     }
 
     nonisolated static func deviceInputLevel(_ buffer: AVAudioPCMBuffer) -> Double {

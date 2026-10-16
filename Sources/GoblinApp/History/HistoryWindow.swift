@@ -160,7 +160,7 @@ struct HistoryWindow: View {
             banners
             if history.entries.isEmpty, !history.isLoading {
                 if history.searchText.isEmpty, history.counts.total == 0 {
-                    EmptyHistoryView(shortcut: model.hotkeys.shortcut == .fn ? "fn" : model.hotkeys.shortcut.label)
+                    EmptyHistoryView(hotkeys: model.hotkeys)
                 } else if !history.searchText.isEmpty {
                     ContentUnavailableView.search(text: history.searchText)
                 } else {
@@ -477,7 +477,9 @@ private struct EntryDetail: View {
 
 /// Asleep, still scowling. The first line is the joke; the second is the instruction.
 struct EmptyHistoryView: View {
-    let shortcut: String
+    @ObservedObject var hotkeys: HotkeyService
+
+    private var shortcut: String { hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label }
 
     var body: some View {
         VStack(spacing: 0) {

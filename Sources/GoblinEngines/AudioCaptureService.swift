@@ -3,10 +3,21 @@ import AVFoundation
 import Darwin
 import Foundation
 
-/// Shared by dictation and the settings level preview. Event handlers run in order on the processing queue.
-@MainActor
+/// The capture service's own thread. CoreAudio calls can take hundreds of
+/// milliseconds, or never return while a device misbehaves; off the main thread, that never
+/// freezes the menu, windows or overlay.
+@globalActor
+public actor CaptureActor {
+    public static let shared = CaptureActor()
+    private let queue = DispatchSerialQueue(label: "app.goblin.capture-engine", qos: .userInitiated)
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+}
+
+/// Shared by dictation and the settings level preview. Event handlers run in order on the processing
+/// queue; preview observers run on the main actor.
+@CaptureActor
 public final class AudioCaptureService {
-    public static let shared = AudioCaptureService()
+    public nonisolated static let shared = AudioCaptureService()
     public private(set) var activeSessionID: UUID?
     public private(set) var warmMicrophoneEnabled = false
     public private(set) var inputResolution: AudioInputResolution?
@@ -15,9 +26,10 @@ public final class AudioCaptureService {
     private var processor: CaptureProcessor?
     private var generation = UUID()
     private var sleepObserver: NSObjectProtocol?
-    private var wakeObserver: NSObjectProtocol?
+    // Set once in init and kept for the process lifetime.
+    nonisolated(unsafe) private var wakeObserver: NSObjectProtocol?
     private var watchdog: DispatchSourceTimer?
-    private var previews: [UUID: @MainActor (AudioPreviewEvent) -> Void] = [:]
+    private var previews: [UUID: @MainActor @Sendable (AudioPreviewEvent) -> Void] = [:]
     private var terminalTask: Task<CapturedAudio?, Error>?
     private var cancellationRequested = false
     private var terminalCommitted = false
@@ -25,9 +37,9 @@ public final class AudioCaptureService {
     private var cancellationError: Error?
     private var eventHandler: (@Sendable (AudioCaptureEvent) -> Void)?
 
-    private init() {
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { @Sendable [weak self] _ in
-            Task { @MainActor in
+    private nonisolated init() {
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { @Sendable [weak self] _ in
+            Task { @CaptureActor in
                 guard let self, self.warmMicrophoneEnabled, self.activeSessionID == nil else { return }
                 do { try self.prepareInput(uid: self.warmUID); try self.startInput() }
                 catch { self.closeInput() }
@@ -130,7 +142,7 @@ public final class AudioCaptureService {
     }
 
     @discardableResult
-    public func beginPreview(uid: String, onEvent: @escaping @MainActor (AudioPreviewEvent) -> Void) throws -> UUID {
+    public func beginPreview(uid: String, onEvent: @escaping @MainActor @Sendable (AudioPreviewEvent) -> Void) throws -> UUID {
         if activeSessionID != nil {
             let requested = try AudioInputDevices.resolve(uid: uid)
             guard requested.device.id == inputResolution?.device.id else { throw AudioCaptureFailure(.alreadyRecording) }
@@ -167,44 +179,55 @@ public final class AudioCaptureService {
         let token = UUID(); generation = token
         let previewDelivery = CapturePreviewDelivery { [weak self] rms in
             guard let self, self.generation == token, let resolution = self.inputResolution else { return }
-            for observer in self.previews.values { observer(.input(device: resolution, rms: rms)) }
+            self.notifyPreviews(.input(device: resolution, rms: rms))
         }
         let processor = try CaptureProcessor(format: input.format, resolution: resolved, preview: { rms in
             previewDelivery.update(rms)
         }, onFailure: { [weak self] failure in
-            DispatchQueue.main.async { [weak self] in
+            Task { @CaptureActor [weak self] in
                 guard let self, self.generation == token else { return }
                 self.closeInput(keepProcessor: self.activeSessionID != nil)
-                for observer in self.previews.values { observer(.failed(failure)) }
+                self.notifyPreviews(.failed(failure))
             }
         })
         self.input = input; self.processor = processor; inputResolution = resolved
         input.observeChanges { [weak self] in
-            Task { @MainActor in
+            Task { @CaptureActor in
                 // A notification can repeat a value the open stream already has.
                 guard let self, self.generation == token, let input = self.input, !input.isHealthy else { return }
                 processor.interrupt(.configurationChanged)
             }
         }
-        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { @Sendable [weak self] _ in
-            Task { @MainActor in
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { @Sendable [weak self] _ in
+            Task { @CaptureActor in
                 guard let self, self.generation == token else { return }
                 if self.activeSessionID != nil { processor.interrupt(.systemSleep) }
                 else {
-                    for observer in self.previews.values { observer(.failed(AudioCaptureFailure(.systemSleep))) }
+                    self.notifyPreviews(.failed(AudioCaptureFailure(.systemSleep)))
                     self.closeInput()
                 }
             }
         }
-        let watchdog = DispatchSource.makeTimerSource(queue: .main)
+        let watchdog = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
         watchdog.schedule(deadline: .now() + 0.25, repeating: 0.25)
-        watchdog.setEventHandler { [weak self] in
-            guard let self, self.generation == token else { return }
-            if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized { processor.interrupt(.permissionMissing) }
-            else if let failure = processor.watchdogFailure() { processor.interrupt(failure) }
+        watchdog.setEventHandler { @Sendable [weak self] in
+            Task { @CaptureActor in
+                guard let self, self.generation == token else { return }
+                if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized { processor.interrupt(.permissionMissing) }
+                else if let failure = processor.watchdogFailure() { processor.interrupt(failure) }
+            }
         }
         self.watchdog = watchdog
         watchdog.resume()
+    }
+
+    /// In order on the main queue, so a meter never shows a level after its failure.
+    private func notifyPreviews(_ event: AudioPreviewEvent) {
+        let observers = Array(previews.values)
+        guard !observers.isEmpty else { return }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { for observer in observers { observer(event) } }
+        }
     }
 
     private func startInput() throws {
@@ -234,13 +257,13 @@ public final class AudioCaptureService {
     }
 }
 
-// Coalesce levels while UI is busy; a long recording cannot accumulate a main-queue callback per buffer.
+// Coalesce levels while UI is busy; a long recording cannot accumulate a callback per buffer.
 private final class CapturePreviewDelivery: @unchecked Sendable {
     private let lock = NSLock()
     private var latest = 0.0
     private var pending = false
-    private let deliver: @MainActor @Sendable (Double) -> Void
-    init(deliver: @escaping @MainActor @Sendable (Double) -> Void) { self.deliver = deliver }
+    private let deliver: @CaptureActor @Sendable (Double) -> Void
+    init(deliver: @escaping @CaptureActor @Sendable (Double) -> Void) { self.deliver = deliver }
     func update(_ rms: Double) {
         let schedule = lock.withLock {
             latest = rms
@@ -248,7 +271,7 @@ private final class CapturePreviewDelivery: @unchecked Sendable {
             pending = true; return true
         }
         guard schedule else { return }
-        DispatchQueue.main.async {
+        Task { @CaptureActor in
             let rms = self.lock.withLock { self.pending = false; return self.latest }
             self.deliver(rms)
         }

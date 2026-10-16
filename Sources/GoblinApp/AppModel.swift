@@ -45,6 +45,8 @@ final class AppModel: ObservableObject {
     private var liveSessions: [UUID: ActiveDictation] = [:]
     private var captureDrainTask: Task<Void, Never>?
     private var shuttingDown = false
+    private var appliedConfiguration: Configuration?
+    private var warmTask: Task<Void, Never>?
 
     init(dataDirectory: URL? = nil, defaults: UserDefaults = .standard, servicesEnabled: Bool = true,
          diagnosticEnvironment: DiagnosticEnvironment? = nil) {
@@ -62,27 +64,32 @@ final class AppModel: ObservableObject {
         hotkeys = HotkeyService(permissions: permissions, defaults: defaults, monitorSystem: servicesEnabled, diagnostics: diagnostics)
         insertion = TextInsertionService(pasteboard: servicesEnabled ? .general : .withUniqueName(), defaults: defaults, registerShortcuts: servicesEnabled)
         audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")], diagnostics: diagnostics)
-        for child in [permissions.objectWillChange, hotkeys.objectWillChange, insertion.objectWillChange,
-                      history.objectWillChange, dictionary.objectWillChange, audioPreview.objectWillChange, diagnostics.objectWillChange,
-                      speechModels.objectWillChange, updates.objectWillChange] {
-            child.sink { [weak self] _ in
-                Task { @MainActor in self?.synchronizeMascot(); self?.objectWillChange.send() }
-            }.store(in: &subscriptions)
-        }
+        // Views observe the child models they show. Forwarding every child change here re-rendered
+        // each open window whole, many times a second.
+        diagnostics.$activeFailures.sink { [weak self] _ in
+            Task { @MainActor in self?.synchronizeMascot() }
+        }.store(in: &subscriptions)
         overlay.model.$phase.removeDuplicates().sink { [weak self] _ in
             Task { @MainActor in self?.synchronizeMascot() }
         }.store(in: &subscriptions)
-        permissions.$snapshot.sink { [weak self] snapshot in
+        // The poll publishes only changes, but it is also how a microphone coming or going shows in
+        // diagnostics and how the warm microphone follows a new default device.
+        permissions.onRefresh = { [weak self] in
+            guard let self, !self.shuttingDown else { return }
+            self.refreshDiagnostics()
+            self.applyWarmMicrophone()
+        }
+        permissions.$snapshot.sink { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.refreshDiagnostics(snapshot: snapshot)
+                self.refreshDiagnostics()
                 self.applyWarmMicrophone()
             }
         }.store(in: &subscriptions)
         speechModels.$state.sink { [weak self] state in
             Task { @MainActor in
                 guard let self, !self.shuttingDown else { return }
-                self.refreshDiagnostics(snapshot: self.permissions.snapshot)
+                self.refreshDiagnostics()
                 self.hotkeys.engineConnected = state == .ready
                 if case .failed = state { self.showFailure(.modelLoadFailed) }
                 else if state == .ready { self.diagnostics.resolve(.model) }
@@ -91,7 +98,7 @@ final class AppModel: ObservableObject {
         hotkeys.$secureInput.sink { [weak self] secure in
             Task { @MainActor in
                 guard let self, !self.shuttingDown else { return }
-                self.diagnostics.refresh(permissions: self.permissions.snapshot, secureInput: secure)
+                self.refreshDiagnostics()
                 if secure { self.showFailure(.secureInputEnabled) }
             }
         }.store(in: &subscriptions)
@@ -150,7 +157,7 @@ final class AppModel: ObservableObject {
             self?.diagnostics.recordTimings(entry.latencies)
         }
         refreshConfiguration()
-        refreshDiagnostics(snapshot: permissions.snapshot)
+        refreshDiagnostics()
         updates.canInstall = { [weak self] in self?.canInstallUpdate == true }
         if servicesEnabled { speechModels.preload(); updates.start() }
         Task { [weak self] in
@@ -179,8 +186,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Every preferences write lands here, window frames included, so it returns early unless a
+    /// preference it reads has changed.
     func refreshConfiguration() {
         guard !shuttingDown else { return }
+        let configuration = Configuration(defaults)
+        guard configuration != appliedConfiguration else { return }
+        appliedConfiguration = configuration
         overlay.position = OverlayPosition(rawValue: defaults.string(forKey: "overlayPosition") ?? "") ?? .bottom
         let settings = RewriteSettingsStore.load(defaults: defaults)
         if servicesEnabled {
@@ -217,7 +229,25 @@ final class AppModel: ObservableObject {
 
     func reloadRewriteCredentials() {
         rewriteCredentials.reset()
+        appliedConfiguration = nil
         refreshConfiguration()
+    }
+
+    /// The preferences refreshConfiguration reads.
+    private struct Configuration: Equatable {
+        var overlayPosition: String?
+        var rewriteSettings: Data?
+        var rewriteKeys: [String: String]?
+        var keepMicrophoneWarm: Bool
+        var inputDeviceUID: String?
+
+        init(_ defaults: UserDefaults) {
+            overlayPosition = defaults.string(forKey: "overlayPosition")
+            rewriteSettings = defaults.data(forKey: RewriteSettingsStore.preferenceKey)
+            rewriteKeys = defaults.dictionary(forKey: RewriteKeyStore.preferenceKey) as? [String: String]
+            keepMicrophoneWarm = defaults.bool(forKey: "audio.keepMicrophoneWarm")
+            inputDeviceUID = defaults.string(forKey: "audio.inputDeviceUID")
+        }
     }
 
     func processTranscript(_ raw: String) async -> TranscriptProcessingResult {
@@ -355,7 +385,7 @@ final class AppModel: ObservableObject {
                         do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
                     }
                 }
-                active.captureID = try self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
+                active.captureID = try await self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
                     directory: self.captureDirectory, feedback: self.feedback, feedbackSessionID: session.id, onEvent: active.onEvent)
                 if self.defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
                    let script = GoblinBrand.assetDirectory?.appendingPathComponent("pause-media.js") {
@@ -511,7 +541,7 @@ final class AppModel: ObservableObject {
         if activeCapture === active { activeCapture = nil; hotkeys.cancelRecording() }
         active.cancelTask = Task { @MainActor [weak self] in
             await active.startTask?.value
-            if let self, let captureID = active.captureID, self.capture.activeSessionID == captureID {
+            if let self, let captureID = active.captureID, await self.capture.activeSessionID == captureID {
                 do { try await self.capture.cancel(sessionID: captureID) }
                 catch { self.diagnostics.report(.microphoneCaptureFailed, operation: active.session.id) }
             }
@@ -546,11 +576,18 @@ final class AppModel: ObservableObject {
         if saved { try? FileManager.default.removeItem(at: url) }
     }
 
+    /// Applied in order on the capture thread: opening a device can block.
     private func applyWarmMicrophone() {
-        guard servicesEnabled, !shuttingDown, activeCapture == nil, capture.activeSessionID == nil else { return }
+        guard servicesEnabled, !shuttingDown, activeCapture == nil else { return }
         let enabled = permissions.snapshot.microphone == .authorized && defaults.bool(forKey: "audio.keepMicrophoneWarm")
-        do { try capture.setWarmMicrophone(enabled: enabled, uid: defaults.string(forKey: "audio.inputDeviceUID") ?? "") }
-        catch { diagnostics.report(Self.diagnostic(error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed))) }
+        let uid = defaults.string(forKey: "audio.inputDeviceUID") ?? ""
+        warmTask = Task { [previous = warmTask, capture, weak self] in
+            await previous?.value
+            do { try await capture.setWarmMicrophone(enabled: enabled, uid: uid) }
+            // A dictation took the microphone first; it reapplies this when it finishes.
+            catch let failure as AudioCaptureFailure where failure.kind == .alreadyRecording {}
+            catch { self?.diagnostics.report(Self.diagnostic(error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed))) }
+        }
     }
 
     private static func diagnostic(_ failure: AudioCaptureFailure) -> DiagnosticFailure {
@@ -723,7 +760,16 @@ final class AppModel: ObservableObject {
         return Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15
     }
 
-    private func refreshDiagnostics(snapshot: PermissionModel.Snapshot) {
+    /// Microphones are listed off the main thread, then everything else is read fresh on return.
+    private func refreshDiagnostics() {
+        guard !shuttingDown, servicesEnabled else { return applyDiagnostics(microphones: nil) }
+        Task { [weak self] in
+            let microphones = await Task.detached(priority: .utility) { DiagnosticsModel.discoverMicrophones() }.value
+            self?.applyDiagnostics(microphones: microphones)
+        }
+    }
+
+    private func applyDiagnostics(microphones: DiagnosticsModel.Microphones?) {
         guard !shuttingDown else { return }
         let engineStatus: DiagnosticEngineStatus
         switch speechModels.state {
@@ -731,7 +777,7 @@ final class AppModel: ObservableObject {
         case .preparing, .unloading, .cancelling: engineStatus = .loading
         default: engineStatus = .unavailable
         }
-        diagnostics.refresh(permissions: snapshot, secureInput: hotkeys.secureInput, engineStatus: engineStatus)
+        diagnostics.refresh(permissions: permissions.snapshot, secureInput: hotkeys.secureInput, engineStatus: engineStatus, microphones: microphones)
     }
 
     private func synchronizeMascot() {
