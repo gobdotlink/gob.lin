@@ -172,11 +172,12 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Talk key: a big keycap card with the key, one sentence on how it works, and Record New Key…. Quick picks: fn / Globe, Right ⌥, ⌥ Space. Cancel a take: esc. A status row for the Globe key setting.
   - Behaviour: Open at login, Click sounds, Pause media while dictating, Add a space after each take.
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
-- **Cleanup:**
-  - A top plate with the AI cleanup switch and a status row naming where the text goes.
-  - Provider: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key, plus Refresh), and API key (masked, "Saved in gob.lin preferences", Replace…).
-  - Style: Level (None, Light, Medium) and Reasoning.
+- **Cleanup:** the switch and level apply as soon as they change; the provider is edited in a sheet and applies on Save.
+  - A top plate with the AI cleanup switch and a status row naming where the text goes. Turning it on with an unfinished provider opens the provider sheet, whose button reads Save and Turn On.
+  - Provider: one row naming the service, with the model, host (Local and Custom) and "key saved" under it, and Edit…. While the provider can't run, an amber row says what's missing, with Set Up….
+  - Style: Level (None, Light, Medium, Coding agent) as a popup, with the level's description under the label.
   - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again, plus an amber row: "Slower than 4 s? I type what you said instead."
+  - The provider sheet: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key, plus Refresh), Reasoning, API key (masked, "Saved in gob.lin preferences", Remove), the model-list status row, and Advanced request options. Cancel and Save.
 - **About:** centred.
   - The goblin at 128 pt, the 48 pt wordmark, the version, and the tagline with a blinking block cursor.
   - Two plates: four sentences of lore with three stats (words yapped, dictations, 0 s of audio uploaded), and spec rows (recognition, runs on, model size, languages, network).
