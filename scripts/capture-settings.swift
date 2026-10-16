@@ -86,6 +86,9 @@ struct SettingsCapture {
                         try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 900, height: 1080), dark: true)
                     }
                     model.diagnostics.resolve(.model)
+                    let provider = CleanupProviderSheet(settings: RewriteSettingsStore.load(defaults: defaults), defaults: defaults,
+                                                        inspectCredentials: false, turnOn: false, onSave: { _ in }, onFailure: { _ in })
+                    try await shoot("settings-cleanup-provider", provider, size: NSSize(width: 680, height: 520))
                 }
                 if wanted("history") {
                     model.historyScope = .all
