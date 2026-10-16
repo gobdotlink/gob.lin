@@ -95,7 +95,7 @@ struct ShortcutRecorder: View {
                 hint = "Use Fn alone, or a key with Command, Option, Control or Shift."
                 return
             }
-            let label = event.keyCode == 49 ? "Space" : (event.charactersIgnoringModifiers?.uppercased() ?? "Key \(event.keyCode)")
+            let label = event.keyCode == 49 ? "Space" : (event.characters(byApplyingModifiers: [])?.uppercased() ?? "Key \(event.keyCode)")
             service.setShortcut(HotkeyShortcut(keyCode: event.keyCode, modifiers: flags.rawValue, modifier: nil, keyLabel: label))
             end()
             return

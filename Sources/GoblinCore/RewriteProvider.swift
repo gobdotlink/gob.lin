@@ -2,14 +2,34 @@ import Foundation
 
 public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     // Keep the fast inference providers at the top of the selector.
-    case cerebras, groq, openAI, openRouter, zai, local, custom
+    case cerebras, groq, sambaNova, openAI, anthropic, gemini, mistral, xai, zai, openRouter, requesty, vercel, local, custom
     public var id: String { rawValue }
+
+    /// Named services always use their own address; only Local and Custom take one.
+    public var hasFixedAddress: Bool { self != .local && self != .custom }
+
+    public var group: RewriteProviderGroup {
+        switch self {
+        case .cerebras, .groq, .sambaNova: .fast
+        case .openAI, .anthropic, .gemini, .mistral, .xai, .zai: .labs
+        case .openRouter, .requesty, .vercel: .routers
+        case .local: .local
+        case .custom: .custom
+        }
+    }
 
     public var title: String {
         switch self {
         case .cerebras: "Cerebras"
         case .groq: "Groq"
+        case .sambaNova: "SambaNova"
         case .openAI: "OpenAI"
+        case .anthropic: "Anthropic"
+        case .gemini: "Google Gemini"
+        case .mistral: "Mistral"
+        case .xai: "xAI"
+        case .requesty: "Requesty"
+        case .vercel: "Vercel AI Gateway"
         case .openRouter: "OpenRouter"
         case .zai: "Z.AI"
         case .local: "Local"
@@ -21,7 +41,14 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         switch self {
         case .cerebras: "https://api.cerebras.ai/v1"
         case .groq: "https://api.groq.com/openai/v1"
+        case .sambaNova: "https://api.sambanova.ai/v1"
         case .openAI: "https://api.openai.com/v1"
+        case .anthropic: "https://api.anthropic.com/v1"
+        case .gemini: "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .mistral: "https://api.mistral.ai/v1"
+        case .xai: "https://api.x.ai/v1"
+        case .requesty: "https://router.requesty.ai/v1"
+        case .vercel: "https://ai-gateway.vercel.sh/v1"
         case .openRouter: "https://openrouter.ai/api/v1"
         case .zai: "https://api.z.ai/api/paas/v4"
         case .local: "http://localhost:11434/v1"
@@ -40,6 +67,16 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .openRouter: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
                            RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
         case .zai: [RewriteModelPreset(id: "glm-4.7-flash", title: "GLM 4.7 Flash", reasoning: .off)]
+        case .sambaNova: [RewriteModelPreset(id: "Meta-Llama-3.3-70B-Instruct", title: "Llama 3.3 70B", reasoning: .off),
+                          RewriteModelPreset(id: "gpt-oss-120b", title: "GPT-OSS 120B", reasoning: .low)]
+        case .anthropic: [RewriteModelPreset(id: "claude-haiku-5-5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
+        case .gemini: [RewriteModelPreset(id: "gemini-3.5-flash-lite", title: "Gemini 3.5 Flash-Lite", reasoning: .off, temperature: nil)]
+        case .mistral: [RewriteModelPreset(id: "mistral-small-2603", title: "Mistral Small 4", reasoning: .off),
+                        RewriteModelPreset(id: "ministral-8b-2512", title: "Ministral 8B", reasoning: .providerDefault)]
+        case .xai: [RewriteModelPreset(id: "grok-4.20-0309-non-reasoning", title: "Grok 4.20 Non-Reasoning", reasoning: .providerDefault)]
+        case .requesty: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off, temperature: nil)]
+        case .vercel: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
+                       RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
         case .local, .custom: []
         }
     }
@@ -53,7 +90,21 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .zai: "The Flash preset requests thinking off. Other GLM models may require thinking."
         case .local: "An OpenAI-compatible server on this Mac. A local server may not need an API key."
         case .custom: "Use any OpenAI-compatible chat completions endpoint."
+        case .sambaNova: "Fast inference. Llama 3.3 does not reason; GPT-OSS 120B uses Low reasoning."
+        case .anthropic: "Claude Haiku 5.5 is the fastest Claude model. The preset turns thinking off."
+        case .gemini: "Flash-Lite is fast and low cost. Gemini 3 thinking cannot be turned off, so Off requests the minimum."
+        case .mistral: "Mistral Small 4 requests reasoning off; Ministral 8B is a small model without reasoning."
+        case .xai: "The non-reasoning Grok model answers without thinking. Other Grok models cannot turn reasoning off."
+        case .requesty: "A router with one OpenAI-compatible endpoint. Requesty may map reasoning Off to its lowest level."
+        case .vercel: "Access GPT-6 Luna and Claude Haiku with one OpenAI-compatible endpoint."
         }
+    }
+
+    /// Request headers that carry the API key. Anthropic's own API uses its key header and a version.
+    public func authorizationHeaders(apiKey: String) -> [String: String] {
+        guard !apiKey.isEmpty else { return [:] }
+        if self == .anthropic { return ["x-api-key": apiKey, "anthropic-version": "2023-06-01"] }
+        return ["Authorization": "Bearer " + apiKey]
     }
 
     public static func matching(baseURL: String) -> Self {
@@ -66,6 +117,20 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
                                      reasoning: models.first?.reasoning ?? .providerDefault,
                                      temperature: models.first.map { $0.temperature } ?? 0,
                                      extraRequestJSON: models.first?.extraRequestJSON ?? "")
+    }
+}
+
+public enum RewriteProviderGroup: String, CaseIterable, Sendable, Identifiable {
+    case fast, labs, routers, local, custom
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .fast: "Fast inference"
+        case .labs: "Model makers"
+        case .routers: "Routers"
+        case .local: "On this Mac"
+        case .custom: "Custom"
+        }
     }
 }
 
@@ -94,17 +159,29 @@ public enum RewriteReasoning: String, CaseIterable, Codable, Sendable, Identifia
         let effort = self == .automatic ? automaticEffort : (self == .off ? "none" : rawValue)
         guard let effort else { return [:] }
         switch provider {
-        case .openRouter:
+        case .openRouter, .vercel:
             return ["reasoning": effort == "none" ? ["enabled": false] : ["effort": effort]]
         case .zai:
             return effort == "none" ? ["thinking": ["type": "disabled"]] : ["thinking": ["type": "enabled"], "reasoning_effort": effort]
+        case .anthropic:
+            return effort == "none" ? ["thinking": ["type": "disabled"]] : ["output_config": ["effort": effort]]
+        // These accept no "none": Gemini 3 and Grok cannot stop thinking, Mistral has only none/high,
+        // and SambaNova's hybrid models already default to thinking off.
+        case .gemini:
+            return ["reasoning_effort": effort == "none" ? "minimal" : effort]
+        case .xai:
+            return ["reasoning_effort": effort == "none" ? "low" : effort]
+        case .mistral:
+            return ["reasoning_effort": effort == "none" ? "none" : "high"]
+        case .sambaNova:
+            return effort == "none" ? [:] : ["reasoning_effort": effort]
         default:
             return ["reasoning_effort": effort]
         }
     }
 }
 
-/// Non-secret settings are remembered per provider; credentials remain keyed by endpoint in RewriteKeyStore.
+/// Non-secret settings are remembered per provider; RewriteKeyStore keeps one key per provider (Custom per endpoint).
 public struct RewriteProviderConfiguration: Codable, Equatable, Sendable {
     public var baseURL: String
     public var model: String

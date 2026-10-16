@@ -158,6 +158,8 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 
 The ⋯ menu is a plain menu: Permissions… (with the number that are off), Diagnostics…, Copy Diagnostics, Check for Updates…, About gob.lin, and Quit gob.lin ⌘Q.
 
+Right-clicking or Control-clicking the menu-bar icon opens a native menu instead of the popover: Cancel Dictation ⎋ (only while recording), Paste Last Dictation ⌥⇧⌘V, Settings… ⌘,, then the ⋯ menu. Both menus come from the same lists in `Menu/StatusMenu.swift`.
+
 ### Settings
 
 `Sources/GoblinApp/Settings/` and the per-page views.
@@ -172,7 +174,7 @@ The ⋯ menu is a plain menu: Permissions… (with the number that are off), Dia
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
 - **Cleanup:**
   - A top plate with the AI cleanup switch and a status row naming where the text goes.
-  - Provider: Service, Address, Model (a free field plus a "Suggested" menu), and API key (masked, "Saved in gob.lin preferences", Replace…).
+  - Provider: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key, plus Refresh), and API key (masked, "Saved in gob.lin preferences", Replace…).
   - Style: Level (None, Light, Medium) and Reasoning.
   - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again, plus an amber row: "Slower than 4 s? I type what you said instead."
 - **About:** centred.

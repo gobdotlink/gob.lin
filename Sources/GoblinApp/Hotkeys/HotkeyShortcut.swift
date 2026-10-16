@@ -26,11 +26,24 @@ struct HotkeyShortcut: Codable, Hashable, Sendable {
         }
     }
 
-    var label: String {
-        guard keyCode != nil else { return keyLabel }
+    private static let modifierKeys: [(flag: CGEventFlags, symbol: String, word: String)] = [
+        (.maskControl, "⌃", "control"), (.maskAlternate, "⌥", "option"), (.maskShift, "⇧", "shift"), (.maskCommand, "⌘", "command"),
+    ]
+
+    /// Each physical key, modifiers first, as a Mac keyboard prints it: ⌥ with "option", then ].
+    var keys: [(symbol: String, word: String)] {
+        if modifier == .fn { return [("fn", "")] }
         let flags = CGEventFlags(rawValue: modifiers)
-        return (flags.contains(.maskControl) ? "⌃" : "") + (flags.contains(.maskAlternate) ? "⌥" : "")
-            + (flags.contains(.maskShift) ? "⇧" : "") + (flags.contains(.maskCommand) ? "⌘" : "") + keyLabel
+        let held = Self.modifierKeys.filter { flags.contains($0.flag) }.map { (symbol: $0.symbol, word: $0.word) }
+        return keyCode == nil ? held : held + [(keyLabel, "")]
+    }
+
+    var label: String { keyCode == nil ? keyLabel : keys.map(\.symbol).joined() }
+
+    /// Spelled out for running text: "Option + ]".
+    var title: String {
+        if modifier == .fn { return "fn / Globe" }
+        return keyCode == nil ? keyLabel : keys.map { $0.word.isEmpty ? $0.symbol : $0.word.capitalized }.joined(separator: " + ")
     }
 
     var carbonModifiers: UInt32 {

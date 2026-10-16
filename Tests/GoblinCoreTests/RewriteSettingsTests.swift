@@ -28,8 +28,12 @@ struct RewriteSettingsTests {
         #expect(settings.configuration == tuned)
         settings = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
         #expect(settings.temperature == nil)
+        // A named service ignores an edited address; Custom starts from the service's own.
+        #expect(try settings.endpoint().host == "api.groq.com")
         settings.selectProvider(.custom)
-        #expect(settings.configuration == tuned)
+        var adapted = tuned
+        adapted.baseURL = RewriteProvider.groq.baseURL
+        #expect(settings.configuration == adapted)
     }
 
     @Test func newInstallStartsDisabledWithFastProviderAndCredentialsStayOutOfPreferences() throws {

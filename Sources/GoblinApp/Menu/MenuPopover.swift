@@ -7,6 +7,7 @@ import SwiftUI
 /// that module rather than the whole popover.
 struct MenuPopover: View {
     let model: AppModel
+    @Environment(\.dismiss) private var dismiss
     @State private var height: CGFloat = 0
 
     var body: some View {
@@ -22,6 +23,8 @@ struct MenuPopover: View {
         .frame(width: 360)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .background(PopoverWindowFit(height: height))
+        .onAppear { model.closePopover = { dismiss() } }
+        .onDisappear { model.closePopover = nil }
     }
 }
 
@@ -40,6 +43,7 @@ private struct PopoverHeader: View {
     @ObservedObject private var diagnostics: DiagnosticsModel
     @ObservedObject private var speechModels: SpeechModelService
     @ObservedObject private var hotkeys: HotkeyService
+    // The ⋯ menu's titles and enabled states come from these two.
     @ObservedObject private var permissions: PermissionModel
     @ObservedObject private var updates: UpdateChecker
     @Environment(\.dismiss) private var dismiss
@@ -63,7 +67,7 @@ private struct PopoverHeader: View {
                     StatusLight(state: status.light, size: 7)
                     if status.light == .ready, model.mascotState == .idle {
                         Text("Ready · hold")
-                        KeyCap(hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label, small: true)
+                        KeyCombo(label: hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label, small: true)
                         Text("to talk")
                     } else {
                         Text(model.mascotState == .recording ? "Listening…" : model.mascotState == .transcribing ? "Writing it out…"
@@ -75,14 +79,13 @@ private struct PopoverHeader: View {
             }
             Spacer(minLength: 6)
             Menu {
-                Button(missingPermissions == 0 ? "Permissions…" : "Permissions… (\(missingPermissions) off)") { dismiss.then { permissions.showOnboarding() } }
-                Button("Diagnostics…") { dismiss.then { model.openSettings(.diagnostics) } }
-                Button("Copy Diagnostics") { diagnostics.copyDiagnostics() }
-                Divider()
-                Button("Check for Updates…") { dismiss.then { model.openSettings(.about); updates.check() } }.disabled(updates.isBusy)
-                Button("About gob.lin") { dismiss.then { model.openSettings(.about) } }
-                Divider()
-                Button("Quit gob.lin") { NSApp.terminate(nil) }.keyboardShortcut("q")
+                ForEach(Array(model.moreMenu.enumerated()), id: \.offset) { index, section in
+                    if index > 0 { Divider() }
+                    ForEach(section, id: \.title) { command in
+                        Button(command.title) { dismiss.then(command.perform) }
+                            .keyboardShortcut(command.shortcut).disabled(!command.enabled)
+                    }
+                }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
                     .frame(width: 28, height: 28).background(.quaternary, in: Circle())
@@ -91,10 +94,6 @@ private struct PopoverHeader: View {
             .accessibilityLabel("More")
         }
         .padding(.horizontal, 6).padding(.top, 4).padding(.bottom, 2)
-    }
-
-    private var missingPermissions: Int {
-        (permissions.snapshot.microphone == .authorized ? 0 : 1) + (permissions.snapshot.accessibility ? 0 : 1)
     }
 }
 
