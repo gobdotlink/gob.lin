@@ -60,6 +60,7 @@ extension DiagnosticFailure {
         case .microphonePermissionMissing: ("Microphone access is off", "I can't hear you until you allow it.")
         case .microphoneUnavailable: ("No microphone", "Plug one in, or pick another in Audio settings.")
         case .microphoneCaptureFailed: ("The microphone stopped", "Check the device, then try again.")
+        case .microphoneMuted: ("The microphone is silent", "Unmute it or raise its input volume, then try again.")
         case .requiredPermissionsMissing, .insertionPermissionMissing: ("Accessibility is off", "I can't type for you or notice the talk key until you allow it.")
         case .hotkeyUnavailable: ("The talk key isn't working", "Check it in General settings.")
         case .secureInputEnabled: ("Secure Input is on", "An app is guarding a password field, so modifier-only talk keys wait until it's done.")

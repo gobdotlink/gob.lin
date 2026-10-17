@@ -413,6 +413,9 @@ final class AppModel: ObservableObject {
             diagnostics.resolve(.microphone)
             diagnostics.developmentLog.record(.firstBuffer, area: .microphone, operation: session.id)
             overlay.update(.listening, session: overlayID)
+        case .silence(let id, let cause):
+            guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
+            overlay.setMicrophoneNotice(cause?.message, session: overlayID)
         case .frame, .level: break
         case .failed(let id, let failure):
             guard id == active.captureID else { return }
@@ -594,6 +597,7 @@ final class AppModel: ObservableObject {
         switch failure.kind {
         case .permissionMissing: .microphonePermissionMissing
         case .deviceUnavailable: .microphoneUnavailable
+        case .allZeroStream: .microphoneMuted
         default: .microphoneCaptureFailed
         }
     }

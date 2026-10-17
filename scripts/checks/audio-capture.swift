@@ -34,7 +34,7 @@ final class CaptureEvidence: @unchecked Sendable {
                 for sample in frame.samples { peak = max(peak, abs(Double(sample))); sum += Double(sample) * Double(sample) }
             case .failed(_, let error): failure = error.kind
             case .finished(let audio): precondition(audio.sampleCount == expectedPosition)
-            case .level, .cancelled: break
+            case .level, .silence, .cancelled: break
             }
         }
     }
@@ -203,7 +203,26 @@ struct AudioCaptureCheck {
         }
         precondition(zeros.watchdogFailure() == .allZeroStream)
         precondition(gated.watchdogFailure() == nil, "A continuous gated pause after valid input must not end capture")
+        // Silence warning decisions: device evidence needs the stream to agree; pauses stay quiet.
+        func warning(device: InputSilence? = nil, streak: TimeInterval? = nil, leading: TimeInterval? = nil, heard: Bool) -> InputSilence? {
+            InputSilenceMonitor.cause(device: device, streak: streak, leading: leading, heardSound: heard)
+        }
+        precondition(warning(device: .muted, streak: 0.2, leading: 0.2, heard: false) == .muted)
+        precondition(warning(device: .volumeAtZero, streak: 0.2, heard: true) == .volumeAtZero)
+        precondition(warning(device: .muted, heard: true) == nil, "Samples still arriving outrank a mute report")
+        precondition(warning(streak: 2.4, leading: 2.4, heard: false) == nil)
+        precondition(warning(streak: 2.5, leading: 2.5, heard: false) == .silent)
+        precondition(warning(streak: 14.9, heard: true) == nil, "A thinking pause must not warn")
+        precondition(warning(streak: 15, heard: true) == .silent)
+        let zeroSnapshot = zeros.silenceSnapshot()
+        precondition(!zeroSnapshot.heardSound && (zeroSnapshot.leading ?? 0) >= 5)
+        precondition(warning(streak: zeroSnapshot.streak, leading: zeroSnapshot.leading, heard: zeroSnapshot.heardSound) == .silent)
+        let gatedSnapshot = gated.silenceSnapshot()
+        precondition(gatedSnapshot.heardSound && (gatedSnapshot.streak ?? 99) < 15)
+        precondition(warning(streak: gatedSnapshot.streak, leading: gatedSnapshot.leading, heard: gatedSnapshot.heardSound) == nil,
+                     "A gated pause after valid input must not warn either")
         gated.receive(buffer, time: AVAudioTime(sampleTime: 10_080, atRate: 16_000))
+        precondition(gated.silenceSnapshot().streak == nil, "Returning sound clears the silence streak")
         let gatedAudio = try await gated.finish(sessionID: gatedID, cancel: false)!
         try gatedEvidence.check(gatedAudio, requireNonzero: true)
         precondition(gatedAudio.sampleCount == 11_680, "Later samples after the gated pause must remain captured")
@@ -224,7 +243,7 @@ struct AudioCaptureCheck {
         try Data().write(to: badDirectory)
         do { _ = try CaptureFile(sessionID: UUID(), directory: badDirectory); preconditionFailure("Non-directory storage must fail") }
         catch { }
-        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, stop cutoff/last samples/deadline/clock/cancellation races, initial-zero/gated-pause/reset/no-callback watchdogs, invalid storage.")
+        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, stop cutoff/last samples/deadline/clock/cancellation races, initial-zero/gated-pause/reset/no-callback watchdogs, muted/silent-input warning decisions and streak reset, invalid storage.")
     }
 
     @MainActor static func checkStopBoundary(directory: URL, device: AudioInputResolution, format: AVAudioFormat) async throws {

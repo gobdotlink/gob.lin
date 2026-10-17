@@ -12,7 +12,7 @@ public enum DiagnosticArea: String, CaseIterable, Sendable {
 
 /// Only typed, static messages enter diagnostics; never pass an error's localizedDescription here.
 public enum DiagnosticFailure: Equatable, Sendable {
-    case microphonePermissionMissing, microphoneUnavailable, microphoneCaptureFailed
+    case microphonePermissionMissing, microphoneUnavailable, microphoneCaptureFailed, microphoneMuted
     case requiredPermissionsMissing, hotkeyUnavailable, secureInputEnabled
     case modelUnavailable, modelLoadFailed, transcriptionFailed, silenceTrimmingFailed
     case rewriteConfiguration, rewriteTimeout, rewriteTransport, rewriteHTTPStatus(Int), rewriteInvalidResponse
@@ -21,7 +21,7 @@ public enum DiagnosticFailure: Equatable, Sendable {
 
     public var area: DiagnosticArea {
         switch self {
-        case .microphonePermissionMissing, .microphoneUnavailable, .microphoneCaptureFailed: .microphone
+        case .microphonePermissionMissing, .microphoneUnavailable, .microphoneCaptureFailed, .microphoneMuted: .microphone
         case .requiredPermissionsMissing: .permissions
         case .hotkeyUnavailable: .hotkeys
         case .secureInputEnabled: .secureInput
@@ -41,6 +41,7 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .microphonePermissionMissing: "Microphone access is missing. Complete microphone setup in Permissions & onboarding."
         case .microphoneUnavailable: "No microphone is available. Connect a microphone and try again."
         case .microphoneCaptureFailed: "Microphone recording failed. Check your audio device and try again."
+        case .microphoneMuted: "The microphone delivered only silence. Check its mute and input volume, then try again."
         case .requiredPermissionsMissing: "Accessibility access is missing. Complete Permissions & onboarding."
         case .hotkeyUnavailable: "The dictation shortcut is unavailable. Check shortcut settings and permissions."
         case .secureInputEnabled: "Secure Input is enabled. Modifier-only shortcuts are paused, and protected fields cannot receive dictation."

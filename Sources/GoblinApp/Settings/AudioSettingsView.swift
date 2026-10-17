@@ -12,6 +12,7 @@ final class AudioPreviewModel: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var ready = false
     @Published var error: String?
+    @Published private(set) var silenceNotice: String?
     /// The open preview, resolving to its id once the device is running (nil if it failed or was stopped first).
     private var preview: Task<UUID?, Never>?
     private var sessionID = UUID()
@@ -60,10 +61,12 @@ final class AudioPreviewModel: ObservableObject {
                         } else if self.error == "Selected microphone is unavailable; preview uses the system default. Your preference is kept." {
                             self.error = nil
                         }
+                    case .silence(let cause):
+                        if self.silenceNotice != cause?.message { self.silenceNotice = cause?.message }
                     case .failed(let failure):
                         self.stop(reason: .configurationChanged)
                         self.error = failure.localizedDescription
-                        self.diagnostics?.report(.microphoneCaptureFailed, operation: session)
+                        self.diagnostics?.report(failure.kind == .allZeroStream ? .microphoneMuted : .microphoneCaptureFailed, operation: session)
                     }
                 }
                 let resolution = await service.inputResolution
@@ -78,13 +81,14 @@ final class AudioPreviewModel: ObservableObject {
                     }
                 }
                 log(.engineStarted)
-                if diagnostics?.activeFailures[.microphone] == .microphoneCaptureFailed { diagnostics?.resolve(.microphone) }
+                if diagnostics?.activeFailures[.microphone] == .microphoneCaptureFailed || diagnostics?.activeFailures[.microphone] == .microphoneMuted { diagnostics?.resolve(.microphone) }
                 return id
             } catch {
                 guard let self, self.sessionID == session else { return nil }
                 self.error = error.localizedDescription
                 log(.previewFailed, severity: .error)
-                diagnostics?.report((error as? AudioCaptureFailure)?.kind == .permissionMissing ? .microphonePermissionMissing : .microphoneCaptureFailed, operation: session)
+                let kind = (error as? AudioCaptureFailure)?.kind
+                diagnostics?.report(kind == .permissionMissing ? .microphonePermissionMissing : kind == .allZeroStream ? .microphoneMuted : .microphoneCaptureFailed, operation: session)
                 return nil
             }
         }
@@ -101,6 +105,7 @@ final class AudioPreviewModel: ObservableObject {
         if running { running = false }
         if ready { ready = false }
         if level != 0 { level = 0 }
+        if silenceNotice != nil { silenceNotice = nil }
     }
 
     nonisolated static func deviceInputLevel(_ buffer: AVAudioPCMBuffer) -> Double {
@@ -159,6 +164,7 @@ struct AudioSettingsView: View {
             if permissions.snapshot.microphone != .authorized {
                 LabeledContent("Microphone access") { Button("Allow microphone…") { permissions.request(.microphone) } }
             }
+            if let notice = preview.silenceNotice { Label(notice, systemImage: "mic.slash.fill").foregroundStyle(.red) }
             if let error = preview.error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
         } header: { Text("Level check") } footer: {
             Text("The preview is local and is not saved. Missing devices fall back to the system default without erasing your saved selection.")

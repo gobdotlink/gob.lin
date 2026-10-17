@@ -85,6 +85,8 @@ final class OverlayModel: ObservableObject {
     /// Shut or yap, with hysteresis and at most 12 changes a second, so the mouth never flaps.
     @Published private(set) var mouthOpen = false
     @Published var previewUnavailable = false
+    /// Shown inside Listening while the microphone delivers only silence.
+    @Published var microphoneNotice: String?
     static let levelHistory = 5
     var cancel: () -> Void = {}
     var perform: (OverlayAction) -> Void = { _ in }
@@ -106,6 +108,7 @@ final class OverlayModel: ObservableObject {
         mouthOpen = false
         mouthChanged = .distantPast
         previewUnavailable = false
+        microphoneNotice = nil
         listeningStarted = nil
         audioSeconds = nil
         cleanupLabel = ""
@@ -183,6 +186,11 @@ final class OverlayController {
         if let tentative, tentative != model.tentativeText { model.tentativeText = tentative }
         if previewUnavailable { model.previewUnavailable = true }
         if let level { model.audioLevel = level.isFinite ? min(1, max(0, level)) : 0 }
+    }
+
+    func setMicrophoneNotice(_ notice: String?, session: UUID) {
+        guard session == sessionID, model.microphoneNotice != notice else { return }
+        model.microphoneNotice = notice
     }
 
     func hide(session: UUID? = nil) {
