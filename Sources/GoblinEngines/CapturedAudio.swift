@@ -44,7 +44,7 @@ public struct AudioCaptureFailure: Error, LocalizedError, Sendable {
 }
 
 /// Why no sound is reaching the app. The first two come from the device itself; the last is
-/// inferred from the samples alone, for devices that expose no mute or volume control.
+/// inferred from the samples alone when the device does not report either condition.
 public enum InputSilence: Sendable, Equatable {
     case muted, volumeAtZero, silent
 
@@ -61,16 +61,18 @@ public enum InputSilence: Sendable, Equatable {
 /// Sound thresholds only: capture itself keeps running either way.
 public enum InputSilenceMonitor {
     /// Before any sound has ever arrived, this much digital silence means something is wrong.
-    public static let leadingSilence: TimeInterval = 2.5
+    public static let leadingSilence: TimeInterval = 5
     /// After sound has arrived, only a long unbroken silence warns: thinking pauses stay quiet.
     public static let trailingSilence: TimeInterval = 15
 
     /// `device` is what the hardware reports about itself; `streak` is how long the stream has
-    /// currently been all-zero; `leading` is how long it has been all-zero since the session began.
-    public static func cause(device: InputSilence?, streak: TimeInterval?, leading: TimeInterval?,
+    /// currently been all-zero; `leading` applies that interval to this session.
+    public static func cause(device: InputSilence?, receivingInput: Bool, streak: TimeInterval?, leading: TimeInterval?,
                              heardSound: Bool) -> InputSilence? {
-        // The device says it is silenced and the stream agrees right now.
-        if let device, streak != nil { return device }
+        guard receivingInput else { return nil }
+        // A silenced device can still deliver nonzero noise.
+        if let device { return device }
+        // shortcut: sample-only warnings require exact zeros until a noise floor is calibrated on hardware.
         if !heardSound, let leading, leading >= leadingSilence { return .silent }
         if heardSound, let streak, streak >= trailingSilence { return .silent }
         return nil

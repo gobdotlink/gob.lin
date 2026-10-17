@@ -69,6 +69,7 @@ public final class AudioCaptureService {
             try processor!.begin(sessionID: id, directory: try directory ?? Self.defaultDirectory(), resolution: inputResolution!,
                                  feedback: feedback, feedbackSessionID: feedbackSessionID, handler: onEvent)
             activeSessionID = id; eventHandler = onEvent; cancellationRequested = false; terminalCommitted = false; cancellationError = nil; silenceCause = nil
+            notifyPreviews(.silence(nil))
             try startInput()
             return id
         } catch {
@@ -150,7 +151,8 @@ public final class AudioCaptureService {
             guard requested.device.id == inputResolution?.device.id else { throw AudioCaptureFailure(.alreadyRecording) }
         } else { try prepareInput(uid: uid) }
         let id = UUID()
-        previews[id] = onEvent; silenceCause = nil
+        previews[id] = onEvent
+        notifyPreviews(.silence(silenceCause))
         do { try startInput() }
         catch { previews.removeValue(forKey: id); if !warmMicrophoneEnabled && activeSessionID == nil { closeInput() }; throw error }
         return id
@@ -230,12 +232,12 @@ public final class AudioCaptureService {
         guard let processor, let input else { return }
         let snapshot = processor.silenceSnapshot()
         let cause = InputSilenceMonitor.cause(device: AudioInputDevices.deviceSilence(input.device),
-            streak: snapshot.streak, leading: snapshot.leading, heardSound: snapshot.heardSound)
+            receivingInput: snapshot.receivingInput, streak: snapshot.streak, leading: snapshot.leading, heardSound: snapshot.heardSound)
         guard cause != silenceCause else { return }
         silenceCause = cause
+        notifyPreviews(.silence(cause))
         // Through the processor queue, so the warning stays in order with frames and levels.
         if let id = activeSessionID { await processor.notify(.silence(sessionID: id, cause: cause), handler: eventHandler) }
-        notifyPreviews(.silence(cause))
     }
 
     /// In order on the main queue, so a meter never shows a level after its failure.
@@ -259,13 +261,17 @@ public final class AudioCaptureService {
             if let cancellationError { waiter.resume(throwing: cancellationError) } else { waiter.resume() }
         }
         if let input, input.isHealthy, let processor {
-            if warmMicrophoneEnabled || !previews.isEmpty { processor.resume() }
+            if warmMicrophoneEnabled || !previews.isEmpty {
+                processor.resume(); silenceCause = nil
+                notifyPreviews(.silence(nil))
+            }
             else { closeInput() }
         } else { closeInput() }
     }
 
     private func closeInput(keepProcessor: Bool = false) {
         generation = UUID(); silenceCause = nil
+        notifyPreviews(.silence(nil))
         watchdog?.cancel(); watchdog = nil
         if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver); self.sleepObserver = nil }
         processor?.pause()

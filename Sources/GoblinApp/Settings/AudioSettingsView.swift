@@ -45,6 +45,7 @@ final class AudioPreviewModel: ObservableObject {
         if !uid.isEmpty { details.selectedDevice = diagnostics?.developmentLog.deviceID(uid) }
         log(.previewRequested, details: details)
         guard monitorSystem else { return }
+        running = true
         refresh()
         let service = AudioCaptureService.shared
         // Opening the device happens on the capture thread; a stop meanwhile ends whatever it opened.
@@ -71,7 +72,7 @@ final class AudioPreviewModel: ObservableObject {
                 }
                 let resolution = await service.inputResolution
                 guard let self, self.sessionID == session else { await service.endPreview(id); return nil }
-                running = true; error = nil
+                error = nil
                 if let device = resolution {
                     details.resolvedDevice = diagnostics?.developmentLog.deviceID(device.device.uid)
                     log(.deviceResolved, details: details)
@@ -85,6 +86,7 @@ final class AudioPreviewModel: ObservableObject {
                 return id
             } catch {
                 guard let self, self.sessionID == session else { return nil }
+                running = false
                 self.error = error.localizedDescription
                 log(.previewFailed, severity: .error)
                 let kind = (error as? AudioCaptureFailure)?.kind

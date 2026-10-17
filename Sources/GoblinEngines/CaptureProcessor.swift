@@ -214,21 +214,22 @@ final class CaptureProcessor: @unchecked Sendable {
     /// A point-in-time read of the zero-stream tracking, for the silence warning.
     /// The streak counts only while callbacks are actually flowing: a stream that
     /// stopped delivering is the no-callback watchdog's problem, not a mute warning.
-    func silenceSnapshot() -> (streak: TimeInterval?, leading: TimeInterval?, heardSound: Bool) {
+    func silenceSnapshot() -> (receivingInput: Bool, streak: TimeInterval?, leading: TimeInterval?, heardSound: Bool) {
         lock.withLock {
             let now = ContinuousClock.now
             func seconds(since start: ContinuousClock.Instant) -> TimeInterval {
                 let duration = start.duration(to: now).components
                 return Double(duration.seconds) + Double(duration.attoseconds) / 1e18
             }
-            guard hasCallback, lastCallback.duration(to: now) <= .seconds(1), let zeroSince else {
-                return (nil, nil, hasNonzeroInput)
+            guard accepting, hasCallback, lastCallback.duration(to: now) <= .seconds(1) else {
+                return (false, nil, nil, hasNonzeroInput)
             }
+            guard let zeroSince else { return (true, nil, nil, hasNonzeroInput) }
             let leading: TimeInterval?
             if hasNonzeroInput { leading = nil }
             else if let recordingSince { leading = seconds(since: max(zeroSince, recordingSince)) }
             else { leading = seconds(since: zeroSince) }
-            return (seconds(since: zeroSince), leading, hasNonzeroInput)
+            return (true, seconds(since: zeroSince), leading, hasNonzeroInput)
         }
     }
 
@@ -238,7 +239,6 @@ final class CaptureProcessor: @unchecked Sendable {
             if let pendingFailure { return pendingFailure }
             if overflow { return .bufferOverflow }
             if lastCallback.duration(to: now) > (hasCallback ? .seconds(5) : .seconds(10)) { return .noCallbacks }
-            if !hasNonzeroInput, let zeroSince, zeroSince.duration(to: now) > .seconds(5) { return .allZeroStream }
             return nil
         }
     }

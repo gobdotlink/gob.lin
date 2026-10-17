@@ -70,4 +70,16 @@ Native capture probe after the change, with AirPods as the default input and out
 
 Real app: with AirPods connected and the DJI selected, three dictations started with first audio after 178–217 ms, opened only the DJI, and left the AirPods at 48 kHz. A preview and a dictation with the AirPods input selected also completed; the first dictation's audio arrived after 475 ms. No default-device aggregate was created.
 
-Still untested: physical unplug during capture, an actual sample-rate change, sleep and wake with this input path, and built-in speech with the lid open. Opening the device remains on the main actor; with a Bluetooth input selected, audio starts about 0.2–0.5 s after the device opens.
+Still untested: physical unplug during capture, an actual sample-rate change, sleep and wake with this input path, and built-in speech with the lid open. Opening the device runs on the capture actor's dedicated executor; with a Bluetooth input selected, audio starts about 0.2–0.5 s after the device opens.
+
+## Muted and silent input warnings
+
+The opened device's reported mute or zero input volume now produces a nonterminal warning once fresh audio callbacks are flowing. Nonzero noise cannot suppress this device evidence. Without a device-reported cause, exact-zero samples warn after five seconds initially, or fifteen seconds after nonzero input. No RMS cutoff is applied. Flowing digital silence no longer triggers the former five-second terminal failure; missing callbacks and other capture failures retain their existing handling. This supersedes the initial-zero timeout described in earlier results above.
+
+A certificate-signed probe exercised the actual capture service on the C920 webcam and built-in microphone. Both reported zero volume within the existing 250 ms polling interval, continued capturing for more than six seconds, and propagated warning changes to the session and preview. The webcam still delivered nonzero samples while its volume was zero. Explicit mute, restoring volume, and unmuting were exercised during each recording. All original mute and volume values were restored.
+
+The built-in microphone delivered exact zeros throughout this setup. Restoring its volume therefore changed the specific warning to the generic silence notice. A retained preview warned after about 5.2 seconds of digital silence; starting a new recording immediately cleared that published notice. The processor checks also cover the five/fifteen-second boundaries, callback freshness, quiet nonzero input, warning-only zero streams, and reset behavior.
+
+The signed release app's Audio preview visibly showed the zero-volume notice while the webcam meter still read 5%. Restoring volume cleared the notice and returned the meter to 22%. Switching the running preview to another device showed a pending Stop control, which successfully stopped the pending preview. The previous device selection and volume were restored. Package smoke checks, all 34 Swift tests, media ownership checks, and the universal Xcode Release build passed.
+
+Unsupported devices that emit nonzero hiss remain outside the conservative sample-only detector. No noise-floor calibration, physical headset mute, or Bluetooth startup acceptance was performed in this correction.
