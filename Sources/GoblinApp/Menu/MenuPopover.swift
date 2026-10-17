@@ -445,7 +445,7 @@ private struct PopoverInsights: View {
             do {
                 guard let store = history.store else { throw HistoryError.database("History is unavailable") }
                 let now = Date(), calendar = Calendar.current
-                let firstChartDay = calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: now))!
+                let firstChartDay = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: now))!)
                 let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)!.start
                 let result = try await store.insights(now: now, day: now, calendar: calendar, since: min(firstChartDay, weekStart))
                 try Task.checkCancellation()
