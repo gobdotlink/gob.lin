@@ -60,7 +60,7 @@ final class CaptureProcessor: @unchecked Sendable {
                feedback: FeedbackSounds? = nil,
                feedbackSessionID: UUID? = nil,
                handler: @escaping @Sendable (AudioCaptureEvent) -> Void) throws {
-        lock.withLock { recordingSince = .now; hasNonzeroInput = false; inputHostRange = nil; hostTimesValid = true }
+        lock.withLock { recordingSince = .now; hasNonzeroInput = false; zeroSince = nil; inputHostRange = nil; hostTimesValid = true }
         try queue.sync {
             guard file == nil else { throw AudioCaptureFailure(.alreadyRecording) }
             if let failure { throw failure }
@@ -211,13 +211,34 @@ final class CaptureProcessor: @unchecked Sendable {
         }
     }
 
+    /// A point-in-time read of the zero-stream tracking, for the silence warning.
+    /// The streak counts only while callbacks are actually flowing: a stream that
+    /// stopped delivering is the no-callback watchdog's problem, not a mute warning.
+    func silenceSnapshot() -> (receivingInput: Bool, streak: TimeInterval?, leading: TimeInterval?, heardSound: Bool) {
+        lock.withLock {
+            let now = ContinuousClock.now
+            func seconds(since start: ContinuousClock.Instant) -> TimeInterval {
+                let duration = start.duration(to: now).components
+                return Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+            }
+            guard accepting, hasCallback, lastCallback.duration(to: now) <= .seconds(1) else {
+                return (false, nil, nil, hasNonzeroInput)
+            }
+            guard let zeroSince else { return (true, nil, nil, hasNonzeroInput) }
+            let leading: TimeInterval?
+            if hasNonzeroInput { leading = nil }
+            else if let recordingSince { leading = seconds(since: max(zeroSince, recordingSince)) }
+            else { leading = seconds(since: zeroSince) }
+            return (true, seconds(since: zeroSince), leading, hasNonzeroInput)
+        }
+    }
+
     func watchdogFailure() -> AudioCaptureFailure.Kind? {
         lock.withLock {
             let now = ContinuousClock.now
             if let pendingFailure { return pendingFailure }
             if overflow { return .bufferOverflow }
             if lastCallback.duration(to: now) > (hasCallback ? .seconds(5) : .seconds(10)) { return .noCallbacks }
-            if !hasNonzeroInput, let zeroSince, zeroSince.duration(to: now) > .seconds(5) { return .allZeroStream }
             return nil
         }
     }

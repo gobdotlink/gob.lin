@@ -137,6 +137,7 @@ The menu-bar icon (`GoblinBrand.menuImage`) is final, including its state dots. 
 | inserted (new) | closed, one nod | A one-line chip: "Typed into Mail · 23 words · 0.59 s". It leaves after 500 ms. |
 | cleanup failed | sheepish | "Cleanup took too long, so I typed your words as you said them." Subline: `Cleanup › Cerebras didn't answer within 4.0 s`. Stays 2.5 s; hovering holds it. |
 | no microphone | squint, palm | "I can't hear anything. No microphone is connected." The subline holds "Choose Microphone…". Stays until dismissed, or 6 s. |
+| microphone silent | same while listening | A line under the header names the cause: muted, volume at zero, or no sound arriving. Device reports warn despite nonzero noise and clear on hardware recovery; a generic silence notice may remain. Sample-only warnings use 5 s before any sound or 15 s after sound and clear when sound returns. Recording continues. |
 | password field | side-eye, palm | "That's a password field, so I didn't type there." Subline: `Insert › Secure Input is on`. |
 | milestone (new) | cackle, sparkles | Replaces the inserted chip once, at 1k, 10k, 100k and 1M words: "10,000 words yapped." The bubble edge glows candle. Stays 2.5 s. |
 

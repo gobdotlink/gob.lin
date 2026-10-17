@@ -146,6 +146,14 @@ private struct OverlayBubble: View {
                         .help("Cancel dictation (Esc)")
                 }
                 .frame(height: 24)
+                if let notice = model.microphoneNotice {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mic.slash.fill").foregroundStyle(Color(red: 1, green: 0.48, blue: 0.43))
+                        Text(notice).fontWeight(.semibold)
+                    }
+                    .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 words(caret: true)
             }
         case .transcribing:
@@ -274,6 +282,11 @@ private struct NoticeCopy {
             symbol = "mic.slash.fill"; tint = Color(red: 1, green: 0.48, blue: 0.43)
             sentence = "The microphone stopped working, so I couldn't finish."
             detail = "Audio › recording failed"; face = .squint; hand = .palm
+            action = ("Audio Settings…", .audioSettings)
+        case .microphoneMuted:
+            symbol = "mic.slash.fill"; tint = Color(red: 1, green: 0.48, blue: 0.43)
+            sentence = "I only heard silence. Your microphone may be muted."
+            detail = "Audio › no sound arrived"; face = .squint; hand = .palm
             action = ("Audio Settings…", .audioSettings)
         case .microphonePermissionMissing:
             symbol = "mic.slash.fill"; tint = Color(red: 1, green: 0.48, blue: 0.43)

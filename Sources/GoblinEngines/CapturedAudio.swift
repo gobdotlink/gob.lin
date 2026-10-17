@@ -43,10 +43,48 @@ public struct AudioCaptureFailure: Error, LocalizedError, Sendable {
     }
 }
 
+/// Why no sound is reaching the app. The first two come from the device itself; the last is
+/// inferred from the samples alone when the device does not report either condition.
+public enum InputSilence: Sendable, Equatable {
+    case muted, volumeAtZero, silent
+
+    public var message: String {
+        switch self {
+        case .muted: "Your microphone is muted, so I can't hear you."
+        case .volumeAtZero: "Your microphone volume is at zero, so I can't hear you."
+        case .silent: "I'm not hearing anything. Is your microphone muted?"
+        }
+    }
+}
+
+/// Decides whether silence is worth a warning, without touching hardware.
+/// Sound thresholds only: capture itself keeps running either way.
+public enum InputSilenceMonitor {
+    /// Before any sound has ever arrived, this much digital silence means something is wrong.
+    public static let leadingSilence: TimeInterval = 5
+    /// After sound has arrived, only a long unbroken silence warns: thinking pauses stay quiet.
+    public static let trailingSilence: TimeInterval = 15
+
+    /// `device` is what the hardware reports about itself; `streak` is how long the stream has
+    /// currently been all-zero; `leading` applies that interval to this session.
+    public static func cause(device: InputSilence?, receivingInput: Bool, streak: TimeInterval?, leading: TimeInterval?,
+                             heardSound: Bool) -> InputSilence? {
+        guard receivingInput else { return nil }
+        // A silenced device can still deliver nonzero noise.
+        if let device { return device }
+        // shortcut: sample-only warnings require exact zeros until a noise floor is calibrated on hardware.
+        if !heardSound, let leading, leading >= leadingSilence { return .silent }
+        if heardSound, let streak, streak >= trailingSilence { return .silent }
+        return nil
+    }
+}
+
 public enum AudioCaptureEvent: Sendable {
     case ready(sessionID: UUID, device: AudioInputResolution)
     case frame(AudioCaptureFrame)
     case level(sessionID: UUID, rms: Double)
+    /// Non-terminal: the current silence warning, cleared with nil when sound returns.
+    case silence(sessionID: UUID, cause: InputSilence?)
     case finished(CapturedAudio)
     case failed(sessionID: UUID, failure: AudioCaptureFailure)
     case cancelled(sessionID: UUID)
@@ -54,5 +92,7 @@ public enum AudioCaptureEvent: Sendable {
 
 public enum AudioPreviewEvent: Sendable {
     case input(device: AudioInputResolution, rms: Double)
+    /// Non-terminal: the current silence warning, cleared with nil when sound returns.
+    case silence(InputSilence?)
     case failed(AudioCaptureFailure)
 }

@@ -217,8 +217,8 @@ private struct PopoverMicrophone: View {
             }
             .frame(height: 26)
             .accessibilityHidden(true)
-            Text(preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : "Hold the button to check your mic. Nothing is saved."))
-                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            Text(preview.silenceNotice ?? preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : "Hold the button to check your mic. Nothing is saved."))
+                .font(.system(size: 11)).foregroundStyle(preview.silenceNotice == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(1)
         }
         .moduleBackground()
         .onAppear { preview.refresh() }

@@ -34,7 +34,7 @@ final class CaptureEvidence: @unchecked Sendable {
                 for sample in frame.samples { peak = max(peak, abs(Double(sample))); sum += Double(sample) * Double(sample) }
             case .failed(_, let error): failure = error.kind
             case .finished(let audio): precondition(audio.sampleCount == expectedPosition)
-            case .level, .cancelled: break
+            case .level, .silence, .cancelled: break
             }
         }
     }
@@ -189,21 +189,62 @@ struct AudioCaptureCheck {
         try await checkStopBoundary(directory: directory, device: device, format: format)
         let neverStarted = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
         let zeros = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        precondition(!zeros.silenceSnapshot().receivingInput)
+        let zeroID = UUID(), zeroEvidence = CaptureEvidence()
+        try zeros.begin(sessionID: zeroID, directory: directory, resolution: device, handler: zeroEvidence.record)
         let zeroBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
         zeroBuffer.frameLength = 160
         for i in 0..<160 { zeroBuffer.floatChannelData![0][i] = 0 }
+        let nearZero = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
+        let nearZeroBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 160)!
+        nearZeroBuffer.frameLength = 160
+        for i in 0..<160 { nearZeroBuffer.floatChannelData![0][i] = 0.0002 }
         let gated = try CaptureProcessor(format: format, resolution: device, preview: { _ in }, onFailure: { _ in })
         let gatedID = UUID(), gatedEvidence = CaptureEvidence()
         try gated.begin(sessionID: gatedID, directory: directory, resolution: device, handler: gatedEvidence.record)
         gated.receive(buffer, time: AVAudioTime(sampleTime: 0, atRate: 16_000))
         for tick in 0..<53 {
             zeros.receive(zeroBuffer)
+            nearZero.receive(nearZeroBuffer)
             gated.receive(zeroBuffer, time: AVAudioTime(sampleTime: 1600 + Int64(tick * 160), atRate: 16_000))
             try await Task.sleep(for: .milliseconds(100))
         }
-        precondition(zeros.watchdogFailure() == .allZeroStream)
+        precondition(zeros.watchdogFailure() == nil, "Flowing digital silence must warn without ending capture")
         precondition(gated.watchdogFailure() == nil, "A continuous gated pause after valid input must not end capture")
+        // Device evidence is authoritative once callbacks flow; sample-only pauses stay quiet.
+        func warning(device: InputSilence? = nil, receiving: Bool = true, streak: TimeInterval? = nil, leading: TimeInterval? = nil, heard: Bool) -> InputSilence? {
+            InputSilenceMonitor.cause(device: device, receivingInput: receiving, streak: streak, leading: leading, heardSound: heard)
+        }
+        precondition(warning(device: .muted, streak: 0.2, leading: 0.2, heard: false) == .muted)
+        precondition(warning(device: .volumeAtZero, streak: 0.2, heard: true) == .volumeAtZero)
+        precondition(warning(device: .muted, heard: true) == .muted, "Nonzero samples must not suppress a reported mute")
+        precondition(warning(device: .volumeAtZero, heard: true) == .volumeAtZero)
+        precondition(warning(device: .muted, receiving: false, heard: false) == nil)
+        precondition(warning(device: .volumeAtZero, receiving: false, heard: true) == nil)
+        precondition(warning(receiving: false, streak: 20, leading: 20, heard: false) == nil)
+        precondition(warning(heard: true) == nil, "Restoring the device clears its warning")
+        precondition(warning(streak: 4.9, leading: 4.9, heard: false) == nil)
+        precondition(warning(streak: 5, leading: 5, heard: false) == .silent)
+        precondition(warning(streak: 14.9, heard: true) == nil, "A thinking pause must not warn")
+        precondition(warning(streak: 15, heard: true) == .silent)
+        let zeroSnapshot = zeros.silenceSnapshot()
+        precondition(zeroSnapshot.receivingInput && !zeroSnapshot.heardSound && (zeroSnapshot.leading ?? 0) >= 5)
+        precondition(warning(streak: zeroSnapshot.streak, leading: zeroSnapshot.leading, heard: zeroSnapshot.heardSound) == .silent)
+        let zeroAudio = try await zeros.finish(sessionID: zeroID, cancel: false)!
+        try zeroEvidence.check(zeroAudio)
+        let nearZeroSnapshot = nearZero.silenceSnapshot()
+        precondition(nearZero.watchdogFailure() == nil)
+        precondition(nearZeroSnapshot.receivingInput && nearZeroSnapshot.heardSound && nearZeroSnapshot.streak == nil)
+        precondition(warning(device: .muted, streak: nearZeroSnapshot.streak, leading: nearZeroSnapshot.leading, heard: nearZeroSnapshot.heardSound) == .muted)
+        precondition(warning(device: .volumeAtZero, streak: nearZeroSnapshot.streak, leading: nearZeroSnapshot.leading, heard: nearZeroSnapshot.heardSound) == .volumeAtZero)
+        precondition(warning(streak: nearZeroSnapshot.streak, leading: nearZeroSnapshot.leading, heard: nearZeroSnapshot.heardSound) == nil,
+                     "Quiet nonzero input alone must not infer mute")
+        let gatedSnapshot = gated.silenceSnapshot()
+        precondition(gatedSnapshot.heardSound && (gatedSnapshot.streak ?? 99) < 15)
+        precondition(warning(streak: gatedSnapshot.streak, leading: gatedSnapshot.leading, heard: gatedSnapshot.heardSound) == nil,
+                     "A gated pause after valid input must not warn either")
         gated.receive(buffer, time: AVAudioTime(sampleTime: 10_080, atRate: 16_000))
+        precondition(gated.silenceSnapshot().streak == nil, "Returning sound clears the silence streak")
         let gatedAudio = try await gated.finish(sessionID: gatedID, cancel: false)!
         try gatedEvidence.check(gatedAudio, requireNonzero: true)
         precondition(gatedAudio.sampleCount == 11_680, "Later samples after the gated pause must remain captured")
@@ -217,14 +258,19 @@ struct AudioCaptureCheck {
             gated.receive(zeroBuffer); beginReset.receive(zeroBuffer)
             try await Task.sleep(for: .milliseconds(100))
         }
-        precondition(gated.watchdogFailure() == .allZeroStream && beginReset.watchdogFailure() == .allZeroStream)
+        for processor in [gated, beginReset] {
+            let snapshot = processor.silenceSnapshot()
+            precondition(snapshot.receivingInput && !snapshot.heardSound && (snapshot.leading ?? 0) >= 5)
+            precondition(processor.watchdogFailure() == nil)
+        }
+        precondition(!nearZero.silenceSnapshot().receivingInput, "Stale callbacks must not support a device warning")
         _ = try await beginReset.finish(sessionID: beginResetID, cancel: true)
         precondition(neverStarted.watchdogFailure() == .noCallbacks)
         let badDirectory = directory.appendingPathComponent("regular-file")
         try Data().write(to: badDirectory)
         do { _ = try CaptureFile(sessionID: UUID(), directory: badDirectory); preconditionFailure("Non-directory storage must fail") }
         catch { }
-        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, stop cutoff/last samples/deadline/clock/cancellation races, initial-zero/gated-pause/reset/no-callback watchdogs, invalid storage.")
+        print("Capture checks passed: real converter tail and ordering, complete sample counts, incremental WAV recovery, cancellation deletion, retained audio on interruption, bounded pre-roll without session leakage, overflow, stop cutoff/last samples/deadline/clock/cancellation races, warning-only initial-zero/gated-pause/reset behavior, no-callback watchdogs, authoritative mute/zero-volume warnings with nonzero input, 5/15-second silence boundaries and recovery, invalid storage.")
     }
 
     @MainActor static func checkStopBoundary(directory: URL, device: AudioInputResolution, format: AVAudioFormat) async throws {

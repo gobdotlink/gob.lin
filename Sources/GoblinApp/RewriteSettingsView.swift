@@ -102,6 +102,7 @@ struct RewriteSettingsView: View {
         .sheet(isPresented: $editingProvider, onDismiss: { turnOnAfterEdit = false }) {
             CleanupProviderSheet(settings: settings, defaults: defaults, inspectCredentials: inspectCredentials, turnOn: turnOnAfterEdit,
                                  onSave: { saved in
+                                     testTask?.cancel()
                                      settings = saved; message = nil; testOutput = nil; testMeta = nil; testFailure = nil
                                      refreshKeyStatus(); onSaved()
                                  }, onFailure: onFailure)

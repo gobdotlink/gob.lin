@@ -36,6 +36,8 @@ public final class AudioCaptureService {
     private var cancellationWaiters: [CheckedContinuation<Void, Error>] = []
     private var cancellationError: Error?
     private var eventHandler: (@Sendable (AudioCaptureEvent) -> Void)?
+    /// The silence warning currently published to the session and previews.
+    private var silenceCause: InputSilence?
 
     private nonisolated init() {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { @Sendable [weak self] _ in
@@ -66,7 +68,8 @@ public final class AudioCaptureService {
         do {
             try processor!.begin(sessionID: id, directory: try directory ?? Self.defaultDirectory(), resolution: inputResolution!,
                                  feedback: feedback, feedbackSessionID: feedbackSessionID, handler: onEvent)
-            activeSessionID = id; eventHandler = onEvent; cancellationRequested = false; terminalCommitted = false; cancellationError = nil
+            activeSessionID = id; eventHandler = onEvent; cancellationRequested = false; terminalCommitted = false; cancellationError = nil; silenceCause = nil
+            notifyPreviews(.silence(nil))
             try startInput()
             return id
         } catch {
@@ -149,6 +152,7 @@ public final class AudioCaptureService {
         } else { try prepareInput(uid: uid) }
         let id = UUID()
         previews[id] = onEvent
+        notifyPreviews(.silence(silenceCause))
         do { try startInput() }
         catch { previews.removeValue(forKey: id); if !warmMicrophoneEnabled && activeSessionID == nil { closeInput() }; throw error }
         return id
@@ -215,10 +219,25 @@ public final class AudioCaptureService {
                 guard let self, self.generation == token else { return }
                 if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized { processor.interrupt(.permissionMissing) }
                 else if let failure = processor.watchdogFailure() { processor.interrupt(failure) }
+                else { await self.updateSilenceWarning() }
             }
         }
         self.watchdog = watchdog
         watchdog.resume()
+    }
+
+    /// Publishes the silence warning when it changes. The device read can block briefly;
+    /// like every other CoreAudio call here, it stays on the capture thread.
+    private func updateSilenceWarning() async {
+        guard let processor, let input else { return }
+        let snapshot = processor.silenceSnapshot()
+        let cause = InputSilenceMonitor.cause(device: AudioInputDevices.deviceSilence(input.device, channelCount: input.format.channelCount),
+            receivingInput: snapshot.receivingInput, streak: snapshot.streak, leading: snapshot.leading, heardSound: snapshot.heardSound)
+        guard cause != silenceCause else { return }
+        silenceCause = cause
+        notifyPreviews(.silence(cause))
+        // Through the processor queue, so the warning stays in order with frames and levels.
+        if let id = activeSessionID { await processor.notify(.silence(sessionID: id, cause: cause), handler: eventHandler) }
     }
 
     /// In order on the main queue, so a meter never shows a level after its failure.
@@ -242,13 +261,17 @@ public final class AudioCaptureService {
             if let cancellationError { waiter.resume(throwing: cancellationError) } else { waiter.resume() }
         }
         if let input, input.isHealthy, let processor {
-            if warmMicrophoneEnabled || !previews.isEmpty { processor.resume() }
+            if warmMicrophoneEnabled || !previews.isEmpty {
+                processor.resume(); silenceCause = nil
+                notifyPreviews(.silence(nil))
+            }
             else { closeInput() }
         } else { closeInput() }
     }
 
     private func closeInput(keepProcessor: Bool = false) {
-        generation = UUID()
+        generation = UUID(); silenceCause = nil
+        notifyPreviews(.silence(nil))
         watchdog?.cancel(); watchdog = nil
         if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver); self.sleepObserver = nil }
         processor?.pause()
