@@ -121,7 +121,7 @@ final class AppModel: ObservableObject {
                 guard let self, !self.shuttingDown else { return }
                 switch outcome {
                 case .failure(let failure): self.showFailure(failure)
-                case .success, .unverified: self.diagnostics.resolve(.insertion)
+                case .success, .unverified, .readyToPaste: self.diagnostics.resolve(.insertion)
                 case .idle, .pending: break
                 }
             }
@@ -690,6 +690,10 @@ final class AppModel: ObservableObject {
         let text = result.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
         var insertionAttempted = false
         var insertionAnchor: InsertionAnchor?
+        var chipShown = false
+        var delivered = false
+        var deliverySeconds = 0.0
+        var readyToPaste = false
         if !text.isEmpty {
             lastTranscript = result.finalText
             if let overlayID = session.overlayID {
@@ -703,10 +707,9 @@ final class AppModel: ObservableObject {
                 if let overlayID = session.overlayID { overlay.update(.inserted(take), session: overlayID) }
             } else if !session.historyOnly {
                 let insertionStart = ContinuousClock.now
-                if session.targetIsFocused && !insertion.busy && insertionTask == nil {
+                if !insertion.busy && insertionTask == nil {
                     insertionAttempted = true
                     diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
-                    var chipShown = false
                     let showChip = { [weak self] in
                         guard !chipShown, result.warning == nil, let self, let overlayID = session.overlayID else { return }
                         chipShown = true
@@ -720,19 +723,29 @@ final class AppModel: ObservableObject {
                     // Pastes report as soon as they're sent; direct Accessibility writes once verified.
                     finishEditObservation()
                     pendingEditObservationID = session.id
-                    await insertion.insert(result.finalText, onPasteSent: showChip)
+                    let target = session.target?.isTerminated == false ? session.originalText : nil
+                    await insertion.insert(result.finalText, into: target, onPasteSent: showChip)
                     insertionAnchor = insertion.takeLastAnchor()
-                    if case .success = insertion.outcome { showChip() }
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
                         details.failure = failure
                         details.succeeded = false
                         if warning == nil { warning = failure.message; warningFailure = failure }
-                    } else if case .success = insertion.outcome { details.succeeded = true }
+                    } else if case .success = insertion.outcome {
+                        delivered = true
+                        details.succeeded = true
+                        deliverySeconds = (Self.milliseconds(since: session.captureStarted) - timings.captureMilliseconds) / 1000
+                    }
+                    else if case .readyToPaste = insertion.outcome {
+                        readyToPaste = true
+                        details.succeeded = false
+                        warning = insertion.status
+                        warningFailure = nil
+                    }
                     else if case .unverified = insertion.outcome { warning = warning ?? insertion.status }
                     diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: session.id, details: details)
                 } else {
-                    let failure: DiagnosticFailure = session.targetIsFocused ? .insertionNotAcknowledged : .insertionTargetChanged
+                    let failure: DiagnosticFailure = .insertionNotAcknowledged
                     diagnostics.report(failure, operation: session.id)
                     if warning == nil { warning = failure.message; warningFailure = failure }
                 }
@@ -760,8 +773,17 @@ final class AppModel: ObservableObject {
         if pendingEditObservationID == session.id { pendingEditObservationID = nil }
         session.audioOwnedByHistory = true
         if saved { try? FileManager.default.removeItem(at: audioURL) }
-        if let overlayID = session.overlayID {
-            if let warning {
+        if let overlayID = session.overlayID, !session.cancelled, !Task.isCancelled {
+            if readyToPaste {
+                overlay.showCompletion(.readyToPaste(application: session.target?.localizedName), session: overlayID)
+            } else if delivered {
+                let notice = warning.map { OverlayNotice(message: $0, failure: warningFailure) }
+                if !chipShown || warning != nil {
+                    overlay.showCompletion(.inserted(OverlayResult(application: session.target?.localizedName,
+                        words: entry.wordCount, seconds: deliverySeconds.isFinite ? max(0, deliverySeconds) : 0, notice: notice)), session: overlayID)
+                }
+                if saved, warning == nil { await celebrateMilestone(adding: entry.wordCount, overlay: overlayID) }
+            } else if let warning {
                 overlay.update(.error(OverlayNotice(message: warning, failure: warningFailure)), session: overlayID)
                 overlay.hide(after: 4, session: overlayID)
             } else {
@@ -823,7 +845,7 @@ final class AppModel: ObservableObject {
             switch overlay.model.phase {
             case .arming, .listening: state = .recording
             case .transcribing, .polishing: state = .transcribing
-            case .error: state = .warning
+            case .error, .readyToPaste: state = .warning
             case .hidden, .inserted, .milestone: state = .idle
             }
         }

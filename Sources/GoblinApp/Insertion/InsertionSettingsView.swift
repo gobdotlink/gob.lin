@@ -11,6 +11,8 @@ struct InsertionSettingsView: View {
             Text("For 30 seconds after a verified paste, gob.lin checks whether you kept, edited, or replaced the text and shows it in History. Heavily rewritten text is counted but never saved. Secure fields and password managers are never watched.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Paste last transcript: ⌘⌥⇧V, or the menu bar item.").foregroundStyle(.secondary)
+            Text("Dictation goes to the original text field. Supported fields can receive text in the background. If delivery isn't supported, your words stay ready for Paste Last Dictation without switching apps.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Label(service.status, systemImage: service.busy ? "arrow.down.doc" : "text.cursor")
                 .fixedSize(horizontal: false, vertical: true)
             if service.hasRecoveryClipboard {
