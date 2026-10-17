@@ -231,7 +231,7 @@ public final class AudioCaptureService {
     private func updateSilenceWarning() async {
         guard let processor, let input else { return }
         let snapshot = processor.silenceSnapshot()
-        let cause = InputSilenceMonitor.cause(device: AudioInputDevices.deviceSilence(input.device),
+        let cause = InputSilenceMonitor.cause(device: AudioInputDevices.deviceSilence(input.device, channelCount: input.format.channelCount),
             receivingInput: snapshot.receivingInput, streak: snapshot.streak, leading: snapshot.leading, heardSound: snapshot.heardSound)
         guard cause != silenceCause else { return }
         silenceCause = cause

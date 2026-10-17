@@ -77,28 +77,28 @@ public enum AudioInputDevices {
     /// What the device itself says about being silenced. Mute and input volume are optional
     /// controls: many USB and Bluetooth microphones expose neither, and "unsupported" must
     /// never read as "muted". Nil therefore means "the device will not say".
-    public static func deviceSilence(_ device: AudioInputDevice) -> InputSilence? {
-        if isInputMuted(device) == true { return .muted }
-        if let volume = inputVolume(device), volume == 0 { return .volumeAtZero }
+    public static func deviceSilence(_ device: AudioInputDevice, channelCount: AVAudioChannelCount) -> InputSilence? {
+        if isInputMuted(device, channelCount: channelCount) == true { return .muted }
+        if let volume = inputVolume(device, channelCount: channelCount), volume == 0 { return .volumeAtZero }
         return nil
     }
 
     /// True only when every readable channel reports mute. Nil when no channel exposes one.
-    public static func isInputMuted(_ device: AudioInputDevice) -> Bool? {
-        let values: [UInt32] = controlElements(device.id, selector: kAudioDevicePropertyMute)
+    public static func isInputMuted(_ device: AudioInputDevice, channelCount: AVAudioChannelCount) -> Bool? {
+        let values: [UInt32] = controlElements(device.id, selector: kAudioDevicePropertyMute, channelCount: channelCount)
         guard !values.isEmpty else { return nil }
         return values.allSatisfy { $0 != 0 }
     }
 
     /// The loudest readable input volume, 0...1. Nil when no channel exposes one.
-    public static func inputVolume(_ device: AudioInputDevice) -> Float32? {
-        let values: [Float32] = controlElements(device.id, selector: kAudioDevicePropertyVolumeScalar)
+    public static func inputVolume(_ device: AudioInputDevice, channelCount: AVAudioChannelCount) -> Float32? {
+        let values: [Float32] = controlElements(device.id, selector: kAudioDevicePropertyVolumeScalar, channelCount: channelCount)
         return values.max()
     }
 
     /// Reads one input control on the main element, falling back to per-channel elements
     /// when the device has no main control. Elements it cannot read are simply absent.
-    private static func controlElements<Value>(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> [Value] {
+    private static func controlElements<Value>(_ id: AudioDeviceID, selector: AudioObjectPropertySelector, channelCount: AVAudioChannelCount) -> [Value] {
         func read(_ element: AudioObjectPropertyElement) -> Value? {
             var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioDevicePropertyScopeInput, mElement: element)
             guard AudioObjectHasProperty(id, &address) else { return nil }
@@ -111,7 +111,7 @@ public enum AudioInputDevices {
             return buffer.load(as: Value.self)
         }
         if let main = read(kAudioObjectPropertyElementMain) { return [main] }
-        return [1, 2].compactMap { read(AudioObjectPropertyElement($0)) }
+        return (0..<channelCount).compactMap { read(AudioObjectPropertyElement($0 + 1)) }
     }
 
     fileprivate static func property(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
