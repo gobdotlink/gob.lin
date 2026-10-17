@@ -25,6 +25,23 @@ assert report["a"]["wordErrorRate"] == 0.1 and report["b"]["wordErrorRate"] == 0
 assert report["b"]["ordinaryWordFalseCorrections"] == 2
 assert "-like +lisa" in run("eval", fixtures / "A.jsonl", fixtures / "B.jsonl").stdout
 
+catalog = json.loads(run("models").stdout)
+assert len(catalog) == 17 and len({model["id"] for model in catalog}) == 17
+assert sum(model["recommended"] for model in catalog) == 4
+assert sum(model["default"] for model in catalog) == 1
+assert all(model["downloadBytes"] > 0 and model["languages"] for model in catalog)
+assert all(model["id"] != "cohere-transcribe" for model in catalog)
+assert "Unknown speech model" in run("models", "--model", "unknown", status=2).stderr
+for model in catalog:
+    if model["id"] != "parakeet-tdt-v3":
+        failure = run("prepare-model", "--model", model["id"], "--vocabulary-support", status=2)
+        assert "Parakeet TDT v3 diagnostic" in failure.stderr
+assert "requires one value" in run("models", "--language", status=2).stderr
+assert "does not support language" in run("models", "--model", "parakeet-tdt-v3", "--language", "ja", status=2).stderr
+assert "Unknown speech model" in run("transcribe", "missing.wav", "--model", "cohere-transcribe", status=2).stderr
+assert "does not support language" in run("models", "--model", "whisper-tiny-en", "--language", "ja", status=2).stderr
+assert "does not support language" in run("models", "--model", "nemotron-3.5", "--language", "th", status=2).stderr
+
 with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
     scratch = Path(temporary)
     records_directory = scratch / "records"
@@ -60,6 +77,12 @@ with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
         writer.writeframes(bytes(640))
     unavailable = run("transcribe", audio, "--model-dir", scratch / "missing-model", status=3)
     assert unavailable.stdout == "" and json.loads(unavailable.stderr)["error"]["code"] == "model_not_installed"
+    fixed = run("transcribe", audio, "--model", "whisper-tiny-en", "--model-dir", scratch / "missing-english", status=3)
+    assert "requires --language" not in fixed.stderr
+    for model in catalog:
+        failure = run("transcribe", audio, "--model", model["id"], "--language", "en",
+                      "--model-dir", scratch / "missing" / model["id"], status=3)
+        assert json.loads(failure.stderr)["error"]["code"] == "model_not_installed"
     assert json.loads(run("replay", scratch, "--model-dir", scratch / "missing-model", status=3).stderr)["error"]["code"] == "model_not_installed"
 
     for flags in [("--repeat", "0"), ("--windows", "NaN"), ("--windows", "16"), ("--cadence-ms", "inf")]:

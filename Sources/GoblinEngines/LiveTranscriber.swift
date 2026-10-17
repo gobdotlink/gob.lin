@@ -1,7 +1,7 @@
 import Foundation
 
 public enum LiveRecoveryReason: String, Sendable {
-    case windowLimit, decodeFailed, decodeUnavailable, overlapMismatch, timingUnavailable, inputDiscontinuity, invalidSamples
+    case windowLimit, decodeFailed, decodeUnavailable, modelPreviewUnavailable, overlapMismatch, timingUnavailable, inputDiscontinuity, invalidSamples
 }
 
 public struct LiveTranscript: Sendable, Equatable {
@@ -15,6 +15,7 @@ public actor LiveTranscriber {
     public nonisolated let updates: AsyncStream<LiveTranscript>
     private let continuation: AsyncStream<LiveTranscript>.Continuation
     private let engine: Task<any PCMSpeechEngine, Error>
+    private let options: RecognitionOptions
     private let maximumSamples: Int
     private var samples: [Float] = []
     private var origin: Int64 = 0
@@ -36,10 +37,17 @@ public actor LiveTranscriber {
     public private(set) var requiresFinalRecovery = false
     public private(set) var computeMilliseconds = 0.0
 
-    public init(engine: Task<any PCMSpeechEngine, Error>, maximumWindowSamples: Int = 240_000) {
+    public init(engine: Task<any PCMSpeechEngine, Error>, maximumWindowSamples: Int = 240_000,
+                options: RecognitionOptions = .init(), previewAvailable: Bool = true) {
         self.engine = engine
+        self.options = options
         maximumSamples = min(240_000, max(6_400, maximumWindowSamples))
         (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        if !previewAvailable {
+            recoveryReason = .modelPreviewUnavailable
+            requiresFinalRecovery = true
+            continuation.yield(.init(committedText: "", tentativeText: "", recoveryReason: .modelPreviewUnavailable))
+        }
     }
 
     public func append(_ frame: [Float], at samplePosition: Int64) {
@@ -91,7 +99,7 @@ public actor LiveTranscriber {
         try checkCancellation()
         let start = ContinuousClock.now
         let result: TranscriptionResult
-        do { result = try await runtime.transcribe(samples: samples) }
+        do { result = try await runtime.transcribe(samples: samples, options: options) }
         catch is CancellationError { throw CancellationError() }
         catch { degrade(.decodeFailed, needsOriginal: true); return nil }
         computeMilliseconds += Self.milliseconds(since: start)
@@ -124,7 +132,7 @@ public actor LiveTranscriber {
     }
 
     private var committedText: String { Self.join(settled, Self.text(committed)) }
-    private var unavailable: Bool { recoveryReason == .decodeUnavailable }
+    private var unavailable: Bool { recoveryReason == .decodeUnavailable || recoveryReason == .modelPreviewUnavailable }
 
     private func scheduleIfNeeded() {
         guard !cancelled, !finishing, !previewStopped, !unavailable, inference == nil, !samples.isEmpty,
@@ -145,12 +153,13 @@ public actor LiveTranscriber {
         let snapshotGeneration = generation
         lastScheduled = received
         let engine = engine
+        let options = options
         inference = Task { [weak self] in
             do {
                 let runtime = try await engine.value
                 try Task.checkCancellation()
                 let start = ContinuousClock.now
-                let result = try await runtime.transcribe(samples: snapshot)
+                let result = try await runtime.transcribe(samples: snapshot, options: options)
                 try Task.checkCancellation()
                 await self?.accept(result, origin: snapshotOrigin, end: snapshotEnd, generation: snapshotGeneration,
                                    milliseconds: Self.milliseconds(since: start))

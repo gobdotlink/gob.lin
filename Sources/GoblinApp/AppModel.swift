@@ -53,9 +53,7 @@ final class AppModel: ObservableObject {
         self.servicesEnabled = servicesEnabled
         captureDirectory = dataDirectory?.appendingPathComponent("Captures", isDirectory: true)
         feedback = servicesEnabled ? GoblinBrand.assetDirectory.map { FeedbackSounds(directory: $0) } : nil
-        let modelDirectory = ParakeetSpeechEngine.defaultModelDirectory
-        speechModels = SpeechModelService(engine: ParakeetSpeechEngine(modelDirectory: modelDirectory),
-            store: ParakeetModelStore(directory: modelDirectory), defaults: defaults)
+        speechModels = SpeechModelService(defaults: defaults)
         diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
         dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault)
@@ -138,7 +136,9 @@ final class AppModel: ObservableObject {
         hotkeys.$recording.sink { [weak self] recording in
             Task { @MainActor in self?.overlay.model.handsFree = recording == .handsFree }
         }.store(in: &subscriptions)
-        overlay.model.modelName = speechModels.selectedModel.name.components(separatedBy: " ").first ?? "Parakeet"
+        speechModels.$selectedModel.sink { [weak self] model in
+            self?.overlay.model.modelName = model.name
+        }.store(in: &subscriptions)
         overlay.model.perform = { [weak self] action in
             guard let self else { return }
             switch action {
@@ -213,7 +213,7 @@ final class AppModel: ObservableObject {
             let lease = try self.speechModels.beginSession()
             defer { self.speechModels.endSession(lease) }
             let engine = try await self.speechModels.readyEngine(for: lease)
-            let run = try await RecordedAudioPipeline(engine: engine).transcribe(audioURL)
+            let run = try await RecordedAudioPipeline(engine: engine, options: lease.options).transcribe(audioURL)
             try Task.checkCancellation()
             let result = await self.processTranscript(run.rawText)
             try Task.checkCancellation()
@@ -348,7 +348,7 @@ final class AppModel: ObservableObject {
                     switch text.recoveryReason {
                     case .windowLimit: details.reason = .liveWindowLimit
                     case .decodeFailed: details.reason = .liveDecodeFailed
-                    case .decodeUnavailable: details.reason = .liveDecodeUnavailable
+                    case .decodeUnavailable, .modelPreviewUnavailable: details.reason = .liveDecodeUnavailable
                     case .overlapMismatch: details.reason = .liveOverlapMismatch
                     case .timingUnavailable: details.reason = .liveTimingUnavailable
                     case .inputDiscontinuity: details.reason = .liveInputDiscontinuity
@@ -356,12 +356,13 @@ final class AppModel: ObservableObject {
                     case nil: break
                     }
                     self.diagnostics.developmentLog.record(text.recoveryReason == nil ? .livePreviewRecovered : .livePreviewDegraded,
-                        area: .application, severity: text.recoveryReason == nil ? .info : .warning, operation: session.id, details: details)
+                        area: .application, severity: text.recoveryReason == nil || text.recoveryReason == .modelPreviewUnavailable ? .info : .warning,
+                        operation: session.id, details: details)
                     previousRecovery = text.recoveryReason
                 }
                 self.overlay.update(.listening,
                     committed: text.committedText, tentative: text.tentativeText,
-                    previewUnavailable: text.recoveryReason == .decodeUnavailable, session: overlayID)
+                    previewUnavailable: text.recoveryReason == .decodeUnavailable || text.recoveryReason == .modelPreviewUnavailable, session: overlayID)
             }
         }
         let previousDrain = captureDrainTask
@@ -499,7 +500,7 @@ final class AppModel: ObservableObject {
                     self.diagnostics.developmentLog.record(.liveFinalRecovery, area: .application, operation: active.session.id)
                     let engine = try await active.readiness.value
                     try active.session.checkCancellation()
-                    let run = try await RecordedAudioPipeline(engine: engine).transcribe(audio.fileURL)
+                    let run = try await RecordedAudioPipeline(engine: engine, options: active.lease.options).transcribe(audio.fileURL)
                     raw = run.rawText
                     timings.asrMilliseconds += run.timings.asrMilliseconds
                 }

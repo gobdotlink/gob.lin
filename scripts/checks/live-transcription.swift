@@ -7,11 +7,13 @@ actor SignalPCM: PCMSpeechEngine {
     private var failures: Int
     private(set) var calls = 0
     private(set) var largestWindow = 0
+    private(set) var optionsUsed: [RecognitionOptions] = []
     init(timings: Bool = true, failures: Int = 0) { self.timings = timings; self.failures = failures }
     func prepare() async throws {}
     func unload() async {}
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { fatalError("File recovery is checked separately") }
-    func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
+        optionsUsed.append(options)
         calls += 1
         largestWindow = max(largestWindow, samples.count)
         precondition(samples.count <= maximumWindowSamples)
@@ -49,7 +51,7 @@ actor SlowUntimedPCM: PCMSpeechEngine {
     func prepare() async throws {}
     func unload() async {}
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { fatalError() }
-    func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
         calls += 1
         largestWindow = max(largestWindow, samples.count)
         precondition(samples.count <= maximumWindowSamples)
@@ -69,7 +71,7 @@ actor ScriptedPCM: PCMSpeechEngine {
     func prepare() async throws {}
     func unload() async {}
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { fatalError("File path is checked separately") }
-    func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
         precondition(samples.count <= maximumWindowSamples)
         if empty { return TranscriptionResult(text: "") }
         calls += 1
@@ -107,7 +109,7 @@ actor WordSequencePCM: PCMSpeechEngine {
  func prepare() async throws {}
  func unload() async {}
  func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { fatalError() }
- func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+ func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
   var tokens: [TranscriptionToken] = []
   var start = 0
   while start < samples.count {
@@ -155,6 +157,21 @@ struct LiveTranscriptionCheck {
         verify(await values.values.contains { $0.committedText == "hello world. Second sentence." }, "Second sentence only appeared at release")
         verify(!(await live.requiresFinalRecovery), "Normal pauses needlessly required full-file catch-up")
         verify(await runtime.largestWindow <= 240_000, "Retained resource bound exceeded")
+
+        let preferred = RecognitionOptions(language: "pl")
+        let languageRuntime = SignalPCM()
+        let languageLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { languageRuntime }, options: preferred)
+        var languagePosition: Int64 = 0
+        try await feed(0.1, seconds: 1.2, live: languageLive, position: &languagePosition)
+        _ = try await languageLive.finish()
+        let used = await languageRuntime.optionsUsed
+        verify(!used.isEmpty && used.allSatisfy { $0 == preferred }, "Preview and final window did not preserve recognition language")
+        let batchRuntime = SignalPCM()
+        let batchOnly = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { batchRuntime }, options: preferred, previewAvailable: false)
+        await batchOnly.append([Float](repeating: 0.1, count: 480_000), at: 0)
+        verify(try await batchOnly.finish() == nil, "Batch-only model lost original-file recovery")
+        verify(await batchOnly.requiresFinalRecovery, "Batch-only model did not request file recovery")
+        verify(await batchRuntime.calls == 0, "Batch-only model decoded or buffered live windows")
 
         let sequence = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { WordSequencePCM() }, maximumWindowSamples: 96_000)
         var sequencePosition: Int64 = 0

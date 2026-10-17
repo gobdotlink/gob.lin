@@ -9,27 +9,62 @@ struct GoblinCLI {
         AppLogger.mirrorsToConsole = false
         do {
             var arguments = Array(CommandLine.arguments.dropFirst())
-            var modelDirectory = ParakeetSpeechEngine.defaultModelDirectory
-            if let index = arguments.firstIndex(of: "--model-dir") {
-                guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--"),
-                      arguments.filter({ $0 == "--model-dir" }).count == 1 else {
-                    throw CommandError.usage("--model-dir requires one directory path")
+            var modelID = SpeechModelCatalog.defaultModel.id
+            var language = "auto"
+            var modelDirectory: URL?
+            for option in ["--model", "--language", "--model-dir"] {
+                if let index = arguments.firstIndex(of: option) {
+                    guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--"),
+                          arguments.filter({ $0 == option }).count == 1 else {
+                        throw CommandError.usage("\(option) requires one value")
+                    }
+                    let value = arguments[index + 1]
+                    switch option {
+                    case "--model": modelID = value
+                    case "--language": language = SpeechModelCatalog.canonicalLanguage(value)
+                    default: modelDirectory = URL(fileURLWithPath: value, isDirectory: true)
+                    }
+                    arguments.removeSubrange(index...index + 1)
                 }
-                modelDirectory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
-                arguments.removeSubrange(index...index + 1)
             }
-            let engine = ParakeetSpeechEngine(modelDirectory: modelDirectory)
+            guard let model = SpeechModelCatalog.model(id: modelID) else {
+                throw CommandError.usage("Unknown speech model: \(modelID). Run goblin models for supported IDs.")
+            }
+            guard language == "auto" || model.capabilities.languageCodes.contains(where: {
+                SpeechModelCatalog.canonicalLanguage($0) == language
+            }) else { throw CommandError.usage("\(model.name) does not support language \(language). Run goblin models.") }
+            if ["transcribe", "replay", "benchmark"].contains(arguments.first ?? ""),
+               !model.capabilities.automaticLanguage, model.capabilities.languageControl != .fixed,
+               language == "auto", !arguments.contains("--recorded") {
+                throw CommandError.usage("\(model.name) requires --language <code>.")
+            }
+            if arguments == ["models"] {
+                let models = SpeechModelCatalog.supported.map { model in
+                    ["id": model.id, "name": model.name, "purpose": model.purpose, "detail": model.detail,
+                     "runtime": model.runtime, "downloadBytes": model.downloadBytes, "languages": model.capabilities.languageCodes,
+                     "automaticLanguage": model.capabilities.automaticLanguage, "livePreview": model.capabilities.livePreview,
+                     "recommended": model.recommended,
+                     "default": model.id == SpeechModelCatalog.defaultModel.id] as [String: Any]
+                }
+                FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: models, options: [.sortedKeys]) + Data([0x0A]))
+                return
+            }
+            let runtime = SpeechRuntimeFactory.make(model, directory: modelDirectory)
+            let options = model.capabilities.options(for: language)
             if arguments.first == "prepare-model" {
                 guard arguments.count == 1 || arguments == ["prepare-model", "--vocabulary-support"] else {
                     throw CommandError.usage("Usage: goblin prepare-model [--vocabulary-support] [--model-dir <path>]")
                 }
-                try await SpeechBenchmark.prepare(engine, vocabularySupport: arguments.count == 2)
+                guard arguments.count == 1 || model.id == SpeechModelCatalog.parakeet.id else {
+                    throw CommandError.usage("--vocabulary-support is a Parakeet TDT v3 diagnostic.")
+                }
+                try await SpeechBenchmark.prepare(runtime, model: model, vocabularySupport: arguments.count == 2)
             } else if arguments.first == "benchmark" {
-                try await SpeechBenchmark.run(Array(arguments.dropFirst()), engine: engine)
+                try await SpeechBenchmark.run(Array(arguments.dropFirst()), engine: runtime.engine, directory: runtime.store.directory, options: options)
             } else {
-                try await GoblinCommands(pipeline: RecordedAudioPipeline(engine: engine)).run(arguments)
+                try await GoblinCommands(pipeline: RecordedAudioPipeline(engine: runtime.engine, options: options)).run(arguments)
             }
-            await engine.unload()
+            await runtime.engine.unload()
         } catch {
             let code: String
             let status: Int32
@@ -228,14 +263,18 @@ private struct GoblinCommands {
       goblin replay history --recorded --history-dir <path>
       goblin eval <A.jsonl> <B.jsonl> [--json]        ID-aligned evaluation report
       goblin --version | --self-check | --help
+      goblin models                               Catalog IDs, sizes, languages and capabilities
 
       goblin prepare-model [--vocabulary-support]  Explicit download; JSON load/cache metrics
       goblin benchmark <file | directory>          Local batch timing JSONL
         [--repeat N] [--windows 1.5,3,6,12] [--cadence-ms 400]
         [--vocabulary <terms-file>]                Diagnostic CTC rescoring; local auxiliary model
       --model-dir <path> overrides the model cache for any command.
+      --model <id> chooses a catalog model. --language auto|<code> sets recognition language.
 
-    Parakeet TDT v3 is the default. Transcribe/replay/benchmark load local models only.
+    Parakeet TDT v3 is the default.
+    Parakeet's language preference guides the writing script, not a same-script language lock.
+    Transcribe/replay/benchmark load local models only.
     Run prepare-model once before recognition. Recognition and benchmarks run locally.
     Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>.
     --rewrite additionally opts into your enabled provider and reads its saved key.

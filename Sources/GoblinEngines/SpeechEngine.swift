@@ -1,11 +1,19 @@
 import Foundation
 import GoblinCore
 
+public struct RecognitionOptions: Sendable, Hashable, Codable {
+    /// Nil requests automatic language detection where the model supports it.
+    public let language: String?
+    public init(language: String? = nil) { self.language = language }
+}
+
 public struct TranscriptionRequest: Sendable {
     public let audioFileURL: URL
+    public let options: RecognitionOptions
 
-    public init(audioFileURL: URL) {
+    public init(audioFileURL: URL, options: RecognitionOptions = .init()) {
         self.audioFileURL = audioFileURL
+        self.options = options
     }
 }
 
@@ -53,7 +61,13 @@ public protocol PCMSpeechEngine: SpeechEngine {
     var maximumWindowSamples: Int { get }
     func prepare() async throws
     func unload() async
-    func transcribe(samples: [Float]) async throws -> TranscriptionResult
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult
+}
+
+public extension PCMSpeechEngine {
+    func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+        try await transcribe(samples: samples, options: .init())
+    }
 }
 
 public struct SpeechModelPreparationProgress: Sendable, Equatable {

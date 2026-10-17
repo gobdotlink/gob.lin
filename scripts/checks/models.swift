@@ -1,26 +1,34 @@
 import AppKit
 import Combine
+import CoreML
 import CryptoKit
 import FluidAudio
 import Foundation
 @testable import GoblinEngines
+@testable import GoblinApp
 import SwiftUI
+import Synchronization
 
 private struct CheckFailure: Error, LocalizedError {
     let message: String
     var errorDescription: String? { message }
 }
-private func expect(_ value: @autoclosure () -> Bool, _ message: String) throws {
-    if !value() { throw CheckFailure(message: message) }
+private func expect(_ value: Bool, _ message: String) throws {
+    if !value { throw CheckFailure(message: message) }
 }
 
 private actor CheckEngine: PCMSpeechEngine {
-    nonisolated let identifier = SpeechModelCatalog.parakeet.id
+    nonisolated let identifier: String
     nonisolated let maximumWindowSamples = 240_000
     var events: [String] = []
+    var optionsUsed: [RecognitionOptions] = []
+    var failNext = false
+    init(_ identifier: String = SpeechModelCatalog.parakeet.id) { self.identifier = identifier }
+    func failOnce() { failNext = true }
     func prepare() async throws {
         events.append("prepare")
         try await Task.sleep(for: .milliseconds(40))
+        if failNext { failNext = false; throw CheckFailure(message: "Simulated model load failure") }
         events.append("ready")
     }
     func unload() async {
@@ -28,8 +36,12 @@ private actor CheckEngine: PCMSpeechEngine {
         try? await Task.sleep(for: .milliseconds(40))
         events.append("unloaded")
     }
-    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { .init(text: "") }
-    func transcribe(samples: [Float]) async throws -> TranscriptionResult { .init(text: "") }
+    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
+        optionsUsed.append(request.options); return .init(text: "recognized")
+    }
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
+        optionsUsed.append(options); return .init(text: "recognized")
+    }
 }
 
 private actor CheckStore: SpeechModelAcquiring {
@@ -50,9 +62,43 @@ private actor CheckStore: SpeechModelAcquiring {
     func removeCachedModel() async throws { try await Task.sleep(for: .milliseconds(40)) }
 }
 
+private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
+    struct Reply: Sendable {
+        let status: Int
+        let body: Data
+        var headers: [String: String] = [:]
+        var suspend = false
+    }
+    private static let handler = Mutex<(@Sendable (URLRequest) -> Reply)?>(nil)
+    static func respond(_ value: @escaping @Sendable (URLRequest) -> Reply) { handler.withLock { $0 = value } }
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let reply = Self.handler.withLock { $0! }(request)
+        var headers = reply.headers
+        if headers["Content-Length"] == nil { headers["Content-Length"] = String(reply.body.count) }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: reply.status,
+            httpVersion: "HTTP/1.1", headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: reply.body)
+        if !reply.suspend { client?.urlProtocolDidFinishLoading(self) }
+    }
+    override func stopLoading() {}
+}
+
 @main private struct ModelChecks {
-    @MainActor static func main() async throws {
+    @MainActor static func main() async {
+        do { try await run() }
+        catch {
+            FileHandle.standardError.write(Data("FAIL: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+
+    @MainActor private static func run() async throws {
         if CommandLine.arguments.contains("--real") { try await realCache(); return }
+        if let index = CommandLine.arguments.firstIndex(of: "--whisper-real"), CommandLine.arguments.count > index + 1 {
+            try await realWhisper(hebrewSpeech: URL(fileURLWithPath: CommandLine.arguments[index + 1])); return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--capture"), CommandLine.arguments.count > index + 1 {
             try await capture(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])); return
         }
@@ -60,9 +106,13 @@ private actor CheckStore: SpeechModelAcquiring {
             try await capture(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]), real: true); return
         }
         try await lifecycle()
+        try await switching()
         try await integrity()
-        try await listingGuard()
-        print("PASS model lease, idle, cancellation, retry, stale progress, repair and integrity checks")
+        try downloadProgress()
+        try await tokenizerBoundary()
+        try whisperSuppression()
+        try await expandedCatalog()
+        print("PASS catalog, language, switching, leases, idle, cancellation, retry, acquisition and integrity checks")
     }
 
     @MainActor private static func settle(_ service: SpeechModelService) async throws {
@@ -89,7 +139,7 @@ private actor CheckStore: SpeechModelAcquiring {
         try expect(acquisitionCount == 1, "Concurrent sessions installed twice")
         service.unloadIfIdle(now: .now.advanced(by: .seconds(7_200)))
         try expect(service.state == .ready, "Unloaded during long capture")
-        do { try service.selectModel(id: runtime.identifier); throw CheckFailure(message: "Changed model during capture") }
+        do { try await service.selectModel(id: runtime.identifier); throw CheckFailure(message: "Changed model during capture") }
         catch SpeechModelServiceError.modelInUse { }
         service.cancelPreparation()
         service.endSession(capture)
@@ -164,98 +214,232 @@ private actor CheckStore: SpeechModelAcquiring {
         await hotkeyRace.shutdown()
     }
 
-    private static func integrity() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("model-integrity-\(UUID())")
-        let directory = root.appendingPathComponent(Repo.parakeetV3.folderName)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let required = ModelNames.ASR.requiredModelsV3().sorted()
-        for name in required {
-            let bundle = directory.appendingPathComponent(name)
-            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
-            try Data("fixture".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+    @MainActor private static func switching() async throws {
+        let suite = "app.goblin.model-switch-check.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let engines = Dictionary(uniqueKeysWithValues: SpeechModelCatalog.supported.map { ($0.id, CheckEngine($0.id)) })
+        let stores = Dictionary(uniqueKeysWithValues: SpeechModelCatalog.supported.map { ($0.id, CheckStore()) })
+        let factory: @Sendable (SpeechModelDescriptor) -> SpeechModelRuntime = {
+            SpeechModelRuntime(engine: engines[$0.id]!, store: stores[$0.id]!)
         }
-        try Data("{}".utf8).write(to: directory.appendingPathComponent(ModelNames.ASR.vocabularyFile))
-        ModelHub.offlineMode = true
-        defer { ModelHub.offlineMode = false }
-        let store = ParakeetModelStore(directory: directory)
-        do {
-            _ = try await store.ensureAvailable(progress: { _ in })
-            throw CheckFailure(message: "An upgraded cache without speech detection was reported available offline")
-        } catch DownloadError.networkDisabled { }
-        do {
-            try await ParakeetSpeechEngine(modelDirectory: directory).prepare()
-            throw CheckFailure(message: "Runtime silently accepted a missing speech detector")
-        } catch SpeechRuntimeError.speechDetectorNotInstalled { }
-        let detectorDirectory = root.appendingPathComponent(Repo.vad.folderName)
-        for name in ModelNames.VAD.requiredModels {
-            let bundle = detectorDirectory.appendingPathComponent(name)
-            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
-            try Data("fixture".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+        let service = SpeechModelService(defaults: defaults, makeRuntime: factory)
+        try expect(service.selectedModel == SpeechModelCatalog.defaultModel, "Default model was not selected")
+        let initial = try service.beginSession()
+        _ = try await service.readyEngine(for: initial)
+        service.endSession(initial)
+        try await service.selectModel(id: SpeechModelCatalog.whisperTiny.id)
+        try expect(service.selectedModel.id == SpeechModelCatalog.whisperTiny.id && service.state == .ready, "Selection did not activate a different runtime")
+        try expect(defaults.string(forKey: "speechModelID") == service.selectedModel.id, "Successful switch was not persisted")
+        try service.selectLanguage("ja-JP")
+        let first = try service.beginSession()
+        let runtime = try await service.readyEngine(for: first)
+        try expect(runtime.identifier == SpeechModelCatalog.whisperTiny.id, "Selector only changed metadata")
+        try service.selectLanguage("fr")
+        let second = try service.beginSession()
+        try expect(first.options.language == "ja" && second.options.language == "fr", "Language change mutated an existing recording")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("model-options-\(UUID()).wav")
+        try Data([0]).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        _ = try await RecordedAudioPipeline(engine: runtime, options: first.options).transcribe(file)
+        let options = await engines[SpeechModelCatalog.whisperTiny.id]!.optionsUsed
+        try expect(options == [first.options], "Original-file recovery used different language options")
+        service.endSession(first); service.endSession(second)
+        try service.selectLanguage("ja")
+        try await service.selectModel(id: SpeechModelCatalog.parakeet.id)
+        try expect(service.preferredLanguage == "ja" && service.recognitionOptions.language == nil, "Unsupported model overwrote language intent")
+        try await service.selectModel(id: SpeechModelCatalog.whisperTiny.id)
+        try expect(service.recognitionOptions.language == "ja", "Returning to a compatible model lost the preference")
+
+        let turbo = engines[SpeechModelCatalog.whisperTurbo.id]!
+        await turbo.failOnce()
+        let failure = Task { try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id) }
+        try await waitForSwitch(service)
+        try expect(!service.canChangeModel, "Parallel switch remained available")
+        let duringDownload = try service.beginSession()
+        let downloadRuntime = try await service.readyEngine(for: duringDownload)
+        try expect(downloadRuntime.identifier == SpeechModelCatalog.whisperTiny.id, "Candidate download interrupted current-model recording")
+        do { try await service.selectModel(id: SpeechModelCatalog.parakeet.id); throw CheckFailure(message: "Two model switches overlapped") }
+        catch SpeechModelServiceError.modelInUse { }
+        try await Task.sleep(for: .milliseconds(70))
+        try expect(service.state == .ready && service.activeSessionCount == 1, "Switch unloaded a leased model")
+        service.endSession(duringDownload)
+        do { try await failure.value; throw CheckFailure(message: "Model load failure was swallowed") }
+        catch let error as CheckFailure { try expect(error.message == "Simulated model load failure", "Unexpected model failure") }
+        try expect(service.selectedModel.id == SpeechModelCatalog.whisperTiny.id && service.state == .ready, "Failed switch did not restore the previous runtime")
+        try expect(defaults.string(forKey: "speechModelID") == SpeechModelCatalog.whisperTiny.id, "Failed candidate replaced saved selection")
+        await stores[SpeechModelCatalog.whisperTurbo.id]!.emitLateProgress()
+        try await Task.sleep(for: .milliseconds(10))
+        try expect(service.state == .ready, "Failed candidate's stale progress overwrote restored state")
+
+        await stores[SpeechModelCatalog.whisperLarge.id]!.failOnce()
+        do { try await service.selectModel(id: SpeechModelCatalog.whisperLarge.id); throw CheckFailure(message: "Download failure was swallowed") }
+        catch let error as CheckFailure { try expect(error.message == "Simulated transfer failure", "Unexpected download failure") }
+        try expect(service.state == .ready && service.selectedModel.id == SpeechModelCatalog.whisperTiny.id, "Download failure stranded the old model")
+        let cancellation = Task { try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id) }
+        try await waitForSwitch(service)
+        service.cancelPreparation()
+        do { try await cancellation.value; throw CheckFailure(message: "Cancelled switch completed") }
+        catch is CancellationError { }
+        try expect(service.state == .ready && service.canChangeModel && service.selectedModel.id == SpeechModelCatalog.whisperTiny.id,
+                   "Cancelled switch did not drain and restore")
+
+        let leasedCancellation = Task { try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id) }
+        try await waitForSwitch(service)
+        let retained = try service.beginSession()
+        service.cancelPreparation()
+        do { try await leasedCancellation.value; throw CheckFailure(message: "An old-model lease prevented candidate cancellation") }
+        catch is CancellationError { }
+        _ = try await service.readyEngine(for: retained)
+        try expect(service.state == .ready && service.activeSessionCount == 1, "Candidate cancellation disturbed an active old-model session")
+        service.endSession(retained)
+
+        try service.selectLanguage("auto")
+        try await service.selectModel(id: SpeechModelCatalog.senseVoice.id)
+        let batchOnly = try service.beginSession()
+        try expect(batchOnly.options.language == nil && !batchOnly.livePreview && service.preferredLanguage == "auto", "Batch model lost automatic recognition or invented preview")
+        service.endSession(batchOnly)
+        let relaunched = SpeechModelService(defaults: defaults, makeRuntime: factory)
+        try expect(relaunched.selectedModel.id == SpeechModelCatalog.senseVoice.id && relaunched.recognitionOptions.language == nil, "Restart ignored selected backend")
+        await relaunched.shutdown()
+        defaults.set("cohere-transcribe", forKey: "speechModelID")
+        let excluded = SpeechModelService(defaults: defaults, makeRuntime: factory)
+        try expect(excluded.selectedModel == SpeechModelCatalog.defaultModel
+                   && defaults.string(forKey: "speechModelID") == SpeechModelCatalog.defaultModel.id,
+                   "An excluded saved model did not recover to the default")
+        await excluded.shutdown()
+        let shutdownSwitch = Task { try await service.selectModel(id: SpeechModelCatalog.whisperTiny.id) }
+        try await waitForSwitch(service)
+        await service.shutdown()
+        _ = try? await shutdownSwitch.value
+        try expect(service.state == .stopped && !service.isPreparing, "Shutdown left candidate work or restored a running service")
+
+        for model in SpeechModelCatalog.supported {
+            let manifest = SpeechModelAssets.manifest(for: model.id)
+            try expect(model.downloadBytes > 0 && Set(manifest.files.map(\.destination)).count == manifest.files.count, "Catalog contains empty or overlapping assets")
+            try expect(manifest.files.allSatisfy { $0.revision.count == 40 && $0.sha256.count == 64 && $0.size >= 0 }, "Catalog has mutable or unverified assets")
+            try expect(Set(model.capabilities.languageCodes).count == model.capabilities.languageCodes.count, "Duplicate catalog languages")
+            if model.kind == .parakeet {
+                let components = Set(manifest.files.map { $0.destination.split(separator: "/").first.map(String.init)! })
+                let version = ParakeetSpeechEngine.version(for: model)
+                let required = version.hasFusedEncoder ? ModelNames.ASR.requiredModelsFused : ModelNames.ASR.requiredModelsV3(precision: .int8)
+                try expect(required.isSubset(of: components), "Pinned assets do not match the loaded encoder precision")
+            }
         }
-        let detectorFile = detectorDirectory.appendingPathComponent(ModelNames.VAD.sileroVadFile).appendingPathComponent("coremldata.bin")
-        let detectorInventory = detectorDirectory.appendingPathComponent(".goblin-integrity.json")
-        let partial = detectorFile.appendingPathExtension("partial")
-        try Data("partial".utf8).write(to: partial)
-        for interrupted in [store, ParakeetModelStore(directory: directory)] {
-            do {
-                _ = try await interrupted.ensureAvailable(progress: { _ in })
-                throw CheckFailure(message: "A metadata-only interrupted detector was stamped ready")
-            } catch DownloadError.networkDisabled { }
-        }
-        try expect(!FileManager.default.fileExists(atPath: detectorInventory.path), "Failed acquisition created a detector inventory")
-        let partialBytes = try Data(contentsOf: partial)
-        try expect(partialBytes == Data("partial".utf8), "Retry discarded interrupted bytes")
-        try expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent(".goblin-integrity.json").path), "Detector retry discarded the usable ASR inventory")
-        try FileManager.default.removeItem(at: partial)
-        // Simulate an earlier completed installation for local integrity checks, without model loading.
-        let digest = SHA256.hash(data: Data("fixture".utf8)).map { String(format: "%02x", $0) }.joined()
-        let entries = ModelNames.VAD.requiredModels.sorted().map {
-            ["path": $0 + "/coremldata.bin", "size": 7, "sha256": digest] as [String: Any]
-        }
-        try JSONSerialization.data(withJSONObject: ["version": 1,
-            "modelID": "silero-vad-v6.2.1@b419383c55c110e2c9271fa6ee0ea83d03c70d96", "files": entries])
-            .write(to: detectorInventory)
-        let staged = try await store.ensureAvailable(progress: { _ in })
-        try expect(staged == .cached, "Previously inventoried offline cache was not retained")
-        let reopened = ParakeetModelStore(directory: directory)
-        let reopenedCache = try await reopened.ensureAvailable(progress: { _ in })
-        try expect(reopenedCache == .cached, "Offline inventory validation failed")
-        try Data("changed".utf8).write(to: detectorFile)
-        do {
-            _ = try await ParakeetModelStore(directory: directory).ensureAvailable(progress: { _ in })
-            throw CheckFailure(message: "A corrupted detector was reported ready")
-        } catch SpeechModelStoreError.invalidCache { }
-        try Data("fixture".utf8).write(to: detectorFile)
-        let changed = directory.appendingPathComponent(required[0]).appendingPathComponent("coremldata.bin")
-        try Data("changed".utf8).write(to: changed)
-        do {
-            _ = try await ParakeetModelStore(directory: directory).ensureAvailable(progress: { _ in })
-            throw CheckFailure(message: "Same-size damaged file was accepted")
-        } catch SpeechModelStoreError.invalidCache { }
-        try await store.removeCachedModel()
-        try expect(!FileManager.default.fileExists(atPath: directory.path), "Explicit repair kept corrupt cache")
-        try expect(!FileManager.default.fileExists(atPath: detectorDirectory.path), "Explicit repair kept the detector cache")
-        print("PASS interrupted detector/offline retry, preserved partial bytes/ASR, inventory reload and corruption rejection (synthetic files, no CoreML)")
+        try expect(SpeechModelCatalog.whisperTiny.capabilities.options(for: "nb-NO").language == "no", "Norwegian alias was lost")
+        try expect(SpeechModelCatalog.whisperTiny.capabilities.options(for: "fil").language == "tl", "Filipino alias was lost")
+        print("PASS actual backend switching, rollback, cancellation, shutdown, immutable language leases, aliases and pinned catalog")
     }
 
-    private static func listingGuard() async throws {
+    @MainActor private static func waitForSwitch(_ service: SpeechModelService) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while service.pendingModel == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        try expect(service.pendingModel != nil, "Switch did not start")
+    }
+
+    private static func integrity() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("model-assets-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("fixture")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let data = Data("fixture".utf8)
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let asset = SpeechModelAsset(repository: "test/speech", revision: String(repeating: "a", count: 40),
+                                     path: "model.bin", destination: "model.bin", size: Int64(data.count), sha256: digest)
+        let manifest = SpeechModelManifest(languages: ["en"], files: [asset])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [DownloadFixtureProtocol.self]
+        let destination = directory.appendingPathComponent("model.bin")
+        DownloadFixtureProtocol.respond { _ in .init(status: 200, body: data) }
+        let store = SpeechArtifactCache(directory: directory, manifest: manifest, configuration: configuration)
+        try expect(try await store.ensureAvailable(progress: { _ in }) == .installed, "Fresh verified acquisition failed")
+        try expect(try Data(contentsOf: destination) == data, "Installed bytes differ from upstream hash")
+        DownloadFixtureProtocol.respond { _ in .init(status: 400, body: Data()) }
+        let reopened = SpeechArtifactCache(directory: directory, manifest: manifest, configuration: configuration)
+        try expect(try await reopened.ensureAvailable(progress: { _ in }) == .cached, "Offline cache needed network")
+        try Data("changed".utf8).write(to: destination)
         do {
-            try await ParakeetModelStore.guardListing(timeout: .milliseconds(20)) { _ in
-                try await Task.sleep(for: .seconds(60))
-            }
-            throw CheckFailure(message: "Stalled metadata listing was accepted")
-        } catch SpeechModelStoreError.listingStalled { }
-        try await ParakeetModelStore.guardListing(timeout: .milliseconds(20)) { transferStarted in
-            transferStarted()
-            try await Task.sleep(for: .milliseconds(80))
+            _ = try await SpeechArtifactCache(directory: directory, manifest: manifest, configuration: configuration).ensureAvailable(progress: { _ in })
+            throw CheckFailure(message: "Same-size cache corruption was accepted")
+        } catch SpeechModelStoreError.invalidCache { }
+        try await store.remove()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let partial = destination.appendingPathExtension("partial")
+        try data.prefix(3).write(to: partial)
+        DownloadFixtureProtocol.respond { request in
+            precondition(request.value(forHTTPHeaderField: "Range") == "bytes=3-", "Interrupted transfer did not resume")
+            return .init(status: 206, body: data.dropFirst(3), headers: ["Content-Range": "bytes 3-6/7"])
         }
-        let cancelled = Task {
-            try await ParakeetModelStore.guardListing { _ in try await Task.sleep(for: .seconds(60)) }
+        try await ModelAssetDownload.download(asset, to: destination, configuration: configuration, progress: { _ in })
+        try expect(try Data(contentsOf: destination) == data, "Range resume duplicated or lost bytes")
+        try FileManager.default.removeItem(at: destination)
+        try data.prefix(3).write(to: partial)
+        DownloadFixtureProtocol.respond { _ in .init(status: 200, body: data) }
+        try await ModelAssetDownload.download(asset, to: destination, configuration: configuration, progress: { _ in })
+        try expect(try Data(contentsOf: destination) == data, "Ignored Range did not restart safely")
+        try FileManager.default.removeItem(at: destination)
+        try data.write(to: partial)
+        DownloadFixtureProtocol.respond { _ in .init(status: 400, body: Data()) }
+        try await ModelAssetDownload.download(asset, to: destination, configuration: configuration, progress: { _ in })
+        try expect(try Data(contentsOf: destination) == data, "Complete partial was not verified locally")
+        try FileManager.default.removeItem(at: destination)
+        DownloadFixtureProtocol.respond { _ in .init(status: 200, body: Data("changed".utf8)) }
+        do {
+            try await ModelAssetDownload.download(asset, to: destination, configuration: configuration, progress: { _ in })
+            throw CheckFailure(message: "Wrong upstream hash was accepted")
+        } catch ModelAssetDownloadError.invalidDigest { }
+        try expect(!FileManager.default.fileExists(atPath: partial.path) && !FileManager.default.fileExists(atPath: destination.path), "Corrupt transfer was promoted or retained")
+        let stream = Data(repeating: 0x62, count: 262_144)
+        let streamDigest = SHA256.hash(data: stream).map { String(format: "%02x", $0) }.joined()
+        let streamAsset = SpeechModelAsset(repository: asset.repository, revision: asset.revision, path: asset.path,
+                                          destination: asset.destination, size: Int64(stream.count), sha256: streamDigest)
+        let streamedPrefix = 65_536
+        DownloadFixtureProtocol.respond { _ in .init(status: 200, body: stream.prefix(streamedPrefix), headers: ["Content-Length": "262144"], suspend: true) }
+        let cancel = Task { try await ModelAssetDownload.download(streamAsset, to: destination, configuration: configuration, progress: { _ in }) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while ModelAssetDownload.fileSize(partial) != Int64(streamedPrefix), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
         }
-        cancelled.cancel()
-        do { try await cancelled.value; throw CheckFailure(message: "Cancelled listing continued") }
+        cancel.cancel()
+        do { try await cancel.value; throw CheckFailure(message: "Cancelled transfer completed") }
         catch is CancellationError { }
-        print("PASS stalled listing guard, transfer handoff and structured cancellation checks (simulated operations)")
+        try expect(try Data(contentsOf: partial) == stream.prefix(streamedPrefix), "Cancellation discarded received bytes")
+        DownloadFixtureProtocol.respond { _ in .init(status: 206, body: stream.dropFirst(streamedPrefix), headers: ["Content-Range": "bytes 65536-262143/262144"]) }
+        try await ModelAssetDownload.download(streamAsset, to: destination, configuration: configuration, progress: { _ in })
+        try expect(try Data(contentsOf: destination) == stream, "Cancelled transfer could not resume")
+        let outside = root.appendingPathComponent("outside.bin")
+        try data.write(to: outside)
+        try FileManager.default.removeItem(at: destination)
+        try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: outside)
+        do {
+            _ = try await SpeechArtifactCache(directory: directory, manifest: manifest, configuration: configuration).ensureAvailable(progress: { _ in })
+            throw CheckFailure(message: "Model cache followed an external symlink")
+        } catch SpeechModelStoreError.invalidDirectory { }
+        let unsafe = SpeechModelAsset(repository: asset.repository, revision: asset.revision, path: asset.path,
+                                      destination: "../outside.bin", size: asset.size, sha256: asset.sha256)
+        do {
+            _ = try await SpeechArtifactCache(directory: directory, manifest: .init(languages: [], files: [unsafe]), configuration: configuration).ensureAvailable(progress: { _ in })
+            throw CheckFailure(message: "Manifest escaped the dedicated cache")
+        } catch SpeechModelStoreError.invalidDirectory { }
+        print("PASS direct download, offline validation, corruption rejection, Range restart/resume, complete partial, cancellation and path boundaries")
+    }
+
+    private static func downloadProgress() throws {
+        let start = ContinuousClock.now
+        var trickle = ModelDownloadProgressWindow(now: start)
+        try trickle.record(bytes: 1, at: start.advanced(by: .seconds(119)))
+        do {
+            try trickle.record(bytes: 1, at: start.advanced(by: .seconds(120)))
+            throw CheckFailure(message: "A trickling transfer reset the useful-progress deadline")
+        } catch let error as URLError { try expect(error.code == .timedOut, "Slow transfer was not retryable") }
+        var healthy = ModelDownloadProgressWindow(now: start)
+        try healthy.record(bytes: 1_048_576, at: start.advanced(by: .seconds(120)))
+        try healthy.record(bytes: 1, at: start.advanced(by: .seconds(239)))
+        do {
+            try healthy.record(bytes: 1, at: start.advanced(by: .seconds(240)))
+            throw CheckFailure(message: "Earlier useful progress hid a later stalled transfer")
+        } catch let error as URLError { try expect(error.code == .timedOut, "Later stall was not retryable") }
+        print("PASS trickling download deadline, useful-progress reset and retryable timeout")
     }
 
     private static func realCache() async throws {
@@ -274,6 +458,142 @@ private actor CheckStore: SpeechModelAcquiring {
         try await runtime.prepare()
         print("Real offline cache=\(cache.rawValue), total validation=\(start.duration(to: .now)), initial local load=\(firstDuration), cached unload/reload=\(reload.duration(to: .now))")
         await runtime.unload()
+    }
+
+    private static func realWhisper(hebrewSpeech: URL) async throws {
+        let engine = WhisperSpeechEngine(model: SpeechModelCatalog.whisperTiny,
+            directory: SpeechRuntimeFactory.directory(for: SpeechModelCatalog.whisperTiny))
+        try await engine.prepare()
+        for language in ["he", nil] as [String?] {
+            let result = try await engine.transcribe(.init(audioFileURL: hebrewSpeech, options: .init(language: language)))
+            try expect(result.text.range(of: "[\\u0590-\\u05FF]", options: .regularExpression) != nil,
+                       "Hebrew speech did not produce Hebrew in \(language ?? "auto") mode")
+            try expect(!result.text.contains("[BLANK_AUDIO]"), "Non-speech annotation escaped model suppression")
+        }
+        let silence = try await engine.transcribe(samples: [Float](repeating: 0, count: 32_000), options: .init(language: "he"))
+        try expect(silence.text.isEmpty && silence.speechPresence == .notDetected, "Silent input generated text")
+        if let index = CommandLine.arguments.firstIndex(of: "--short-speech"), CommandLine.arguments.count > index + 1 {
+            let file = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            let samples = try AudioConverter().resampleAudioFile(file)
+            try expect(!samples.isEmpty && samples.count <= 16_000, "Short-speech fixture exceeds one second")
+            let pcm = try await engine.transcribe(samples: samples, options: .init(language: "en"))
+            let recorded = try await engine.transcribe(.init(audioFileURL: file, options: .init(language: "en")))
+            guard case .detected = pcm.speechPresence else { throw CheckFailure(message: "Short fixture contains no detected speech") }
+            try expect(!pcm.text.isEmpty && !recorded.text.isEmpty,
+                       "Short speech-positive PCM or file skipped decoding")
+            print("PASS real Whisper short speech on PCM and file paths (\(samples.count) samples)")
+        }
+        await engine.unload()
+        try await engine.prepare()
+        let reloaded = try await engine.transcribe(.init(audioFileURL: hebrewSpeech, options: .init(language: "he")))
+        try expect(reloaded.text.range(of: "[\\u0590-\\u05FF]", options: .regularExpression) != nil,
+                   "Unload/reload lost multilingual decoding")
+        await engine.unload()
+        print("PASS real Whisper Tiny Hebrew, automatic detection, silence and local unload/reload")
+    }
+
+    private static func whisperSuppression() throws {
+        for endToken in [50256, 50257] {
+            let config = try JSONDecoder().decode(WhisperGenerationConfiguration.self,
+                from: Data("{\"suppress_tokens\":[58,59,90,91],\"begin_suppress_tokens\":[220,\(endToken)]}".utf8))
+            let options = try config.decodingOptions(vocabularySize: 51865)
+            try expect(!options.suppressBlank && options.suppressTokens == [58, 59, 90, 91] && options.skipSpecialTokens,
+                       "Published non-speech suppression was lost or inferred whitespace suppression was used")
+            let sampleBegin = endToken == 50256 ? 2 : 4
+            let filter = WhisperBeginSuppressionFilter(tokens: config.beginSuppressTokens, sampleBegin: sampleBegin)
+            let logits = try MLMultiArray(shape: [1, 1, 51865], dataType: .float16)
+            logits[220] = 1; logits[endToken] = 1; logits[100] = 1
+            _ = filter.filterLogits(logits, withTokens: [Int](repeating: 0, count: sampleBegin))
+            try expect(logits[220].floatValue == -.infinity && logits[endToken].floatValue == -.infinity
+                       && logits[100].floatValue == 1, "First-token filter suppressed the wrong published IDs")
+            logits[220] = 1; logits[endToken] = 1
+            _ = filter.filterLogits(logits, withTokens: [Int](repeating: 0, count: sampleBegin + 1))
+            try expect(logits[220].floatValue == 1 && logits[endToken].floatValue == 1,
+                       "First-token suppression prevented later spaces or end-of-text")
+        }
+        for json in ["{\"suppress_tokens\":[-1],\"begin_suppress_tokens\":[]}",
+                     "{\"suppress_tokens\":[51865],\"begin_suppress_tokens\":[]}",
+                     "{\"suppress_tokens\":[],\"begin_suppress_tokens\":[51865]}"] {
+            let config = try JSONDecoder().decode(WhisperGenerationConfiguration.self, from: Data(json.utf8))
+            do {
+                _ = try config.decodingOptions(vocabularySize: 51865)
+                throw CheckFailure(message: "Invalid suppression configuration reached decoding")
+            } catch SpeechModelStoreError.invalidCache { }
+        }
+        print("PASS Whisper published suppression, English/multilingual first-token mapping and invalid-token rejection")
+    }
+
+    private static func tokenizerBoundary() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("local-tokenizer-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var rejected = false
+        do { try await WhisperSpeechEngine.validateLocalTokenizer(model: SpeechModelCatalog.whisperTiny, directory: directory) }
+        catch { rejected = true }
+        try expect(rejected, "Missing tokenizer was allowed to enter the SDK network fallback")
+        let conflicting = directory.appendingPathComponent("models/openai/whisper-tiny")
+        try FileManager.default.createDirectory(at: conflicting, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: conflicting.appendingPathComponent("tokenizer.json"))
+        do {
+            try await WhisperSpeechEngine.validateLocalTokenizer(model: SpeechModelCatalog.whisperTiny, directory: directory)
+            throw CheckFailure(message: "A stale Hub tokenizer overrode the pinned local tokenizer")
+        } catch SpeechModelStoreError.invalidCache { }
+        print("PASS local tokenizer preflight and stale Hub-cache rejection")
+    }
+
+    private static func expandedCatalog() async throws {
+        let all = SpeechModelCatalog.supported
+        try expect(all.count == 17 && Set(all.map(\.id)).count == 17, "Expanded catalog contains missing or duplicate models")
+        try expect(SpeechModelCatalog.recommended.count == 4, "Recommendation shortlist expanded with the full catalog")
+        let japanese = SpeechModelCatalog.matching(language: "ja-JP", livePreviewOnly: true)
+        try expect(japanese.contains(SpeechModelCatalog.nemotron) && !japanese.contains(SpeechModelCatalog.senseVoice)
+                   && !japanese.contains(SpeechModelCatalog.whisperTinyEnglish), "Language/preview filters admit incompatible models")
+        let englishTiny = SpeechModelCatalog.matching(query: "tiny english-only", language: "en")
+        try expect(englishTiny == [SpeechModelCatalog.whisperTinyEnglish], "Catalog search lost the English-only choice")
+        try expect(SpeechModelCatalog.matching(query: "does-not-exist").isEmpty, "Catalog search hides its empty result")
+        try expect(SpeechModelCatalog.matching(recommendedOnly: true) == SpeechModelCatalog.recommended, "Recommendation filtering changes order or membership")
+        for model in all {
+            let directory = URL(fileURLWithPath: "/tmp/missing-expanded-model-\(UUID())/\(model.cacheFolder)")
+            let runtime = SpeechRuntimeFactory.make(model, directory: directory)
+            try expect(runtime.engine.identifier == model.id, "Catalog selection uses the wrong inference adapter")
+            do { try await runtime.engine.prepare(); throw CheckFailure(message: "Missing model entered inference or acquisition") }
+            catch SpeechRuntimeError.modelNotInstalled { }
+            if model.capabilities.languageControl == .fixed {
+                try expect(model.capabilities.options(for: "ja").language == "en" && !model.capabilities.automaticLanguage,
+                           "A fixed English model advertises automatic detection or changes language")
+                try expect(RecognitionOptions().validatedLanguage(for: model) == "en", "A monolingual default requires manual language setup")
+            }
+            if model.kind == .whisper {
+                let variant = WhisperSpeechEngine.variant(for: model)
+                let repository = SpeechModelAssets.manifest(for: model.id).files.first { $0.destination == "tokenizer.json" }!.repository
+                try expect(repository == "openai/whisper-\(variant.description)", "Whisper uses another size's tokenizer")
+            }
+        }
+        try expect(ParakeetSpeechEngine.version(for: SpeechModelCatalog.parakeetCompact).decoderLayers == 1,
+                   "Compact transducer uses the larger model's decoder state")
+        let indices = try [nil, "zh", "en", "yue", "ja", "ko"].map { try SenseVoiceSpeechEngine.languageIndex($0) }
+        try expect(indices == [0, 3, 4, 7, 11, 12], "SenseVoice hints use token IDs instead of query indices")
+        let dictionary = ["en": 0, "ja-JP": 10, "zh-CN": 4, "no": 27, "nb-NO": 103]
+        try expect(NemotronSpeechEngine.promptLanguage("ja", dictionary: dictionary) == "ja-JP", "Bare language silently falls back to automatic Nemotron recognition")
+        try expect(NemotronSpeechEngine.promptLanguage("no", dictionary: dictionary) == "nb-NO", "Bokmål uses an unsupported generic Norwegian prompt")
+        do { _ = try NemotronSpeechEngine.promptLanguage("ko", dictionary: dictionary); throw CheckFailure(message: "A missing language prompt was ignored") }
+        catch SpeechRuntimeError.unsupportedLanguage { }
+        try expect(!SpeechModelCatalog.nemotron.capabilities.languageCodes.contains("th"), "Adaptation-only language is offered without trained weights")
+        let windows = Mutex<[(Int, Float?)]>([])
+        var samples = [Float](repeating: 0.1, count: 1_040_000)
+        samples[samples.count - 1] = 0.2
+        let transcript = try await SenseVoiceSpeechEngine.decodeWindows(samples) { audio in
+            windows.withLock { $0.append((audio.count, audio.last)) }
+            return "重复完整句子测试文本"
+        }
+        try expect(windows.withLock { $0.count == 3 && $0.allSatisfy { $0.0 <= 480_000 } && $0.last?.1 == 0.2 },
+                   "SenseVoice long-file windows truncate the recording's tail")
+        try expect(transcript == "重复完整句子测试文本 重复完整句子测试文本 重复完整句子测试文本", "Whole repeated hypotheses were erased")
+        try expect(SenseVoiceSpeechEngine.merge("开头这些中文字符用于确认接缝", "这些中文字符用于确认接缝然后是结尾", overlapping: true)
+                   == "开头这些中文字符用于确认接缝然后是结尾", "CJK overlap failed without whitespace word boundaries")
+        try expect(SenseVoiceSpeechEngine.merge("hello repeated phrase", "hello repeated phrase", overlapping: false)
+                   == "hello repeated phrase hello repeated phrase", "Repetition after silence was erased")
+        print("PASS expanded recommendations/search, factory routing, fixed languages, tokenizer variants, decoder shapes, hints and long-file tails")
     }
 
     @MainActor private static func capture(to directory: URL, real: Bool = false) async throws {
