@@ -355,6 +355,7 @@ private struct EntryDetail: View {
                 }
                 .disclosureGroupStyle(RowDisclosureStyle())
                 .padding(.top, 18)
+                editObservation.padding(.top, 18)
                 ViewThatFits(in: .horizontal) {
                     actions(entry).labelStyle(.titleAndIcon)
                     actions(entry).labelStyle(.iconOnly)
@@ -362,6 +363,27 @@ private struct EntryDetail: View {
                 .padding(.top, 16)
             }
             .padding(28)
+        }
+    }
+
+    /// What became of the pasted text, when the target could be watched.
+    @ViewBuilder private var editObservation: some View {
+        switch entry.editOutcome {
+        case .edited:
+            if let editedText = entry.editedText {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("After we transcribed — you edited").font(.system(size: 13, weight: .semibold))
+                    InlineDiff(from: entry.finalText, to: editedText)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        case .rewritten:
+            Text("You rewrote this after dictating.").font(.callout).foregroundStyle(.secondary)
+        case .rejected:
+            Text("You deleted this after dictating.").font(.callout).foregroundStyle(.secondary)
+        default:
+            EmptyView()
         }
     }
 

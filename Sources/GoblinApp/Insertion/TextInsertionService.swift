@@ -13,6 +13,11 @@ final class TextInsertionService: ObservableObject {
     @Published var trailingSpace: Bool {
         didSet { defaults.set(trailingSpace, forKey: "goblin.trailingSpace") }
     }
+    @Published var watchEdits: Bool {
+        didSet { defaults.set(watchEdits, forKey: "goblin.watchEditsAfterPaste") }
+    }
+    /// Where the last verified insertion landed, for the post-paste edit watcher.
+    private(set) var lastAnchor: InsertionAnchor?
     @Published private(set) var status = "Ready to insert into your focused app"
     @Published private(set) var busy = false
     @Published private(set) var hasRecoveryClipboard = false
@@ -38,6 +43,7 @@ final class TextInsertionService: ObservableObject {
         self.defaults = defaults
         self.registerShortcuts = registerShortcuts
         trailingSpace = defaults.object(forKey: "goblin.trailingSpace") as? Bool ?? true
+        watchEdits = defaults.object(forKey: "goblin.watchEditsAfterPaste") as? Bool ?? true
         guard registerShortcuts else { return }
         if let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() { previousApplication = app }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
@@ -62,6 +68,7 @@ final class TextInsertionService: ObservableObject {
         guard AXIsProcessTrusted() else { setStatus("Allow Accessibility before inserting text", outcome: .failure(.insertionPermissionMissing)); return }
         guard !IsSecureEventInputEnabled() else { setStatus("Secure Input is active; no text was inserted", outcome: .failure(.secureInputEnabled)); return }
         busy = true
+        lastAnchor = nil
         defer { busy = false }
         let text = InsertionPolicy.text(transcript, trailingSpace: trailingSpace)
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
@@ -85,7 +92,8 @@ final class TextInsertionService: ObservableObject {
         let bundle = NSRunningApplication(processIdentifier: target.pid)?.bundleIdentifier ?? ""
         let quirks = AppInsertionQuirks.forBundle(bundle)
         let expected = target.value.flatMap { before in
-            target.selection.flatMap { InsertionPolicy.expectedValue(before: before, selectedRange: $0, inserted: text) }
+            target.selection.flatMap { InsertionPolicy.expectedValue(before: before, selectedRange: $0, inserted: text,
+                                                                     replacesEmptyLineBreak: quirks.emptyEditorLineBreak) }
         }
         if !quirks.remoteDesktop, let expected, expected == target.value, let selection = target.selection {
             let fresh = FocusedText.read(pid: target.pid, element: target.element)
@@ -103,6 +111,7 @@ final class TextInsertionService: ObservableObject {
                   !Task.isCancelled, !IsSecureEventInputEnabled() else {
                 setStatus("The target changed while confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
             }
+            lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
             let caretConfirmed = observed.selection == NSRange(location: caret.location, length: 0)
             setStatus(caretConfirmed
                 ? "Text already matched the dictation · clipboard preserved; caret at replacement end"
@@ -121,6 +130,9 @@ final class TextInsertionService: ObservableObject {
                         readValue: { FocusedText.read(pid: target.pid, element: target.element).value },
                         isSafe: { target.isStillFocused() && !IsSecureEventInputEnabled() })
                     if verified {
+                        if let selection = target.selection {
+                            lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
+                        }
                         setStatus("Direct insertion verified in the focused app · clipboard preserved", outcome: .success)
                     } else {
                         setStatus("The app accepted an Accessibility write but did not confirm the edit; no duplicate paste was attempted", outcome: .failure(.insertionNotAcknowledged))
@@ -184,6 +196,9 @@ final class TextInsertionService: ObservableObject {
                InsertionPolicy.mayRestoreClipboard(providerRead: provider.hasBeenRead, targetPID: target.pid, focusedPID: observed.pid,
                                                     before: target.value, expected: expected, observed: observed.value,
                                                     ownedChangeCount: ownedCount, currentChangeCount: pasteboard.changeCount) {
+                if let expected, let selection = target.selection {
+                    lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
+                }
                 if snapshot.restore(to: pasteboard) {
                     recovery = nil
                     hasRecoveryClipboard = false
@@ -225,6 +240,26 @@ final class TextInsertionService: ObservableObject {
         if let layoutObserver { DistributedNotificationCenter.default().removeObserver(layoutObserver); self.layoutObserver = nil }
         if let pasteHotkey { UnregisterEventHotKey(pasteHotkey); self.pasteHotkey = nil }
         if let carbonHandler { RemoveEventHandler(carbonHandler); self.carbonHandler = nil }
+    }
+
+    /// Consume the anchor from the latest verified insertion, if any.
+    func takeLastAnchor() -> InsertionAnchor? {
+        defer { lastAnchor = nil }
+        return lastAnchor
+    }
+
+    /// The watcher anchor for a verified insertion: the target element plus the
+    /// expected value split around the inserted span (UTF-16, like the AX ranges).
+    private func anchor(target: FocusedText, expected: String, selection: NSRange, text: String,
+                        quirks: AppInsertionQuirks) -> InsertionAnchor? {
+        guard watchEdits, !quirks.editWatchBlocked, !quirks.remoteDesktop else { return nil }
+        let value = expected as NSString
+        let end = selection.location + (text as NSString).length
+        guard selection.location >= 0, end >= selection.location, end <= value.length else { return nil }
+        return InsertionAnchor(pid: target.pid, element: target.element,
+                               prefix: value.substring(with: NSRange(location: 0, length: selection.location)),
+                               inserted: text,
+                               suffix: value.substring(with: NSRange(location: end, length: value.length - end)))
     }
 
     private func clipboardToPreserve() -> ClipboardSnapshot? {
@@ -294,13 +329,21 @@ final class TextInsertionService: ObservableObject {
 struct AppInsertionQuirks {
     var preferPaste = false
     var remoteDesktop = false
+    var emptyEditorLineBreak = false
+    /// Never watch edits in credential managers, even outside their secure fields.
+    var editWatchBlocked = false
 
     static func forBundle(_ bundle: String) -> Self {
         let pasteOnly: Set<String> = ["com.apple.Terminal", "com.mitchellh.ghostty", "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders",
                                       "com.todesktop.230313mzl4w4u92", "com.tinyspeck.slackmacgap", "com.google.Chrome",
                                       "company.thebrowser.Browser", "company.thebrowser.dia", "com.t3tools.t3code"]
         let remote: Set<String> = ["com.microsoft.rdc.macos", "com.realvnc.vncviewer", "com.teamviewer.TeamViewer", "com.anydesk.AnyDesk"]
+        let credentialManagers: Set<String> = ["com.1password.1password", "com.agilebits.onepassword7",
+                                               "com.bitwarden.desktop", "com.dashlane.Dashlane",
+                                               "org.keepassxc.KeePassXC", "com.lastpass.LastPass"]
         return Self(preferPaste: pasteOnly.contains(bundle) || remote.contains(bundle) || bundle.lowercased().contains("paseo"),
-                    remoteDesktop: remote.contains(bundle))
+                    remoteDesktop: remote.contains(bundle),
+                    emptyEditorLineBreak: bundle == "com.t3tools.t3code",
+                    editWatchBlocked: credentialManagers.contains(bundle))
     }
 }

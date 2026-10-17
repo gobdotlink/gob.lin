@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
     let permissions: PermissionModel
     let hotkeys: HotkeyService
     let insertion: TextInsertionService
+    private let editWatcher = PostPasteWatcher()
     let audioPreview: AudioPreviewModel
     let speechModels: SpeechModelService
     let updates = UpdateChecker()
@@ -107,6 +108,9 @@ final class AppModel: ObservableObject {
                 if let failure = hotkeyFailure ?? pasteFailure { self.showFailure(failure) }
                 else { self.diagnostics.resolve(.hotkeys) }
             }
+        }.store(in: &subscriptions)
+        insertion.$watchEdits.sink { [weak self] watchEdits in
+            Task { @MainActor in if !watchEdits { self?.editWatcher.cancel() } }
         }.store(in: &subscriptions)
         insertion.$outcome.sink { [weak self] outcome in
             Task { @MainActor in
@@ -631,6 +635,7 @@ final class AppModel: ObservableObject {
         if servicesEnabled { await capture.shutdown() }
         dictationSessions.removeAll()
         await modelShutdown.value
+        editWatcher.cancel()
         insertion.shutdown()
         history.stopAudio()
         audioPreview.stop(reason: .shutdown)
@@ -722,6 +727,11 @@ final class AppModel: ObservableObject {
             completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
             processingWarning: warning)
         let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
+        if saved, insertionAttempted, let anchor = insertion.takeLastAnchor() {
+            editWatcher.start(entryID: entry.id, anchor: anchor) { [weak self] result in
+                Task { @MainActor in await self?.history.applyEditObservation(result) }
+            }
+        }
         session.audioOwnedByHistory = true
         if saved { try? FileManager.default.removeItem(at: audioURL) }
         if let overlayID = session.overlayID {
