@@ -69,16 +69,34 @@ struct HistoryLayoutChecks {
         let store = model.history.store!
         var filler: [UUID] = []
         for _ in 0..<205 {
-            let entry = HistoryEntry(rawText: "Paging fixture", finalText: "Paging fixture", createdAt: Date(timeIntervalSinceNow: -1))
+            let entry = HistoryEntry(rawText: "Paging fixture", finalText: "Paging fixture", createdAt: Date(timeIntervalSinceNow: -1), starred: true)
             _ = try await store.insert(entry)
             filler.append(entry.id)
         }
+        model.history.filter = .starred
+        model.history.searchText = ""
+        await model.history.reload()
+        let starredIDs = try await store.entries(filter: .starred, limit: 2000).map(\.id)
+        await expectEntries(model.history, Array(starredIDs.prefix(200)))
+        await model.history.loadMore()
+        await expectEntries(model.history, starredIDs)
+        let olderID = starredIDs.last!, unstarredEntry = model.history.entries[200]
+        await model.history.setStarred(false, entry: unstarredEntry)
+        await expectEntries(model.history, starredIDs.filter { $0 != unstarredEntry.id })
+        precondition(model.history.entries.contains { $0.id == olderID }, "Unstarring another row must preserve older loaded pages")
+        model.history.filter = .all
         model.history.searchText = ""
         await model.history.reload()
         precondition(!model.history.entries.contains { $0.id == second.id })
         model.openHistory(focus: second.id)
         try await capture(host, to: output.appendingPathComponent("history-focused-older.png"))
         precondition(model.historyFocus == nil && model.history.entries.contains { $0.id == second.id }, "Recent-search navigation must reveal entries beyond the first page")
+        model.history.searchText = "schedule"
+        await model.history.reload()
+        await expectEntries(model.history, [second.id])
+        model.openHistory(focus: second.id)
+        try await capture(host, to: output.appendingPathComponent("history-focused-from-search.png"))
+        precondition(model.historyFocus == nil && model.history.entries.contains { $0.id == second.id }, "Clearing an old search must keep its requested entry focused")
         for id in filler { try await store.delete(id: id) }
         model.history.searchText = "no matching fixture"
         await model.history.reload()

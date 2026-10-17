@@ -40,10 +40,13 @@ struct HistoryView: View {
             await revealFocus()
         }
         .onChange(of: history.entries.map(\.id), initial: true) { _, ids in
-            if let focus = model.historyFocus, ids.contains(focus) { selectedID = focus; model.historyFocus = nil }
-            else if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
+            if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
         }
-        .task(id: model.historyFocus) { await revealFocus() }
+        .task(id: model.historyFocus) {
+            guard model.historyFocus != nil else { return }
+            await history.reload()
+            await revealFocus()
+        }
         .alert("Delete this dictation and its audio?", isPresented: Binding(get: { deleteCandidate != nil }, set: { if !$0 { deleteCandidate = nil } })) {
             Button("Delete", role: .destructive) {
                 if let entry = deleteCandidate { Task { await history.delete(entry) } }
@@ -57,12 +60,13 @@ struct HistoryView: View {
     private func revealFocus() async {
         guard let focus = model.historyFocus else { return }
         while model.historyFocus == focus, !Task.isCancelled {
+            guard !history.isLoading else { return }
             if history.entries.contains(where: { $0.id == focus }) {
                 selectedID = focus
                 model.historyFocus = nil
                 return
             }
-            guard !history.isLoading, history.hasMore else { return }
+            guard history.hasMore else { return }
             let count = history.entries.count
             await history.loadMore()
             guard history.entries.count > count else { return }
