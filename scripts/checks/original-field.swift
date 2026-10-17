@@ -23,11 +23,6 @@ struct OriginalFieldCheck {
             let service = TextInsertionService(defaults: defaults, registerShortcuts: false)
             let overlay = OverlayController()
             var report: [String: Any] = [:]
-            defer {
-                overlay.shutdown()
-                service.shutdown()
-                defaults.removePersistentDomain(forName: suite)
-            }
             do {
                 guard AXIsProcessTrusted() else { throw Failure("Signed probe has no Accessibility permission") }
                 guard let target = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "app.goblin.original-field-target" }) else {
@@ -127,8 +122,21 @@ struct OriginalFieldCheck {
                 try capture(overlay, to: root.appendingPathComponent("delivery-notice.png"))
                 try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), "Delivery notice stole focus")
                 report["destinationNoticeQueuedWithoutFocusChange"] = true
+                let oldRecovery = overlay.begin(onCancel: {})
+                let newRecording = overlay.begin(onCancel: {})
+                overlay.update(.listening, committed: "Newer transcript", session: newRecording)
+                overlay.showCompletion(.readyToPaste(application: "Original Field Target"), session: oldRecovery)
+                try require(overlay.model.phase == .listening, "Queued recovery replaced a new recording")
+                overlay.showCompletion(.inserted(.init(application: "New destination", words: 2, seconds: 0.2)), session: newRecording)
+                overlay.hide(session: newRecording)
+                try await wait("queued recovery") { if case .readyToPaste = overlay.model.phase { return true }; return false }
+                try require(overlay.model.phase == .readyToPaste(application: "Original Field Target", shortcut: false), "Queued recovery advertised Paste Last for an older transcript")
+                try await Task.sleep(for: .milliseconds(250))
+                try capture(overlay, to: root.appendingPathComponent("queued-recovery-notice.png"))
+                report["queuedRecoveryUsesHistory"] = true
                 let readyNotice = overlay.begin(onCancel: {})
                 overlay.showCompletion(.readyToPaste(application: "Original Field Target"), session: readyNotice)
+                try require(overlay.model.phase == .readyToPaste(application: "Original Field Target", shortcut: true), "Immediate recovery lost its Paste Last shortcut")
                 try await Task.sleep(for: .milliseconds(250))
                 try capture(overlay, to: root.appendingPathComponent("ready-notice.png"))
                 overlay.shutdown()
@@ -165,6 +173,9 @@ struct OriginalFieldCheck {
                 report["error"] = String(describing: error)
             }
             try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("result.json"))
+            overlay.shutdown()
+            service.shutdown()
+            defaults.removePersistentDomain(forName: suite)
             app.terminate(nil)
         }
         app.run()

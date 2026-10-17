@@ -197,7 +197,7 @@ private struct OverlayBubble: View {
                     Subline { Text(NoticeCopy(notice).sentence).fixedSize(horizontal: false, vertical: true) }
                 }
             }
-        case .readyToPaste(let application):
+        case .readyToPaste(let application, let shortcut):
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 9) {
                     Image(systemName: "doc.on.clipboard").foregroundStyle(GoblinBrand.neon)
@@ -205,7 +205,7 @@ private struct OverlayBubble: View {
                         .font(.system(size: 14, weight: .semibold))
                 }
                 Subline {
-                    Text("Focus a text field, then press ⌥⇧⌘V. Your words are in History.")
+                    Text(shortcut ? "Focus a text field, then press ⌥⇧⌘V. Your words are in History." : "Your words are in History.")
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

@@ -7,7 +7,7 @@ import SwiftUI
 enum OverlayPhase: Equatable {
     case hidden, arming, listening, transcribing, polishing
     case inserted(OverlayResult)
-    case readyToPaste(application: String?)
+    case readyToPaste(application: String?, shortcut: Bool = true)
     case milestone(words: Int)
     case error(OverlayNotice)
 
@@ -222,7 +222,11 @@ final class OverlayController {
     /// Older results wait for the current recording's overlay instead of replacing its words.
     func showCompletion(_ phase: OverlayPhase, session: UUID) {
         if session != sessionID, model.phase != .hidden {
-            completionNotices.append(phase)
+            if case .readyToPaste(let application, _) = phase {
+                completionNotices.append(.readyToPaste(application: application, shortcut: false))
+            } else {
+                completionNotices.append(phase)
+            }
             return
         }
         let current = session == sessionID ? session : begin(onCancel: {})

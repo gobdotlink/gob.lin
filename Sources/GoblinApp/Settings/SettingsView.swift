@@ -214,7 +214,10 @@ private struct GeneralSettingsView: View {
             }
         } header: { CapsHeader("Behaviour") }
         Section {
-            LabeledContent("Paste last dictation again") { KeyCombo(label: "⌥⇧⌘V") }
+            LabeledContent { KeyCombo(label: "⌥⇧⌘V") } label: {
+                Text("Paste last dictation again")
+                Text("Dictation goes to the original field, in the background where supported. If it can't land there, choose a field and use this shortcut.")
+            }
             StatusRow(insertionLight, Text(insertion.status))
             if insertion.hasRecoveryClipboard {
                 StatusRow(.waiting, Text("Your last dictation is on the clipboard.")) {
