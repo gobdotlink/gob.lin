@@ -302,7 +302,7 @@ private struct PopoverCleanup: View {
         var changed = settings
         if settings.enabled && settings.cleanup != .none { changed.enabled = false; save(changed); return }
         // Turning it on needs a model and, for remote providers, a saved key; Settings explains what's missing.
-        let local = ["localhost", "127.0.0.1", "[::1]", "::1"].contains((try? settings.endpoint())?.host ?? "")
+        let local = (settings.provider.runsOnDevice && OnDeviceCleanup.availability == .available) || ["localhost", "127.0.0.1", "[::1]", "::1"].contains((try? settings.endpoint())?.host ?? "")
         let hasKey = local || (model.servicesEnabled && (try? RewriteKeyStore.load(for: settings, defaults: model.defaults))?.isEmpty == false)
         guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, hasKey else {
             dismiss.then { model.openSettings(.cleanup) }

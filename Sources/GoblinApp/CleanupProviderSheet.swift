@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Why these settings can't run cleanup yet, or nil when they can.
 func cleanupSetupProblem(_ settings: RewriteSettings, hasKey: Bool) -> String? {
+    if settings.provider.runsOnDevice { return OnDeviceCleanup.availability.problem }
     let endpoint: URL
     do { endpoint = try settings.endpoint() } catch { return error.localizedDescription }
     if settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Choose a model before turning on AI cleanup." }
@@ -69,6 +70,13 @@ struct CleanupProviderSheet: View {
                                 .labelsHidden().font(.body.monospaced()).autocorrectionDisabled().frame(width: Self.fieldWidth)
                         }
                     }
+                    if settings.provider.runsOnDevice {
+                        if let problem = OnDeviceCleanup.availability.problem {
+                            StatusRow(.waiting, Text(problem))
+                        } else {
+                            StatusRow(.ready, Text("Ready on this Mac. Cleanup runs offline and sends nothing anywhere."))
+                        }
+                    } else {
                     LabeledContent("Model") { modelField.frame(width: Self.fieldWidth) }
                     LabeledContent {
                         Picker("Reasoning", selection: $settings.reasoning) {
@@ -91,9 +99,11 @@ struct CleanupProviderSheet: View {
                         Label(keySaved ? "Saved in gob.lin preferences" : "Stored unencrypted in gob.lin preferences", systemImage: "key")
                     }
                     modelStatus
+                    }
                 } header: { Text("Cleanup provider") } footer: {
                     Text(settings.provider.detail)
                 }
+                if !settings.provider.runsOnDevice {
                 Section {
                     DisclosureGroup("Advanced request options") {
                         VStack(alignment: .leading, spacing: 10) {
@@ -116,6 +126,7 @@ struct CleanupProviderSheet: View {
                         }
                         .padding(.top, 8)
                     }
+                }
                 }
             }
             .formStyle(PlateFormStyle())
@@ -304,7 +315,7 @@ struct CleanupProviderSheet: View {
         handledRefreshes = refresh
         loadingModels = false
         if listing?.source != source { listing = nil }
-        guard inspectCredentials else { return }
+        guard inspectCredentials, !source.provider.runsOnDevice else { return }
         if !manual {
             guard modelHost != nil, isLocalHost(modelHost) || !source.key.isEmpty else { return }
             // Typing in the address or key restarts this; wait for a pause before asking.
@@ -335,14 +346,15 @@ struct CleanupProviderSheet: View {
         do {
             var next = settings
             if turnOn { next.enabled = true }
-            _ = try next.endpoint()
+            if !next.provider.runsOnDevice { _ = try next.endpoint() }
             _ = try next.extraRequestParameters()
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             if next.enabled, let problem = cleanupSetupProblem(next, hasKey: !key.isEmpty || keySaved) {
                 throw RewriteFailure.configuration(problem)
             }
-            if inspectCredentials, !key.isEmpty || removeKey { try RewriteKeyStore.save(key, for: next, defaults: defaults) }
+            if inspectCredentials, !next.provider.runsOnDevice, !key.isEmpty || removeKey { try RewriteKeyStore.save(key, for: next, defaults: defaults) }
             try RewriteSettingsStore.save(next, defaults: defaults)
+            if next.provider.runsOnDevice { OnDeviceCleanup.prewarm() }
             onSave(next)
             dismiss()
         } catch { message = error.localizedDescription; onFailure(.settingsSaveFailed) }

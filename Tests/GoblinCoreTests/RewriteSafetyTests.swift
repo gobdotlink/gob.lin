@@ -197,7 +197,7 @@ struct RewriteSafetyTests {
     }
 
     @Test func providerPresetsSendNativeReasoningAndAdvancedOptions() async throws {
-        for provider in RewriteProvider.allCases where !provider.models.isEmpty && provider != .anthropic {
+        for provider in RewriteProvider.allCases where !provider.models.isEmpty && provider != .anthropic && !provider.runsOnDevice {
             for preset in provider.models {
                 var configured = settings
                 configured.selectProvider(provider)

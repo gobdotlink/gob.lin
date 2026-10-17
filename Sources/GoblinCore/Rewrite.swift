@@ -285,6 +285,9 @@ public actor RewriteClient {
         guard settings.enabled, settings.cleanup != .none, !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return RewriteResult(rawText: rawText)
         }
+        if settings.provider.runsOnDevice {
+            return await OnDeviceCleanup.rewrite(rawText, cleanup: settings.cleanup, tone: tone, preferredSpellings: preferredSpellings)
+        }
         do {
             let endpoint = try settings.endpoint()
             guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

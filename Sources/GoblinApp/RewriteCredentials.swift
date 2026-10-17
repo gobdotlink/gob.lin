@@ -34,5 +34,8 @@ final class RewriteCredentials {
 
     func reset() { scope = nil; credential = nil }
 
-    private static func scope(_ settings: RewriteSettings) throws -> String { settings.provider.rawValue + " " + (try settings.endpoint().absoluteString) }
+    private static func scope(_ settings: RewriteSettings) throws -> String {
+        // The on-device provider has no endpoint or key; it still needs a stable scope.
+        settings.provider.runsOnDevice ? settings.provider.rawValue : settings.provider.rawValue + " " + (try settings.endpoint().absoluteString)
+    }
 }

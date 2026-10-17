@@ -33,7 +33,9 @@ struct RewriteSettingsView: View {
                 Text("Off unless you turn it on. Only the text of each take is sent, never the audio.")
             }
             StatusRow(isOn ? .ready : .off,
-                      Text(isOn ? "Your text goes to \(Text(settings.provider.title).fontWeight(.semibold)). Everything else stays on this Mac."
+                      Text(isOn ? (settings.provider.runsOnDevice
+                                   ? "Cleanup runs on this Mac with \(Text(settings.provider.title).fontWeight(.semibold)). Nothing is sent anywhere."
+                                   : "Your text goes to \(Text(settings.provider.title).fontWeight(.semibold)). Everything else stays on this Mac.")
                                 : "Off. Everything stays on this Mac."))
             if let message { StatusRow(.problem, Text(message)) }
         }
@@ -83,7 +85,7 @@ struct RewriteSettingsView: View {
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
                 HStack(spacing: 10) {
-                    Text(testMeta ?? (isOn ? "Sends this one sentence, nothing else." : "Turn on AI cleanup to try it."))
+                    Text(testMeta ?? (isOn ? (settings.provider.runsOnDevice ? "Runs this one sentence on this Mac." : "Sends this one sentence, nothing else.") : "Turn on AI cleanup to try it."))
                         .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                     Spacer()
                     Button(testing ? "Testing…" : testOutput == nil ? "Run Test" : "Run Again") { testCleanup() }
@@ -114,6 +116,7 @@ struct RewriteSettingsView: View {
     private var setupProblem: String? { cleanupSetupProblem(settings, hasKey: keySaved) }
 
     private var providerSummary: String {
+        if settings.provider.runsOnDevice { return OnDeviceCleanup.availability.problem ?? "On-device · no key needed" }
         let model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
         var parts = [model.isEmpty ? "No model" : model]
         if !settings.provider.hasFixedAddress, let host = try? settings.endpoint().host() { parts.append(host) }
