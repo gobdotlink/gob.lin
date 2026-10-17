@@ -23,6 +23,7 @@ import SwiftUI
 @main
 struct UIProbeApp: App {
     @StateObject private var model: AppModel
+    @State private var popoverHeight: CGFloat = 0
     @NSApplicationDelegateAdaptor(Driver.self) private var driver
 
     init() {
@@ -45,19 +46,17 @@ struct UIProbeApp: App {
         let _ = attach()
         MenuBarExtra {
             MenuPopover(model: model).defaultAppStorage(model.defaults)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { popoverHeight = $0 }
+                .background(PopoverWindowFit(height: popoverHeight))
         } label: {
             ProbeMenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
-        Window("gob.lin Settings", id: "settings") {
+        Window("gob.lin", id: "settings") {
             SettingsView(model: model, speechModels: model.speechModels)
         }
-        .defaultSize(width: 940, height: 720)
+        .defaultSize(width: 1040, height: 720)
         .windowResizability(.contentSize)
-        Window("History", id: "history") {
-            HistoryWindow(model: model).defaultAppStorage(model.defaults)
-        }
-        .defaultSize(width: 1100, height: 720)
     }
 
     private func attach() { driver.lifecycle.model = model }
@@ -459,17 +458,17 @@ final class Driver: NSObject, NSApplicationDelegate {
         _ = await openPopover()
         if let all = button(popover(), "All History") {
             all.press()
-            if let t = await until(3, { window("history")?.isKeyWindow == true && window("MenuBarExtra") == nil }) { historyOpens.append(t) }
-            check("All History opens History", historyOpens.count == 1)
-            await MainActor.run { check("History shows all dictations", model.historyScope == .all) }
+            if let t = await until(3, { window("settings")?.isKeyWindow == true && window("MenuBarExtra") == nil }) { historyOpens.append(t) }
+            check("All History opens the shared window", historyOpens.count == 1)
+            await MainActor.run { check("History shows all dictations", model.settingsSelection == .history && model.history.filter == .all) }
             try? await Task.sleep(for: .milliseconds(600))
-            await MainActor.run { snapshot(window("history"), "history-all") }
+            await MainActor.run { snapshot(window("settings"), "history-all") }
         }
         _ = await openPopover()
         let rowTarget = await MainActor.run { model.history.entries.first { $0.targetApplicationName == "Mail" }?.id }
         if let row = popover()?.find({ $0.label.contains("Seeded dictation 1 from Mail") && $0.role != kAXStaticTextRole }) ?? popover()?.find({ $0.label.contains("Seeded dictation 1 from Mail") }) {
             if !row.press(), let frame = row.frame { await click(frame) }
-            let focused = await until(3) { window("history")?.isKeyWindow == true && model.historyFocus == nil && window("MenuBarExtra") == nil }
+            let focused = await until(3) { window("settings")?.isKeyWindow == true && model.historyFocus == nil && window("MenuBarExtra") == nil }
             check("recent row opens History on that entry", focused != nil && rowTarget != nil)
             let selected = await untilAX(2) { windows().contains { $0.find { $0.label.contains("Seeded dictation 1 from Mail") && ($0.attribute(kAXSelectedAttribute) as? Bool == true || $0.label.contains("Selected")) } != nil } }
             record("historyRowSelectedViaAX", selected != nil)
@@ -477,13 +476,13 @@ final class Driver: NSObject, NSApplicationDelegate {
         _ = await openPopover()
         if let insights = button(popover(), "Insights") {
             insights.press()
-            let shown = await until(3) { model.historyScope == .insights && window("history")?.isKeyWindow == true }
-            check("Insights opens History on Insights", shown != nil)
+            let shown = await until(3) { model.settingsSelection == .insights && window("settings")?.isKeyWindow == true }
+            check("Insights opens the shared window on Insights", shown != nil)
             try? await Task.sleep(for: .milliseconds(600))
-            await MainActor.run { snapshot(window("history"), "history-insights") }
+            await MainActor.run { snapshot(window("settings"), "history-insights") }
         }
         record("historyOpenFromPopoverMs", historyOpens)
-        await MainActor.run { window("history")?.performClose(nil) }
+        await MainActor.run { window("settings")?.performClose(nil) }
 
         // 13. More menu. Its popup is not in the AX tree, so click it open and pick items by typing their
         // names: arrow counts break while Check for Updates… is disabled.

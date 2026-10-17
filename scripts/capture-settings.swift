@@ -79,11 +79,11 @@ struct SettingsCapture {
                     for page in SettingsSection.allCases {
                         model.settingsSelection = page
                         if page == .diagnostics { model.diagnostics.report(.modelUnavailable) }
-                        try await shoot("settings-\(page.rawValue.lowercased())", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 900, height: 1080))
+                        try await shoot("settings-\(page.rawValue.lowercased())", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080))
                     }
                     for page in [SettingsSection.general, .cleanup, .about] {
                         model.settingsSelection = page
-                        try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 900, height: 1080), dark: true)
+                        try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     }
                     model.diagnostics.resolve(.model)
                     let provider = CleanupProviderSheet(settings: RewriteSettingsStore.load(defaults: defaults), defaults: defaults,
@@ -91,14 +91,15 @@ struct SettingsCapture {
                     try await shoot("settings-cleanup-provider", provider, size: NSSize(width: 680, height: 520))
                 }
                 if wanted("history") {
-                    model.historyScope = .all
-                    try await shoot("history", HistoryWindow(model: model), size: NSSize(width: 1100, height: 720))
-                    try await shoot("history-dark", HistoryWindow(model: model), size: NSSize(width: 1100, height: 720), dark: true)
-                    model.historyScope = .insights
-                    try await shoot("history-insights", HistoryWindow(model: model), size: NSSize(width: 1100, height: 720))
-                    model.historyScope = .all
-                    try await shoot("history-empty", HistoryWindow(model: empty), size: NSSize(width: 900, height: 560))
-                    try await shoot("history-narrow", HistoryWindow(model: model), size: NSSize(width: 880, height: 600))
+                    model.settingsSelection = .history
+                    try await shoot("history", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1100, height: 720))
+                    try await shoot("history-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1100, height: 720), dark: true)
+                    model.settingsSelection = .insights
+                    try await shoot("history-insights", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1100, height: 720))
+                    model.settingsSelection = .history
+                    empty.settingsSelection = .history
+                    try await shoot("history-empty", SettingsView(model: empty), size: NSSize(width: 970, height: 620))
+                    try await shoot("history-narrow", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 970, height: 620))
                 }
                 if wanted("popover") {
                     try await shoot("popover", popover(model), size: NSSize(width: 420, height: 720))

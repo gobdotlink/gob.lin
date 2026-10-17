@@ -8,7 +8,6 @@ import SwiftUI
 struct MenuPopover: View {
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var height: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 8) {
@@ -21,8 +20,6 @@ struct MenuPopover: View {
         }
         .padding(8)
         .frame(width: 360)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-        .background(PopoverWindowFit(height: height))
         .onAppear { model.closePopover = { dismiss() } }
         .onDisappear { model.closePopover = nil }
     }
@@ -395,7 +392,7 @@ private struct PopoverRecents: View {
             }
             .frame(height: 4 * 42, alignment: .top)
             menuItem("All History", chevron: true) { dismiss.then { model.openHistory() } }
-            menuItem("Insights", chevron: true) { dismiss.then { model.openHistory(.insights) } }
+            PopoverInsights(history: history) { dismiss.then { model.openSettings(.insights) } }
         }
         .moduleBackground()
         .task(id: RecentQuery(text: query, revision: history.revision)) { await reload() }
@@ -403,6 +400,72 @@ private struct PopoverRecents: View {
 
     private func reload() async {
         recent = (try? await history.store?.entries(matching: query, limit: 4)) ?? []
+    }
+}
+
+/// Local totals use retained history, independently of the recent-search query.
+private struct PopoverInsights: View {
+    @ObservedObject var history: HistoryModel
+    let open: () -> Void
+    @State private var insights: HistoryInsights?
+    @State private var unavailable = false
+    @State private var refreshID = UUID()
+
+    private struct Request: Equatable { var revision: Int; var refresh: UUID }
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Insights").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text(summary).font(.system(size: 13)).monospacedDigit()
+                }
+                Spacer(minLength: 4)
+                if let insights {
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(insights.days) { day in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(GoblinBrand.moss.opacity(day.words > 0 ? 1 : 0.2))
+                                .frame(width: 5, height: max(3, 22 * Double(day.words) / Double(max(1, insights.days.map(\.words).max() ?? 0))))
+                        }
+                    }
+                    .frame(height: 22, alignment: .bottom)
+                    .accessibilityHidden(true)
+                }
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MenuRowStyle())
+        .accessibilityLabel("Insights")
+        .accessibilityValue(summary)
+        .help("Open Insights · activity over the last seven days")
+        .task(id: Request(revision: history.revision, refresh: refreshID)) {
+            do {
+                guard let store = history.store else { throw HistoryError.database("History is unavailable") }
+                let now = Date(), calendar = Calendar.current
+                let firstChartDay = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -6, to: calendar.startOfDay(for: now))!)
+                let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)!.start
+                let result = try await store.insights(now: now, day: now, calendar: calendar, since: min(firstChartDay, weekStart))
+                try Task.checkCancellation()
+                insights = result
+                unavailable = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                insights = nil
+                unavailable = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshID = UUID() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in refreshID = UUID() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in refreshID = UUID() }
+        .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in refreshID = UUID() }
+    }
+
+    private var summary: String {
+        if let insights { return "\(insights.weekWords.formatted()) words this week" }
+        return unavailable ? "Insights unavailable" : "Loading insights…"
     }
 }
 
@@ -550,7 +613,7 @@ private enum PopoverModule {
 /// The menu-bar window grows with its content but never shrinks, so anything that disappears
 /// (a warning, the clipboard notice) left the old, taller frame outlined behind the popover.
 /// This keeps the window exactly as tall as the content, its top edge under the menu bar.
-private struct PopoverWindowFit: NSViewRepresentable {
+struct PopoverWindowFit: NSViewRepresentable {
     let height: CGFloat
 
     func makeNSView(context: Context) -> Fitter { Fitter() }

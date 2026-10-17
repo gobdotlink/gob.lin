@@ -19,6 +19,26 @@ struct HistoryInsightsTests {
         return url
     }
 
+    @Test func recentWindowPreservesWeekAndChartTotals() async throws {
+        let directory = try directory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try HistoryStore(directory: directory)
+        let now = date("2026-10-14T12:00:00Z"), firstChartDay = date("2026-10-08T00:00:00Z")
+        for (timestamp, text) in [("2026-10-07T23:59:59Z", "outside"),
+                                  ("2026-10-08T00:00:00Z", "chart starts"),
+                                  ("2026-10-11T12:00:00Z", "previous week"),
+                                  ("2026-10-14T12:00:00Z", "current week words")] {
+            _ = try await store.insert(HistoryEntry(rawText: "", finalText: text, createdAt: date(timestamp)))
+        }
+        let all = try await store.insights(now: now, day: now, calendar: calendar())
+        let recent = try await store.insights(now: now, day: now, calendar: calendar(), since: firstChartDay)
+        #expect(all.entryCount == 4 && all.totalWords == 8)
+        #expect(recent.entryCount == 3 && recent.totalWords == 7)
+        #expect(recent.todayWords == all.todayWords && recent.weekWords == all.weekWords)
+        #expect(recent.days.map(\.words) == all.days.map(\.words))
+        #expect(recent.days.first?.words == 2 && recent.weekWords == 3)
+    }
+
     @Test func retainedWordsAndWeightedAudioSpeedUseAllPages() async throws {
         let directory = try directory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
-		0885CBBAA0DE9F6FB9BFB4A3 /* HistorySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC4B5EB8D08B3E2EE319018 /* HistorySettingsView.swift */; };
+		0885CBBAA0DE9F6FB9BFB4A3 /* HistoryRetentionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC4B5EB8D08B3E2EE319018 /* HistoryRetentionView.swift */; };
 		0FC039959BF7AD5EE416140E /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3FEC9638FA6353F8324835A /* SpeechModelService.swift */; };
 		12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2CADA2FD0B5602E82686E92 /* EventTap.swift */; };
 		73A062085B4B4AA989F37786 /* CleanupProviderSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB307CF30BDE1C3441FF45F /* CleanupProviderSheet.swift */; };
@@ -49,7 +49,7 @@
 		A80D16C881344416CB256003 /* PermissionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D589917F852F1F35A10767 /* PermissionModel.swift */; };
 		B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 329F4335956AA81050B7D254 /* HotkeyService.swift */; };
 		BFC91F80B072CFDCE76C1B1A /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B44F440C37D56DCC03C439 /* DiagnosticsView.swift */; };
-		CD7F1BE60A8700CD5BAF0453 /* HistoryWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6094FD8E8B26D894C6B110C /* HistoryWindow.swift */; };
+		CD7F1BE60A8700CD5BAF0453 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6094FD8E8B26D894C6B110C /* HistoryView.swift */; };
 		CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7BE4BFC2CC19C75E54AB9178 /* GoblinCore */; };
 		D3D42EB4371D6BA94FD4F2B8 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119D82C80CFD2C6D04B8785E /* UpdateChecker.swift */; };
 		D762EA37F9BE0EFAFE1BF66B /* DictationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */; };
@@ -64,7 +64,7 @@
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
 		37BC44B5352BC52AFF2D6019 /* DiagnosticsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModel.swift; sourceTree = "<group>"; };
-		3FC4B5EB8D08B3E2EE319018 /* HistorySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySettingsView.swift; sourceTree = "<group>"; };
+		3FC4B5EB8D08B3E2EE319018 /* HistoryRetentionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryRetentionView.swift; sourceTree = "<group>"; };
 		451CAE065F64DB5E635BF53C /* Goblin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Goblin.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4740B2E14FC110A8510E92CB /* OverlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayController.swift; sourceTree = "<group>"; };
 		4F18F0064FDFE0737432235A /* ModelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSettingsView.swift; sourceTree = "<group>"; };
@@ -96,7 +96,7 @@
 		CD14CC141C14EE017D44E28D /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
 		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 		D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneSettingsView.swift; sourceTree = "<group>"; };
-		D6094FD8E8B26D894C6B110C /* HistoryWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryWindow.swift; sourceTree = "<group>"; };
+		D6094FD8E8B26D894C6B110C /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationOverlay.swift; sourceTree = "<group>"; };
 		D6B44F440C37D56DCC03C439 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
@@ -190,8 +190,8 @@
 			isa = PBXGroup;
 			children = (
 				CD14CC141C14EE017D44E28D /* HistoryModel.swift */,
-				3FC4B5EB8D08B3E2EE319018 /* HistorySettingsView.swift */,
-				D6094FD8E8B26D894C6B110C /* HistoryWindow.swift */,
+				3FC4B5EB8D08B3E2EE319018 /* HistoryRetentionView.swift */,
+				D6094FD8E8B26D894C6B110C /* HistoryView.swift */,
 				AAC73565C924F4F70CD7F9BB /* InsightsView.swift */,
 			);
 			path = History;
@@ -382,8 +382,8 @@
 				90BA4272E95E7192F6993A4E /* GoblinApplicationDelegate.swift in Sources */,
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */,
-				0885CBBAA0DE9F6FB9BFB4A3 /* HistorySettingsView.swift in Sources */,
-				CD7F1BE60A8700CD5BAF0453 /* HistoryWindow.swift in Sources */,
+				0885CBBAA0DE9F6FB9BFB4A3 /* HistoryRetentionView.swift in Sources */,
+				CD7F1BE60A8700CD5BAF0453 /* HistoryView.swift in Sources */,
 				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
 				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
 				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,

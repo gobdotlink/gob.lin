@@ -115,14 +115,18 @@ public actor HistoryStore {
     }
 
     /// A single read snapshot of retained entries, independent of History search and pagination.
-    public func insights(now: Date = Date(), day: Date = Date(), calendar: Calendar = .current) throws -> HistoryInsights {
+    /// Supply a lower date bound for summaries that do not need all-time metrics.
+    public func insights(now: Date = Date(), day: Date = Date(), calendar: Calendar = .current, since: Date? = nil) throws -> HistoryInsights {
         var accumulator = HistoryInsightsAccumulator(now: now, day: day, calendar: calendar)
+        let lowerBound = since == nil ? "" : " AND created_at >= ?"
+        var values: [SQLValue] = [.number(now.timeIntervalSince1970)]
+        if let since { values.append(.number(since.timeIntervalSince1970)) }
         // Project only metrics; stream rows so transcripts and the full store never collect in memory.
         try database.forEachRow("""
             SELECT created_at, json_extract(metadata, '$.wordCount'), json_extract(metadata, '$.audioDuration'),
                    json_extract(metadata, '$.targetBundleIdentifier'), app_name
-            FROM entries WHERE created_at <= ? ORDER BY created_at DESC, id DESC
-            """, [.number(now.timeIntervalSince1970)]) { row in
+            FROM entries WHERE created_at <= ?\(lowerBound) ORDER BY created_at DESC, id DESC
+            """, values) { row in
             try Task.checkCancellation()
             guard let timestamp = Double(row[0] ?? ""), timestamp.isFinite else { return }
             accumulator.add(date: Date(timeIntervalSince1970: timestamp), words: max(0, Int(row[1] ?? "") ?? 0),

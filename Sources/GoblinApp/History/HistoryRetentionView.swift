@@ -1,39 +1,6 @@
 import GoblinCore
 import SwiftUI
 
-enum HistoryScope: Hashable {
-    case insights, entries(HistoryFilter)
-    static let all = Self.entries(.all)
-}
-
-/// Settings › History: how much to keep. Browsing lives in the History window.
-struct HistorySettingsView: View {
-    @ObservedObject var model: HistoryModel
-    let open: (HistoryScope) -> Void
-    @State private var showingRetention = false
-
-    var body: some View {
-        Section {
-            LabeledContent("Keep at most") { Text(model.retention.maximumUnstarredCount.map { "\($0.formatted()) dictations" } ?? "Everything") }
-            LabeledContent("Delete after") { Text(model.retention.maximumAgeDays.map { "\($0.formatted()) days" } ?? "Never") }
-            StatusRow(.ready, Text("Starred dictations are always kept.")) {
-                Button("Change…") { showingRetention = true }
-            }
-        } header: { CapsHeader("Keep") }
-        Section {
-            StatusRow(model.store == nil ? .problem : .ready,
-                      Text(model.store == nil ? "History is unavailable right now." : "\(model.counts.total.formatted()) dictations with their audio, on this Mac.")) {
-                Button("Open History") { open(.all) }
-            }
-            StatusRow(.ready, Text("Words per day, your pace, and the apps you talk to most.")) {
-                Button("Open Insights") { open(.insights) }
-            }
-        } header: { CapsHeader("Stored") }
-        .sheet(isPresented: $showingRetention) { HistoryRetentionView(model: model) }
-        .task { await model.reload() }
-    }
-}
-
 struct HistoryRetentionView: View {
     @ObservedObject var model: HistoryModel
     @Environment(\.dismiss) private var dismiss

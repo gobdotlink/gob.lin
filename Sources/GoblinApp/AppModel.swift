@@ -24,7 +24,6 @@ final class AppModel: ObservableObject {
     @Published var mascotState: MascotState = .idle
     @Published var settingsSelection: SettingsSection? = .general
     @Published var lastTranscript: String?
-    @Published var historyScope: HistoryScope = .all
     /// A dictation History should select when it opens, e.g. from a popover row.
     @Published var historyFocus: UUID?
     /// Set by the app scene: opens a window by id and brings gob.lin forward.

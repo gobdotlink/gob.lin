@@ -1,8 +1,8 @@
 # Settings
 
-One native settings window exposes General, Audio, Model, Dictionary, Cleanup, Tone, History (retention), Overlay, Diagnostics and About. Browsing dictations and Insights live in the separate History window. Existing feature views share the same services as the menu bar and history. Changes persist under stable preference keys and apply without a restart; shortening retention requires Apply to prevent deletion while editing.
+One native gob.lin window exposes Insights and History above General, Audio, Model, Dictionary, Cleanup, Tone, Overlay, Diagnostics and About. History opens dictation browsing directly; Change… below its list opens retention settings. Existing feature views share the same services as the menu bar and history. Changes persist under stable preference keys and apply without a restart; shortening retention requires Save and Apply to prevent deletion while editing.
 
-Every page is a set of sections inside one Form styled with `PlateFormStyle`: white plates on the warm case in light mode, lifted plates in dark mode, small-caps section labels, and the page title in the window's toolbar row. A native grouped Form can only draw its sections darker than the window in light mode, which is why the style lays sections out itself. Groups end in a status row (a light and one sentence) instead of footnotes where a status exists. The window is capped at 960 pt wide so every page keeps the same margins.
+Settings pages and Insights use sections inside a Form styled with `PlateFormStyle`: white plates on the warm case in light mode, lifted plates in dark mode, small-caps section labels, and the page title in the window's toolbar row. History uses a filter menu, dictation list and detail pane. A native grouped Form can only draw its sections darker than the window in light mode, which is why the style lays sections out itself. Groups end in a status row (a light and one sentence) instead of footnotes where a status exists. The shared window has a 970 pt minimum width; settings forms and Insights keep a bounded 760 pt content column as History expands with the window.
 
 Microphones are stored by Core Audio UID, with a follow-system option. The explicit local level preview requires an existing microphone grant, becomes ready only after its first buffer, and stops when leaving the page or permission is revoked. A missing saved device falls back without erasing the preference. Preview callbacks are session guarded. This is a level preview, not the GOB-8 capture engine.
 
@@ -10,7 +10,7 @@ The meter displays the loudest channel's RMS as device input, so a microphone on
 
 Login Items uses SMAppService and reports approval/errors. Audio capture, sounds, model download and recognizer binding remain separate benchmark/capture work; model selection clearly shows this pending state. Dictionary, rewrite credentials, tone, insertion space and clipboard recovery are real controls; no live provider request is made by opening settings.
 
-Login Items status refreshes when General appears, when gob.lin becomes active, and after each attempted change. History's count picker distinguishes no limit from zero unstarred entries, preserves custom saved counts, and reloads a newly saved policy from the History window.
+Login Items status refreshes when General appears, when gob.lin becomes active, and after each attempted change. History's retention controls distinguish no limit from zero unstarred entries, preserve custom saved counts, and refresh the History page after applying a policy.
 
 Checked: SwiftPM build, signed app verification, Xcode debug compilation. Permission changes and login-item registration are user actions and are not toggled during automated verification.
 
