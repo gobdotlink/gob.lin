@@ -198,6 +198,7 @@ final class AppModel: ObservableObject {
             do { try rewriteCredentials.prepare(for: settings) }
             catch { showFailure(.rewriteConfiguration) }
         }
+        if settings.provider.runsOnDevice, settings.enabled, settings.cleanup != .none { OnDeviceCleanup.prewarm() }
         if settings.enabled && settings.cleanup != .none {
             history.rewriteAction = { [weak self] entry, _ in
                 guard let self, !self.shuttingDown else { throw CancellationError() }

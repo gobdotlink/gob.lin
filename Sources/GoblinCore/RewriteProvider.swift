@@ -2,18 +2,21 @@ import Foundation
 
 public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     // Keep the fast inference providers at the top of the selector.
-    case cerebras, groq, sambaNova, openAI, anthropic, gemini, mistral, xai, zai, openRouter, requesty, vercel, local, custom
+    case cerebras, groq, sambaNova, openAI, anthropic, gemini, mistral, xai, zai, openRouter, requesty, vercel, appleIntelligence, local, custom
     public var id: String { rawValue }
 
     /// Named services always use their own address; only Local and Custom take one.
     public var hasFixedAddress: Bool { self != .local && self != .custom }
+
+    /// The system on-device model: no address, model choice, or API key.
+    public var runsOnDevice: Bool { self == .appleIntelligence }
 
     public var group: RewriteProviderGroup {
         switch self {
         case .cerebras, .groq, .sambaNova: .fast
         case .openAI, .anthropic, .gemini, .mistral, .xai, .zai: .labs
         case .openRouter, .requesty, .vercel: .routers
-        case .local: .local
+        case .appleIntelligence, .local: .local
         case .custom: .custom
         }
     }
@@ -32,6 +35,7 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .vercel: "Vercel AI Gateway"
         case .openRouter: "OpenRouter"
         case .zai: "Z.AI"
+        case .appleIntelligence: "Apple Intelligence"
         case .local: "Local"
         case .custom: "Custom"
         }
@@ -51,6 +55,7 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .vercel: "https://ai-gateway.vercel.sh/v1"
         case .openRouter: "https://openrouter.ai/api/v1"
         case .zai: "https://api.z.ai/api/paas/v4"
+        case .appleIntelligence: ""
         case .local: "http://localhost:11434/v1"
         case .custom: ""
         }
@@ -77,6 +82,7 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .requesty: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off, temperature: nil)]
         case .vercel: [RewriteModelPreset(id: "openai/gpt-6-luna", title: "GPT-6 Luna", reasoning: .off),
                        RewriteModelPreset(id: "anthropic/claude-haiku-5.5", title: "Claude Haiku 5.5", reasoning: .off, temperature: nil)]
+        case .appleIntelligence: [RewriteModelPreset(id: "on-device", title: "On-device model", reasoning: .providerDefault, temperature: nil)]
         case .local, .custom: []
         }
     }
@@ -88,6 +94,7 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
         case .openAI: "GPT-6 Luna is a small, cost-efficient model. The preset requests reasoning off."
         case .openRouter: "Access GPT-6 Luna and Claude Haiku with one OpenAI-compatible endpoint."
         case .zai: "The Flash preset requests thinking off. Other GLM models may require thinking."
+        case .appleIntelligence: "Apple's on-device model. Free, offline and private, with no API key. Long dictations and exacting cleanup may suit a larger model better."
         case .local: "An OpenAI-compatible server on this Mac. A local server may not need an API key."
         case .custom: "Use any OpenAI-compatible chat completions endpoint."
         case .sambaNova: "Fast inference. Llama 3.3 does not reason; GPT-OSS 120B uses Low reasoning."
@@ -109,7 +116,7 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
 
     public static func matching(baseURL: String) -> Self {
         let normalized = baseURL.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return allCases.first { $0 != .custom && ($0.baseURL == normalized || $0.baseURL + "/chat/completions" == normalized) } ?? .custom
+        return allCases.first { $0 != .custom && !$0.baseURL.isEmpty && ($0.baseURL == normalized || $0.baseURL + "/chat/completions" == normalized) } ?? .custom
     }
 
     public var configuration: RewriteProviderConfiguration {
