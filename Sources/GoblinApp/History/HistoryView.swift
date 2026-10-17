@@ -2,46 +2,26 @@ import AppKit
 import GoblinCore
 import SwiftUI
 
-/// The History window: smart lists and apps, the dictations, and one dictation in detail.
-struct HistoryWindow: View {
+/// Dictations and their detail, inside the shared app window.
+struct HistoryView: View {
     @ObservedObject var model: AppModel
     @ObservedObject private var history: HistoryModel
     @State private var selectedID: UUID?
     @State private var deleteCandidate: HistoryEntry?
-    @State private var weekWords: Int?
+    @State private var showingRetention = false
 
     init(model: AppModel) {
         self.model = model
         _history = ObservedObject(wrappedValue: model.history)
     }
 
-    private var filter: HistoryFilter? {
-        if case .entries(let filter) = model.historyScope { filter } else { nil }
-    }
-
     private var selectedEntry: HistoryEntry? { history.entries.first { $0.id == selectedID } }
 
     var body: some View {
-        // The sidebar is always there: no toggle, and no collapsing in narrow windows.
-        NavigationSplitView(columnVisibility: .constant(.all)) {
-            sidebar
-                // The column width alone doesn't hold; the content's own width pins the split item.
-                .frame(width: 200)
-                .navigationSplitViewColumnWidth(200)
-                .toolbar(removing: .sidebarToggle)
-        } detail: {
-            Group {
-                if filter == nil { InsightsView(history: history) } else { entriesPane }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .caseBackground()
-            .navigationTitle(title)
-            .toolbar(removing: .title)
+        entriesPane
             .toolbar {
-                ToolbarTitle(title: title, subtitle: subtitle, leading: 16)
-                if filter != nil, let entry = selectedEntry {
-                    // Star, copy and delete sit right before search. They must be declared here, on
-                    // the detail column: from the window's toolbar the spacer centres them instead.
+                ToolbarTitle(title: "History", subtitle: subtitle, leading: 16)
+                if let entry = selectedEntry {
                     ToolbarSpacer(.flexible)
                     ToolbarItemGroup {
                         Button(entry.starred ? "Unstar" : "Star", systemImage: entry.starred ? "star.fill" : "star") {
@@ -52,23 +32,18 @@ struct HistoryWindow: View {
                     }
                 }
             }
-            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        }
         .searchable(text: $history.searchText, placement: .toolbar, prompt: "Search dictations")
         // Scrolled rows stop at the toolbar rather than showing through the title (see Settings).
         .scrollEdgeEffectStyle(.hard, for: .top)
-        .task(id: Query(search: history.searchText, filter: filter ?? .all)) {
-            history.filter = filter ?? .all
+        .task(id: Query(search: history.searchText, filter: history.filter)) {
             await history.reload()
+            await revealFocus()
         }
-        .task(id: history.revision) { weekWords = try? await history.store?.insights().weekWords }
         .onChange(of: history.entries.map(\.id), initial: true) { _, ids in
             if let focus = model.historyFocus, ids.contains(focus) { selectedID = focus; model.historyFocus = nil }
             else if selectedID.map({ ids.contains($0) }) != true { selectedID = ids.first }
         }
-        .onChange(of: model.historyFocus) { _, focus in
-            if let focus, history.entries.contains(where: { $0.id == focus }) { selectedID = focus; model.historyFocus = nil }
-        }
+        .task(id: model.historyFocus) { await revealFocus() }
         .alert("Delete this dictation and its audio?", isPresented: Binding(get: { deleteCandidate != nil }, set: { if !$0 { deleteCandidate = nil } })) {
             Button("Delete", role: .destructive) {
                 if let entry = deleteCandidate { Task { await history.delete(entry) } }
@@ -76,31 +51,43 @@ struct HistoryWindow: View {
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
         }
         .onDisappear { history.stopAudio() }
-        // Sidebar 200 + inset 16 + list 330 + rule 1 + detail 420.
-        .frame(minWidth: 970, minHeight: 560)
+        .sheet(isPresented: $showingRetention) { HistoryRetentionView(model: history) }
+    }
+
+    private func revealFocus() async {
+        guard let focus = model.historyFocus else { return }
+        while model.historyFocus == focus, !Task.isCancelled {
+            if history.entries.contains(where: { $0.id == focus }) {
+                selectedID = focus
+                model.historyFocus = nil
+                return
+            }
+            guard !history.isLoading, history.hasMore else { return }
+            let count = history.entries.count
+            await history.loadMore()
+            guard history.entries.count > count else { return }
+        }
     }
 
     private var title: String {
-        switch model.historyScope {
-        case .insights: "Insights"
-        case .entries(.all): "All Dictations"
-        case .entries(.starred): "Starred"
-        case .entries(.withWarnings): "Warnings"
-        case .entries(.application(let name)): name
+        switch history.filter {
+        case .all: "All Dictations"
+        case .starred: "Starred"
+        case .withWarnings: "Warnings"
+        case .application(let name): name
         }
     }
 
     private var subtitle: String {
         let counts = history.counts
         func dictations(_ count: Int) -> String { "\(count.formatted()) \(count == 1 ? "dictation" : "dictations")" }
-        switch model.historyScope {
-        case .insights: return "Counted on this Mac"
-        case .entries(.all):
+        switch history.filter {
+        case .all:
             let minutes = Int((counts.totalSeconds / 60).rounded())
             return minutes > 0 ? "\(dictations(counts.total)) · \(minutes.formatted()) min of talking" : dictations(counts.total)
-        case .entries(.starred): return dictations(counts.starred)
-        case .entries(.withWarnings): return dictations(counts.withWarnings)
-        case .entries(.application(let name)): return dictations(counts.applications.first { $0.name == name }?.count ?? 0)
+        case .starred: return dictations(counts.starred)
+        case .withWarnings: return dictations(counts.withWarnings)
+        case .application(let name): return dictations(counts.applications.first { $0.name == name }?.count ?? 0)
         }
     }
 
@@ -109,48 +96,64 @@ struct HistoryWindow: View {
         var filter: HistoryFilter
     }
 
-    // MARK: Sidebar
-
-    private var sidebar: some View {
-        let scopes: [HistoryScope] = [.insights, .all, .entries(.starred), .entries(.withWarnings)]
-            + history.counts.applications.map { .entries(.application($0.name)) }
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 1) {
-                row("Insights", .insights) { Image(systemName: "chart.bar.xaxis") }
-                Spacer().frame(height: 10)
-                row("All Dictations", .all, count: history.counts.total) { Image(systemName: "clock") }
-                row("Starred", .entries(.starred), count: history.counts.starred) { Image(systemName: "star") }
-                row("Warnings", .entries(.withWarnings), count: history.counts.withWarnings) { Image(systemName: "exclamationmark.triangle") }
+    private var filters: some View {
+        HStack {
+            Menu {
+                filterItem("All Dictations", .all, count: history.counts.total, symbol: "clock")
+                filterItem("Starred", .starred, count: history.counts.starred, symbol: "star")
+                filterItem("Warnings", .withWarnings, count: history.counts.withWarnings, symbol: "exclamationmark.triangle")
                 if !history.counts.applications.isEmpty {
-                    Text("Apps").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                        .padding(.leading, 9).padding(.top, 14).padding(.bottom, 4)
+                    Divider()
                     ForEach(history.counts.applications) { app in
-                        row(app.name, .entries(.application(app.name)), count: app.count) {
-                            AppIcon(bundleIdentifier: app.bundleIdentifier, size: 18)
-                        }
+                        filterItem(app.name, .application(app.name), count: app.count, symbol: "app")
                     }
                 }
+            } label: {
+                HStack {
+                    Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10).padding(.top, 4)
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+            .accessibilityLabel("Filter dictations: \(title)")
         }
-        .arrowKeySelection(scopes, selection: Binding(get: { model.historyScope }, set: { if let scope = $0 { model.historyScope = scope } }))
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let weekWords, weekWords > 0 {
-                // ponytail: 40 words a minute is a typical typing speed; make it a setting if people ask.
-                let minutes = max(1, Int((Double(weekWords) / 40).rounded()))
-                Text("**\(weekWords.formatted()) words this week.** About \(minutes) \(minutes == 1 ? "minute" : "minutes") of typing you didn't do.")
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .overlay(alignment: .top) { Divider() }
-            }
+        .padding(.horizontal, 16).frame(height: 44)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func filterItem(_ title: String, _ filter: HistoryFilter, count: Int, symbol: String) -> some View {
+        Button {
+            history.filter = filter
+        } label: {
+            Label("\(title) · \(count.formatted())", systemImage: history.filter == filter ? "checkmark" : symbol)
         }
     }
 
-    private func row<Icon: View>(_ title: String, _ scope: HistoryScope, count: Int? = nil, @ViewBuilder icon: () -> Icon) -> some View {
-        SidebarRow(title: title, selected: model.historyScope == scope, action: { model.historyScope = scope }, icon: icon) {
-            if let count { Text(count.formatted()) }
+    private var retentionFooter: some View {
+        Button { showingRetention = true } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(retentionSummary).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Text("Change…").font(.system(size: 11.5)).foregroundStyle(GoblinBrand.moss)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help("Change history retention. Starred dictations are always kept.")
+        .accessibilityLabel("History retention: \(retentionSummary). Change retention")
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var retentionSummary: String {
+        let policy = history.retention
+        var limits: [String] = []
+        if let count = policy.maximumUnstarredCount { limits.append("Keep \(count.formatted()) unstarred") }
+        if let days = policy.maximumAgeDays { limits.append("Delete after \(days.formatted()) \(days == 1 ? "day" : "days")") }
+        return limits.isEmpty ? "Keeping all dictations" : limits.joined(separator: " · ")
     }
 
     // MARK: Entries
@@ -158,26 +161,28 @@ struct HistoryWindow: View {
     private var entriesPane: some View {
         VStack(spacing: 0) {
             banners
-            if history.entries.isEmpty, !history.isLoading {
-                if history.searchText.isEmpty, history.counts.total == 0 {
-                    EmptyHistoryView(hotkeys: model.hotkeys)
-                } else if !history.searchText.isEmpty {
-                    ContentUnavailableView.search(text: history.searchText)
-                } else {
-                    ContentUnavailableView("Nothing here yet", systemImage: "tray")
-                }
-            } else {
-                // A fixed list column, so switching lists never changes its width.
-                HStack(spacing: 0) {
-                    entryList.frame(width: 330)
-                    Rectangle().fill(.primary.opacity(0.1)).frame(width: 1)
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    filters
                     Group {
-                        if let entry = selectedEntry { EntryDetail(entry: entry, history: history).id(entry.id) }
-                        else { ContentUnavailableView("Pick a dictation", systemImage: "text.alignleft") }
+                        if history.entries.isEmpty, !history.isLoading {
+                            if !history.searchText.isEmpty { ContentUnavailableView.search(text: history.searchText) }
+                            else { ContentUnavailableView("Nothing here yet", systemImage: "tray") }
+                        } else { entryList }
                     }
-                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                    .background(GoblinBrand.plate)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    retentionFooter
                 }
+                .frame(width: 330)
+                Rectangle().fill(.primary.opacity(0.1)).frame(width: 1)
+                Group {
+                    if let entry = selectedEntry { EntryDetail(entry: entry, history: history).id(entry.id) }
+                    else if history.counts.total == 0, !history.isLoading, history.searchText.isEmpty {
+                        EmptyHistoryView(hotkeys: model.hotkeys)
+                    } else { ContentUnavailableView("Pick a dictation", systemImage: "text.alignleft") }
+                }
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .background(GoblinBrand.plate)
             }
         }
     }

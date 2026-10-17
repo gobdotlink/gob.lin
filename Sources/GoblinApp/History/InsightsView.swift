@@ -35,7 +35,7 @@ struct InsightsView: View {
             .formStyle(PlateFormStyle())
         }
         .toolbar {
-            // Keeps refresh and search together at the trailing end, as in the dictation lists.
+            // Refresh stays at the trailing end of the shared window.
             ToolbarSpacer(.flexible)
             ToolbarItem {
                 if loading { ProgressView().controlSize(.small) }

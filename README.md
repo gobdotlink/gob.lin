@@ -129,8 +129,10 @@ keeps raw and final text, tone, target app, timestamps, duration, word count,
 model, and stage timings. Original, untrimmed captures are copied into `audio/`
 under unique UUID filenames before their metadata is saved.
 
-The History window supports transcript/app search, copying either text, audio
-playback, stars, deletion, and optional count/age retention. Both limits start
+History opens directly in the shared gob.lin window, alongside Insights and settings.
+Its filter menu selects all dictations, starred entries, warnings, or an app. Retention
+controls live below the list. The History page supports transcript/app search, copying
+either text, audio playback, stars, deletion, and optional count/age retention. Both limits start
 unset, so history is kept by default; starred entries survive retention cleanup.
 Re-transcription and rewrite actions create a new entry and keep the original.
 Re-transcription stays visibly unavailable until a speech engine is configured.
@@ -146,8 +148,8 @@ entries. It never uses your recordings or history folder.
 
 ## Insights
 
-Open Insights from the menu or Settings sidebar for today’s, this calendar week’s,
-and total saved words, weighted dictation WPM, current/longest daily streaks,
+Open Insights from the popover’s weekly words summary or the shared window’s sidebar
+for today’s, this calendar week’s, and total saved words, weighted dictation WPM, current/longest daily streaks,
 a seven-day word chart, a selectable day’s hourly timeline, and words by app.
 Calculations stay local and use all retained History entries, independent of search
 or pagination. Deletion and retention reduce totals; starred entries still count.

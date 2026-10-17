@@ -34,7 +34,7 @@ extension AppModel {
         case .hotkeys: ("Open General Settings", { [weak self] in self?.openSettings(.general) })
         case .history: ("Open History", { [weak self] in self?.openHistory() })
         // Their copy says the dictation is waiting in History.
-        case .insertion, .trimming: ("Open History", { [weak self] in self?.openHistory(.entries(.withWarnings)) })
+        case .insertion, .trimming: ("Open History", { [weak self] in self?.openHistory(.withWarnings) })
         case .dictionary: ("Open Dictionary", { [weak self] in self?.openSettings(.dictionary) })
         case .secureInput, .settings, .application: nil
         }
@@ -45,10 +45,11 @@ extension AppModel {
         openWindow?("settings")
     }
 
-    func openHistory(_ scope: HistoryScope = .all, focus: UUID? = nil) {
-        historyScope = scope
+    func openHistory(_ filter: HistoryFilter = .all, focus: UUID? = nil) {
+        history.filter = filter
+        if focus != nil { history.searchText = "" }
         historyFocus = focus
-        openWindow?("history")
+        openSettings(.history)
     }
 }
 

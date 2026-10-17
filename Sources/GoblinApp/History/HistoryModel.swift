@@ -128,8 +128,11 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func setStarred(_ starred: Bool, entry: HistoryEntry) async {
         do {
             try await store?.setStarred(starred, id: entry.id)
-            if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index].starred = starred }
-            if let counts = try? await store?.counts() { self.counts = counts }
+            if filter == .starred { await reload() }
+            else {
+                if let index = entries.firstIndex(where: { $0.id == entry.id }) { entries[index].starred = starred }
+                if let counts = try? await store?.counts() { self.counts = counts }
+            }
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }
 

@@ -5,11 +5,13 @@ import ServiceManagement
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+    case insights = "Insights", history = "History"
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
-    case cleanup = "Cleanup", tone = "Tone", history = "History", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
+    case cleanup = "Cleanup", tone = "Tone", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
     var symbol: String {
         switch self {
+        case .insights: "chart.bar.xaxis"
         case .general: "gearshape"
         case .audio: "mic"
         case .model: "cpu"
@@ -36,6 +38,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(SettingsSection.allCases) { item in
+                        if item == .general { Divider().padding(.vertical, 10).padding(.horizontal, 6) }
                         SidebarRow(title: item.rawValue, selected: item == section, action: { model.settingsSelection = item }) {
                             Image(systemName: item.symbol)
                         }
@@ -52,22 +55,32 @@ struct SettingsView: View {
         } detail: {
             // The title is a toolbar item, so the toolbar stays and the sidebar runs up behind the traffic
             // lights. The toolbar draws no band, so the case reaches the top of the window.
-            Form { sectionContents }
-                .formStyle(PlateFormStyle())
+            Group {
+                switch section {
+                case .history: HistoryView(model: model)
+                case .insights:
+                    InsightsView(history: model.history)
+                        .frame(maxWidth: 760)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                default:
+                    Form { sectionContents }
+                        .formStyle(PlateFormStyle())
+                        .frame(maxWidth: 760)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
                 .id(section)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .caseBackground()
                 .navigationTitle(section.rawValue)
                 .toolbar(removing: .title)
-                .toolbar { ToolbarTitle(title: section.rawValue) }
+                .toolbar { if section != .history { ToolbarTitle(title: section.rawValue) } }
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         // With the toolbar background hidden, scrolled rows would show through the title; the hard
         // edge cuts them off at the toolbar instead.
         .scrollEdgeEffectStyle(.hard, for: .top)
-        // Grouped Forms center a ~700pt column in wider windows; capping the width keeps every
-        // page on the same margins (System Settings is fixed-width too).
-        .frame(minWidth: 820, maxWidth: 960, minHeight: 620)
+        .frame(minWidth: 970, minHeight: 620)
         .defaultAppStorage(model.defaults)
     }
 
@@ -84,7 +97,7 @@ struct SettingsView: View {
                                            onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                            onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
-        case .history: HistorySettingsView(model: model.history, open: { model.openHistory($0) })
+        case .history, .insights: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
         case .about: AboutSettingsView(updates: model.updates, history: model.history)

@@ -5,37 +5,33 @@ import SwiftUI
 @main
 struct GoblinApp: App {
     @StateObject private var model = AppModel()
+    @State private var popoverHeight: CGFloat = 0
     @NSApplicationDelegateAdaptor(GoblinApplicationDelegate.self) private var lifecycle
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
         GoblinBrand.registerFonts()
-        // Both sidebars are a fixed 200 pt. AppKit restores a saved split width past SwiftUI's
+        // The sidebar is a fixed 200 pt. AppKit restores a saved split width past SwiftUI's
         // maximum, so a width saved by an older build would stick.
-        for window in ["history", "settings"] {
-            UserDefaults.standard.removeObject(forKey: "NSSplitView Subview Frames \(window), SidebarNavigationSplitView")
-        }
+        UserDefaults.standard.removeObject(forKey: "NSSplitView Subview Frames settings, SidebarNavigationSplitView")
     }
 
     var body: some Scene {
         let _ = attachLifecycle()
         MenuBarExtra {
             MenuPopover(model: model)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { popoverHeight = $0 }
+                .background(PopoverWindowFit(height: popoverHeight))
         } label: {
             MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
 
-        Window("gob.lin Settings", id: "settings") {
+        Window("gob.lin", id: "settings") {
             SettingsView(model: model, speechModels: model.speechModels)
         }
-        .defaultSize(width: 940, height: 720)
+        .defaultSize(width: 1040, height: 720)
         .windowResizability(.contentSize)
-
-        Window("History", id: "history") {
-            HistoryWindow(model: model)
-        }
-        .defaultSize(width: 1100, height: 720)
     }
 
     private func attachLifecycle() { lifecycle.model = model }
