@@ -6,6 +6,7 @@ This document lists bundled fonts, dependencies, and model attribution for gob.l
 
 - Workbench — Copyright 2021 The Workbench Project Authors; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/workbench). See `Sources/GoblinApp/Assets/Workbench-OFL.txt`.
 - VT323 — Copyright 2011 The VT323 Project Authors; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/vt323). See `Sources/GoblinApp/Assets/VT323-OFL.txt`.
+- Press Start 2P — Copyright 2012 The Press Start 2P Project Authors, with Reserved Font Name "Press Start 2P"; SIL Open Font License 1.1. [Source and licence](https://github.com/google/fonts/tree/main/ofl/pressstart2p). Bundled unmodified for the Insights word cloud. See `Sources/GoblinApp/Assets/PressStart2P-OFL.txt`.
 
 The original goblin sprites come from the owner's gob.lin brand kit. Only visual assets and fonts are reused from that kit.
 

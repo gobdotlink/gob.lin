@@ -115,9 +115,10 @@ public actor HistoryStore {
     }
 
     /// A single read snapshot of retained entries, independent of History search and pagination.
+    /// `week` is any date in the calendar week the Activity charts show.
     /// Supply a lower date bound for summaries that do not need all-time metrics.
-    public func insights(now: Date = Date(), day: Date = Date(), calendar: Calendar = .current, since: Date? = nil) throws -> HistoryInsights {
-        var accumulator = HistoryInsightsAccumulator(now: now, day: day, calendar: calendar)
+    public func insights(now: Date = Date(), week: Date = Date(), calendar: Calendar = .current, since: Date? = nil) throws -> HistoryInsights {
+        var accumulator = HistoryInsightsAccumulator(now: now, week: week, calendar: calendar)
         let lowerBound = since == nil ? "" : " AND created_at >= ?"
         var values: [SQLValue] = [.number(now.timeIntervalSince1970)]
         if let since { values.append(.number(since.timeIntervalSince1970)) }
@@ -133,6 +134,30 @@ public actor HistoryStore {
                             duration: row[2].flatMap(Double.init), bundle: row[3], name: row[4])
         }
         return accumulator.finish()
+    }
+
+    /// The nouns said most today and this calendar week. Reads saved final text from this week's rows only
+    /// and keeps nothing but a word count.
+    public func spokenWords(now: Date = Date(), calendar: Calendar = .current, limit: Int = 40) throws -> InsightWordCloud {
+        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)!.start.timeIntervalSince1970
+        let today = calendar.startOfDay(for: now).timeIntervalSince1970
+        let counter = SpokenWordCounter()
+        var week: [String: Int] = [:], day: [String: Int] = [:], cloud = InsightWordCloud()
+        try database.forEachRow("SELECT created_at, final_text FROM entries WHERE created_at >= ? AND created_at <= ?",
+                                [.number(weekStart), .number(now.timeIntervalSince1970)]) { row in
+            try Task.checkCancellation()
+            guard let timestamp = Double(row[0] ?? ""), let text = row[1], !text.isEmpty else { return }
+            let isToday = timestamp >= today
+            cloud.weekEntries += 1
+            if isToday { cloud.todayEntries += 1 }
+            for word in counter.nouns(in: text) {
+                week[word, default: 0] += 1
+                if isToday { day[word, default: 0] += 1 }
+            }
+        }
+        cloud.week = SpokenWordCounter.top(week, limit: limit)
+        cloud.today = SpokenWordCounter.top(day, limit: limit)
+        return cloud
     }
 
     /// Record what became of the pasted text. `editedText` is stored only for

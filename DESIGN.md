@@ -12,7 +12,7 @@ gob.lin is a native macOS 26 app with a proud pixel goblin living in it. Control
 |---|---|---|
 | Overlay | ~100 times a day | A face, a moving mouth, one hand. Plain words. |
 | Menu-bar popover | daily | A goblin portrait and the wordmark in the header. Everything else is stock. |
-| Settings, History | weekly | Status sentences in the goblin's voice. No sprites, except on About. |
+| Settings, History | weekly | Status sentences in the goblin's voice. No sprites, except on About and Insights. |
 | First run, empty states, milestones, About | rare | The full goblin: big sprites, jokes, sparkles and the tagline. |
 
 ## Rules
@@ -30,7 +30,7 @@ The values live in `GoblinBrand`. This table is what it must contain.
 | Token | Light | Dark | Job |
 |---|---|---|---|
 | moss | `#2B7D4F` | `#34965F` fill, `#62C78A` text | Every interactive job: primary buttons, switches, links, selection, chart bars |
-| neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline |
+| neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline, the top word of the Insights cloud on dark |
 | candle | `#B26B0F` | `#F2A93B` | Stars and milestones |
 | case | `#EDECE9` | `#1E1F21` | Settings and History window background |
 | plate | `#FBFAF8` | `#2A2B2E` | A grouped section, with a 0.5 pt hairline |
@@ -42,6 +42,7 @@ The values live in `GoblinBrand`. This table is what it must contain.
 - SF Pro for everything, using system text styles.
 - Workbench for the wordmark "gob.lin" only, at sizes that are multiples of 4: 16 pt in the popover header, 48 pt on About.
 - VT323 for the tagline `$ sudo autism --unmuted` only. It appears on About and on the last first-run step, nowhere else. `$` and `autism` are neon.
+- Press Start 2P for the Insights word cloud only. Draw it at its native 8 pt with antialiasing off, then scale by whole numbers on a 2 pt grid, like the sprites.
 - SF Mono for values a person would copy: URLs, model IDs, a masked API key.
 - `.monospacedDigit()` on any number that changes: timers, counts, latencies.
 
@@ -198,6 +199,10 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - "What you said": the raw transcript, with the words cleanup cut struck through (the same inline diff as the Cleanup page).
   - Re-transcribe and Rewrite under the text. Star, copy and delete sit in the toolbar.
 - **Insights:** plates on the case, numbers in monospaced digits, chart bars in moss.
+  - This week: the week's words as the one big number, the talking time in the goblin's voice ("You talked for 59 minutes. I did all the typing."), and the look-down goblin at 128 pt with its quill, sitting on the plate's divider. Below it: Today, Speaking pace and Streak.
+  - Activity: Words per day beside When you talk. Seven bars stand on faint full-height tracks with a dashed average, labelled on today and the peak. Today is the full-moss bar and the bold row. The hour grid is 7 × 24 square cells in four steps of moss. Hovering a bar or a square shows its count, and ‹ › step a week at a time.
+  - What you talked about: the pixel word cloud for Today or This Week. The side-eye goblin grips the top edge of the biggest word, and smaller goblins and sparks appear only where a gap fits them. The layout is seeded by the day, so it doesn't reshuffle on every visit. Hovering a word shows how often you said it.
+  - Where I typed: app icon, name, words and share over a thin moss track. Then "How I count".
 - **Empty:** the closed goblin at 128 pt with Zz, then "Nothing to snitch on yet." and "Hold fn and say something. I'll keep the receipts."
 - **Problems:** save errors and unsaved dictations are amber status plates with one action each.
 
