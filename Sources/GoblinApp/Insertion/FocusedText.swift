@@ -63,10 +63,18 @@ struct FocusedText {
     }
 
     var supportsDirectInsertion: Bool {
+        canSetTextAttribute(kAXSelectedTextAttribute)
+    }
+
+    var supportsValueInsertion: Bool {
+        canSetTextAttribute(kAXValueAttribute)
+    }
+
+    private func canSetTextAttribute(_ attribute: String) -> Bool {
         guard !applicationFallback, !secure, value != nil, selection != nil,
               role == "AXTextField" || role == "AXTextArea" || role == "AXComboBox" else { return false }
         var settable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success && settable.boolValue
+        return AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success && settable.boolValue
     }
 
     func hasSameContext(as other: FocusedText) -> Bool {

@@ -2,6 +2,8 @@
 
 Each recording captures its original application, text control, window/document context, and selection before showing the overlay. Automatic delivery never activates an app or raises a window. If that control is still focused, the normal insertion pipeline runs against it. Otherwise, an editable control with readable text/selection and a writable `AXSelectedText` can receive a direct background write. The original window must still exist and its document must match. Editors that route changes through their app's selection must still identify the captured control as that app's focused element. Selection is restored only while the field's text is unchanged; edits made during recording use its fresh selection.
 
+An unchanged empty original field can instead receive a direct `AXValue` write when supported. This handles editors that ignore selected-text writes in the background. Both captured and current selections must be at the start, and the captured value must still be empty (or a single empty-paragraph newline). The inserted text is verified literally, then caret placement at its UTF-16 end is acknowledged separately. An unconfirmed caret is reported without retrying the delivered text. Existing drafts are never replaced wholesale through this path.
+
 Background writes leave the clipboard untouched and require exact text readback before showing **Text landed in [app]**. Unsupported, missing, or changed targets show **Ready to paste** and keep the transcript in History and Paste Last Dictation. They never redirect into the currently focused field. An accepted but unconfirmed write is reported separately and never retried automatically. App-only captures retain foreground paste compatibility but cannot be restored in the background. Manual Paste Last Dictation deliberately targets the field the user currently chooses.
 
 `TextInsertionService.insert(_:)` is the native pipeline entry. Accessibility writes `AXSelectedText` first when the focused control exposes it as settable. A timeout or ambiguous write failure never triggers a second insertion. Unsupported writes fall back to paste. Secure Input and accessible secure text fields reject insertion.
@@ -19,7 +21,7 @@ New pastes while the unverified transcript still owns the clipboard carry forwar
 | Notes and standard Cocoa editors | Accessibility insertion where supported; otherwise verified paste |
 | Terminal / Ghostty | Paste only, avoiding repeated direct typing; terminal AX content often cannot confirm consumption |
 | Paseo / VS Code / Cursor / Slack | Paste handles Electron editing; exact AX evidence is used only when exposed |
-| T3 Code | Paste only; its empty editor's single placeholder newline is replaced by the paste when predicting the exact AX value |
+| T3 Code | Paste while focused, with exact empty-paragraph normalization; unchanged empty original editors also support verified background value insertion |
 | Dia / Chrome / Arc | Paste preserves browser input handling; address bars may normalize trailing whitespace and therefore require explicit recovery |
 | Remote desktop / VNC / AnyDesk / TeamViewer | Paste only; local AX cannot confirm remote consumption, so automatic recovery is disabled |
 | No focused AX control | Paste into the same foreground app; no automatic recovery without target text evidence |

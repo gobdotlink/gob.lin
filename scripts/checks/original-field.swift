@@ -41,7 +41,7 @@ struct OriginalFieldCheck {
                     throw Failure("Original native editor was not captured as writable: \(String(describing: session.originalText))")
                 }
                 let fields = descendants(AXUIElementCreateApplication(target.processIdentifier))
-                guard let pasteOnly = fields["paste-only"], let unconfirmed = fields["unconfirmed"] else { throw Failure("Target fields missing") }
+                guard let pasteOnly = fields["paste-only"], let unconfirmed = fields["unconfirmed"], let valueOnly = fields["value-only"] else { throw Failure("Target fields missing") }
                 var movedSelection = CFRange(location: 0, length: 4)
                 try set(original.element, kAXSelectedTextRangeAttribute, AXValueCreate(.cfRange, &movedSelection)!)
                 try set(pasteOnly, kAXFocusedAttribute, kCFBooleanTrue)
@@ -57,6 +57,16 @@ struct OriginalFieldCheck {
                 try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() && editor.string == "Foreground draft must stay untouched.", "Background insertion stole focus or typed into the foreground")
                 try require(NSPasteboard.general.changeCount == clipboardCount, "Background insertion touched the clipboard")
                 report["backgroundOriginalField"] = true
+
+                let empty = FocusedText.read(pid: original.pid, element: valueOnly)
+                try require(empty.supportsValueInsertion && !empty.supportsDirectInsertion, "Value-only fixture exposes the wrong write capabilities")
+                await service.insert("value 🧌", into: empty)
+                let valueInserted = FocusedText.read(pid: original.pid, element: valueOnly)
+                try require(service.outcome == .success && valueInserted.value == "value 🧌" && valueInserted.selection == NSRange(location: "value 🧌".utf16.count, length: 0), "Empty background value insertion or caret failed: " + service.status)
+                try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() && NSPasteboard.general.changeCount == clipboardCount, "Value insertion changed foreground or clipboard")
+                await service.insert("must not replace the draft", into: empty)
+                try require(service.outcome == .readyToPaste && FocusedText.read(pid: original.pid, element: valueOnly).value == "value 🧌", "Value insertion replaced a nonempty draft")
+                report["emptyValueInsertionAndDraftProtection"] = true
 
                 var currentCaret = CFRange(location: "left replacement right".utf16.count, length: 0)
                 try set(original.element, kAXSelectedTextRangeAttribute, AXValueCreate(.cfRange, &currentCaret)!)
@@ -195,7 +205,8 @@ struct OriginalFieldCheck {
         return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
     }
     private static func set(_ element: AXUIElement, _ name: String, _ value: CFTypeRef) throws {
-        try require(AXUIElementSetAttributeValue(element, name as CFString, value) == .success, "Could not set " + name)
+        let result = AXUIElementSetAttributeValue(element, name as CFString, value)
+        try require(result == .success, "Could not set \(name): \(result.rawValue)")
     }
     private static func require(_ condition: Bool, _ reason: String) throws { if !condition { throw Failure(reason) } }
     @MainActor private static func capture(_ overlay: OverlayController, to url: URL) throws {
