@@ -140,6 +140,7 @@ private struct GeneralSettingsView: View {
     @ObservedObject private var permissions: PermissionModel
     @AppStorage("feedbackSoundsEnabled") private var sounds = true
     @AppStorage("audio.pauseMediaWhileDictating") private var pauseMedia = false
+    @AppStorage("audio.muteWhileDictating") private var muteAudio = false
     /// The last status read, so a reopened page shows it straight away.
     @MainActor private static var loginStatus: SMAppService.Status?
     @State private var loginStatus = GeneralSettingsView.loginStatus
@@ -200,10 +201,6 @@ private struct GeneralSettingsView: View {
                 Text("Click sounds")
                 Text("A soft tick once the mic is really listening, and another when it stops.")
             }
-            Toggle(isOn: $pauseMedia) {
-                Text("Pause media while dictating")
-                Text("Picks up where it left off when you're done, unless you changed what's playing.")
-            }
             Toggle(isOn: $insertion.trailingSpace) {
                 Text("Add a space after each take")
                 Text("So the next one doesn't run into this one.")
@@ -213,6 +210,18 @@ private struct GeneralSettingsView: View {
                 Text("Watch for 30 seconds and show corrections in History. Secure fields and password managers are excluded.")
             }
         } header: { CapsHeader("Behaviour") }
+        Section {
+            Toggle(isOn: $pauseMedia) {
+                Text("Pause current media")
+                Text("Pauses the player controlled by macOS, then resumes where it left off unless you changed playback. Other players can keep playing.")
+            }
+            Toggle(isOn: $muteAudio) {
+                Text("Mute audio")
+                Text("Silences your current sound output while music and videos keep advancing. Restores sound when you finish; audio that was already muted stays muted.")
+            }
+        } header: { CapsHeader("Reduce audio while dictating") } footer: {
+            Text("Use either option, or both to pause the current player and silence other sounds. Some external audio devices don't support muting.")
+        }
         Section {
             Picker("Insert dictation into", selection: $insertion.destination) {
                 Text("Current text field").tag(DictationDestination.currentField)

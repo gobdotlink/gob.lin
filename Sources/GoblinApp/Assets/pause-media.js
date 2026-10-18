@@ -30,10 +30,9 @@ function run() {
         const item = Request.localNowPlayingItem;
         if (path.isNil() || item.isNil() || path.client.processIdentifier <= 0) return null;
         const info = ObjC.deepUnwrap(item.nowPlayingInfo);
-        const identity = info.kMRMediaRemoteNowPlayingInfoContentItemIdentifier ||
-            info.kMRMediaRemoteNowPlayingInfoUniqueIdentifier ||
-            JSON.stringify([info.kMRMediaRemoteNowPlayingInfoTitle, info.kMRMediaRemoteNowPlayingInfoArtist,
-                info.kMRMediaRemoteNowPlayingInfoAlbum, info.kMRMediaRemoteNowPlayingInfoDuration]);
+        // System content IDs can change on pause and metadata refreshes for the same item.
+        const identity = JSON.stringify([info.kMRMediaRemoteNowPlayingInfoTitle, info.kMRMediaRemoteNowPlayingInfoArtist,
+            info.kMRMediaRemoteNowPlayingInfoAlbum, info.kMRMediaRemoteNowPlayingInfoDuration]);
         if (!info.kMRMediaRemoteNowPlayingInfoTitle || !Number.isFinite(info.kMRMediaRemoteNowPlayingInfoElapsedTime)) return null;
         const lastPlaying = Request.localLastPlayingDate;
         return { path: path, pid: path.client.processIdentifier, identity: identity, playing: Request.localIsPlaying,

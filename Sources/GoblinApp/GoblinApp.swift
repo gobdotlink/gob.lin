@@ -3,6 +3,16 @@ import GoblinCore
 import SwiftUI
 
 @main
+enum GoblinEntryPoint {
+    @MainActor static func main() {
+        if CommandLine.arguments.dropFirst() == ["--mute-output-while-dictating"] {
+            runOutputMuteHelper()
+        } else {
+            GoblinApp.main()
+        }
+    }
+}
+
 struct GoblinApp: App {
     @StateObject private var model = AppModel()
     @State private var popoverHeight: CGFloat = 0

@@ -10,6 +10,7 @@
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
 		0FC039959BF7AD5EE416140E /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3FEC9638FA6353F8324835A /* SpeechModelService.swift */; };
 		12E0DAA6B05952B69378BE7A /* EventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2CADA2FD0B5602E82686E92 /* EventTap.swift */; };
+		1681340D6BFE62BC3E93F1C3 /* OutputMute.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0D09B5CE498E57602528AB1 /* OutputMute.swift */; };
 		174F206992DBAA3EB8F3DF21 /* RewriteSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */; };
 		17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */; };
 		1954B82D91DCCF9879DD3E7A /* ToneSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */; };
@@ -27,7 +28,6 @@
 		58E00021912DB4B5D0D06F35 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F18F0064FDFE0737432235A /* ModelSettingsView.swift */; };
 		5C55A7CF565ECAD05E937128 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAC73565C924F4F70CD7F9BB /* InsightsView.swift */; };
 		5FFE7394E4A1EC402B37C343 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24B1A95910F26D0E4F24463 /* DirectInsertionVerification.swift */; };
-		61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */; };
 		669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740B2E14FC110A8510E92CB /* OverlayController.swift */; };
 		705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */; };
 		70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */; };
@@ -48,6 +48,7 @@
 		A80D16C881344416CB256003 /* PermissionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D589917F852F1F35A10767 /* PermissionModel.swift */; };
 		B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 329F4335956AA81050B7D254 /* HotkeyService.swift */; };
 		BFC91F80B072CFDCE76C1B1A /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B44F440C37D56DCC03C439 /* DiagnosticsView.swift */; };
+		C4FEF6C6C9DD7FE202193AC1 /* AudioReductionSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8368BB3DF85B1D6ED849CA5E /* AudioReductionSession.swift */; };
 		CD1A018583C8E250C08C159D /* PostPasteWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6A96744AA996E489A81E25 /* PostPasteWatcher.swift */; };
 		CE9F4BEADE15689EDA5731C1 /* GoblinCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7BE4BFC2CC19C75E54AB9178 /* GoblinCore */; };
 		CEDC38008C707265024AF6CA /* StatusMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6772E9F3CB47679C0B563E6 /* StatusMenu.swift */; };
@@ -60,7 +61,6 @@
 
 /* Begin PBXFileReference section */
 		119D82C80CFD2C6D04B8785E /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
-		1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPauseSession.swift; sourceTree = "<group>"; };
 		207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsertionSettingsView.swift; sourceTree = "<group>"; };
 		2B3FAD4AE834447412676E24 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		329F4335956AA81050B7D254 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
@@ -80,6 +80,7 @@
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
 		7D74D07131206B57D5513E74 /* RewriteCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteCredentials.swift; sourceTree = "<group>"; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		8368BB3DF85B1D6ED849CA5E /* AudioReductionSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioReductionSession.swift; sourceTree = "<group>"; };
 		844116D65927D5C258B7A0C5 /* UpdateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSettingsView.swift; sourceTree = "<group>"; };
 		86CA786E7971062A617DCC40 /* KeyboardLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayout.swift; sourceTree = "<group>"; };
 		8C7DC821C59D20E3BD8E9846 /* Goblin.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Goblin.icns; sourceTree = "<group>"; };
@@ -106,6 +107,7 @@
 		DDB1197B94259F10AEFE3EFC /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = Sources/GoblinApp/Assets; sourceTree = SOURCE_ROOT; };
 		E33741D23CEF99390DFA8769 /* DesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignComponents.swift; sourceTree = "<group>"; };
 		E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlaySettingsView.swift; sourceTree = "<group>"; };
+		F0D09B5CE498E57602528AB1 /* OutputMute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputMute.swift; sourceTree = "<group>"; };
 		F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteSettingsView.swift; sourceTree = "<group>"; };
 		F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApplicationDelegate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -240,6 +242,7 @@
 				BF1FE8056C680509FF18EE58 /* ActiveDictation.swift */,
 				975C736F378D2F622BC649E2 /* AppModel.swift */,
 				B029479976312A99966D9899 /* AppStatus.swift */,
+				8368BB3DF85B1D6ED849CA5E /* AudioReductionSession.swift */,
 				64FD9CAC227996E36779A580 /* CleanupProviderSheet.swift */,
 				E33741D23CEF99390DFA8769 /* DesignComponents.swift */,
 				5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */,
@@ -247,7 +250,7 @@
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
 				F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */,
 				7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */,
-				1C9A1B1ED74493627ABA0AF5 /* MediaPauseSession.swift */,
+				F0D09B5CE498E57602528AB1 /* OutputMute.swift */,
 				7D74D07131206B57D5513E74 /* RewriteCredentials.swift */,
 				F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */,
 				D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */,
@@ -371,6 +374,7 @@
 				E044215AEE61E9611339C46B /* ActiveDictation.swift in Sources */,
 				A7811327A6820FE203C57930 /* AppModel.swift in Sources */,
 				7FC0B09A37C901C81DBE588C /* AppStatus.swift in Sources */,
+				C4FEF6C6C9DD7FE202193AC1 /* AudioReductionSession.swift in Sources */,
 				2D264F8C1F01B32F7D43596E /* AudioSettingsView.swift in Sources */,
 				7BECF8E57E9E47525641EB6A /* CleanupProviderSheet.swift in Sources */,
 				E6008ABDEBD09FC35F26CD52 /* DesignComponents.swift in Sources */,
@@ -393,10 +397,10 @@
 				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,
 				5C55A7CF565ECAD05E937128 /* InsightsView.swift in Sources */,
 				8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */,
-				61F6D500E21A3A5C7A66083D /* MediaPauseSession.swift in Sources */,
 				2CEF1DEC0B82CA2270B7C39A /* MenuPopover.swift in Sources */,
 				58E00021912DB4B5D0D06F35 /* ModelSettingsView.swift in Sources */,
 				39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */,
+				1681340D6BFE62BC3E93F1C3 /* OutputMute.swift in Sources */,
 				669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */,
 				7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */,
 				21AA69E94D41CF1EFC04E543 /* PasteboardTransaction.swift in Sources */,
