@@ -259,7 +259,9 @@ final class TextInsertionService: ObservableObject {
         return InsertionAnchor(pid: target.pid, element: target.element,
                                prefix: value.substring(with: NSRange(location: 0, length: selection.location)),
                                inserted: text,
-                               suffix: value.substring(with: NSRange(location: end, length: value.length - end)))
+                               suffix: value.substring(with: NSRange(location: end, length: value.length - end)),
+                               normalizesEmptyLineBreak: quirks.emptyEditorLineBreak && target.value == "\n"
+                                   && selection == NSRange(location: 0, length: 0))
     }
 
     private func clipboardToPreserve() -> ClipboardSnapshot? {

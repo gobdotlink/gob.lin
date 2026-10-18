@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     let hotkeys: HotkeyService
     let insertion: TextInsertionService
     private let editWatcher = PostPasteWatcher()
+    private var pendingEditObservationID: UUID?
     let audioPreview: AudioPreviewModel
     let speechModels: SpeechModelService
     let updates = UpdateChecker()
@@ -110,7 +111,12 @@ final class AppModel: ObservableObject {
             }
         }.store(in: &subscriptions)
         insertion.$watchEdits.sink { [weak self] watchEdits in
-            Task { @MainActor in if !watchEdits { self?.editWatcher.cancel() } }
+            Task { @MainActor in
+                if !watchEdits {
+                    self?.pendingEditObservationID = nil
+                    self?.editWatcher.cancel()
+                }
+            }
         }.store(in: &subscriptions)
         insertion.$outcome.sink { [weak self] outcome in
             Task { @MainActor in
@@ -176,10 +182,12 @@ final class AppModel: ObservableObject {
         guard !shuttingDown else { return }
         guard let text = lastTranscript, !text.isEmpty else { showFailure(.noTranscriptAvailable); return }
         guard insertionTask == nil else { showFailure(.insertionNotAcknowledged); return }
+        finishEditObservation()
         insertionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let operation = UUID()
             self.diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: operation)
+            self.finishEditObservation()
             await self.insertion.insert(text)
             var details = DevelopmentDetails()
             if case .failure(let failure) = self.insertion.outcome { details.failure = failure; details.succeeded = false }
@@ -187,6 +195,12 @@ final class AppModel: ObservableObject {
             self.diagnostics.developmentLog.record(.insertionFinished, area: .insertion, operation: operation, details: details)
             self.insertionTask = nil
         }
+    }
+
+    private func finishEditObservation() {
+        // A new action also supersedes an observation still awaiting its History save.
+        pendingEditObservationID = nil
+        editWatcher.finish()
     }
 
     /// Every preferences write lands here, window frames included, so it returns early unless a
@@ -328,6 +342,7 @@ final class AppModel: ObservableObject {
 
     private func beginDictation() {
         guard activeCapture == nil else { return }
+        finishEditObservation()
         let session = DictationSession()
         let lease: SpeechModelLease
         do { lease = try speechModels.beginSession() }
@@ -669,6 +684,7 @@ final class AppModel: ObservableObject {
         var warningFailure = result.warning
         let text = result.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
         var insertionAttempted = false
+        var insertionAnchor: InsertionAnchor?
         if !text.isEmpty {
             lastTranscript = result.finalText
             if let overlayID = session.overlayID {
@@ -697,7 +713,10 @@ final class AppModel: ObservableObject {
                         self.overlay.hide(after: 0.6, session: overlayID)
                     }
                     // Pastes report as soon as they're sent; direct Accessibility writes once verified.
+                    finishEditObservation()
+                    pendingEditObservationID = session.id
                     await insertion.insert(result.finalText, onPasteSent: showChip)
+                    insertionAnchor = insertion.takeLastAnchor()
                     if case .success = insertion.outcome { showChip() }
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
@@ -727,11 +746,13 @@ final class AppModel: ObservableObject {
             completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
             processingWarning: warning)
         let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
-        if saved, insertionAttempted, let anchor = insertion.takeLastAnchor() {
+        if saved, pendingEditObservationID == session.id, insertion.watchEdits, !shuttingDown,
+           let anchor = insertionAnchor {
             editWatcher.start(entryID: entry.id, anchor: anchor) { [weak self] result in
                 Task { @MainActor in await self?.history.applyEditObservation(result) }
             }
         }
+        if pendingEditObservationID == session.id { pendingEditObservationID = nil }
         session.audioOwnedByHistory = true
         if saved { try? FileManager.default.removeItem(at: audioURL) }
         if let overlayID = session.overlayID {

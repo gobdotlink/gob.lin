@@ -11,6 +11,7 @@ struct InsertionAnchor {
     var prefix: String
     var inserted: String
     var suffix: String
+    var normalizesEmptyLineBreak = false
 }
 
 struct EditObservationResult {
@@ -75,12 +76,16 @@ final class PostPasteWatcher {
         finish(report: false)
     }
 
+    /// Report before another dictation or insertion changes the target.
+    func finish() {
+        finish(report: true)
+    }
+
     // MARK: - Sampling
 
     /// Returns false when the session ended inside this sample.
-    /// A key-triggered final sample runs after the key reached the target, so
-    /// it may already see a submitted-and-cleared field; it only updates the
-    /// metrics when it still locates the region, never downgrades them.
+    /// Final key samples may see a field already cleared by submission;
+    /// preserve the previous observation when the span is gone.
     private func sampleOnce(sessionID: UUID, isFinalKeySample: Bool = false) -> Bool {
         guard var current = session, current.id == sessionID else { return false }
         guard !IsSecureEventInputEnabled() else {
@@ -92,8 +97,9 @@ final class PostPasteWatcher {
             if isFinalKeySample { return true }
             finish(report: true); return false
         }
+        let observedValue = current.anchor.normalizesEmptyLineBreak && value == "\n" ? "" : value
         switch EditObservation.evaluate(prefix: current.anchor.prefix, inserted: current.anchor.inserted,
-                                        suffix: current.anchor.suffix, current: value) {
+                                        suffix: current.anchor.suffix, current: observedValue) {
         case .region(let text, let distance):
             current.lastRegion = text
             current.lastDistance = distance
@@ -140,13 +146,13 @@ final class PostPasteWatcher {
     }
 
     /// Keys that mean the user has moved on from the pasted span: submitting,
-    /// leaving the field, undoing, or pasting over it. Take one last sample
-    /// first — a chat field cleared by sending must not read as a deletion.
+    /// leaving the field or pasting over it. Undo stays observable by polling.
+    /// Take one last sample, preserving text already cleared by submission.
     private func installKeyMonitor(sessionID: UUID) {
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let exits = [36, 76, 48, 53].contains(Int(event.keyCode))
                 || (event.modifierFlags.contains(.command)
-                    && ["z", "v"].contains(event.charactersIgnoringModifiers?.lowercased() ?? ""))
+                    && event.charactersIgnoringModifiers?.lowercased() == "v")
             guard exits else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.session?.id == sessionID, !(self.session?.finishing ?? true) else { return }
