@@ -171,7 +171,8 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **Sidebar:** General, Audio, Model, Dictionary, Cleanup, Tone, History (retention only), Overlay, Diagnostics, About, all with SF Symbols. The footer is a status light, "Ready", and the engine and where it runs ("Parakeet v3 · on this Mac").
 - **General:**
   - Talk key: a big keycap card with the key, one sentence on how it works, and Record New Key…. Quick picks: fn / Globe, Right ⌥, ⌥ Space. Cancel a take: esc. A status row for the Globe key setting.
-  - Behaviour: Open at login, Click sounds, Pause media while dictating, Add a space after each take.
+  - Behaviour: Open at login, Click sounds, Add a space after each take.
+  - Reduce audio while dictating: independent Pause current media and Mute audio switches. Explain that pause preserves the current player's position, mute lets playback advance, and both can be enabled. Preserve the existing pause preference; mute starts off.
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
 - **Cleanup:** the switch and level apply as soon as they change; the provider is edited in a sheet and applies on Save.
   - A top plate with the AI cleanup switch and a status row naming where the text goes. Turning it on with an unfinished provider opens the provider sheet, whose button reads Save and Turn On.

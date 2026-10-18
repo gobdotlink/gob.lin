@@ -407,16 +407,12 @@ final class AppModel: ObservableObject {
                 }
                 active.captureID = try await self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
                     directory: self.captureDirectory, feedback: self.feedback, feedbackSessionID: session.id, onEvent: active.onEvent)
-                if self.defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
-                   let script = GoblinBrand.assetDirectory?.appendingPathComponent("pause-media.js") {
-                    active.media = MediaPauseSession(script: script)
-                }
                 active.eventTask = Task { @MainActor [weak self] in
                     for await event in active.events { await self?.consume(event, for: active) }
                 }
             } catch {
                 active.sounds?.end(sessionID: session.id, playStop: false)
-                await active.media?.finish()
+                await active.audioReduction?.finish()
                 active.failure = error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed)
                 active.finishEvents()
                 if !active.stopping && !session.cancelled { self.suspendDictation(active) }
@@ -430,6 +426,11 @@ final class AppModel: ObservableObject {
         switch event {
         case .ready(let id, _):
             guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
+            if active.audioReduction == nil {
+                active.audioReduction = AudioReductionSession(
+                    pauseMedia: defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
+                    muteAudio: defaults.bool(forKey: "audio.muteWhileDictating"))
+            }
             diagnostics.resolve(.microphone)
             diagnostics.developmentLog.record(.firstBuffer, area: .microphone, operation: session.id)
             overlay.update(.listening, session: overlayID)
@@ -477,11 +478,11 @@ final class AppModel: ObservableObject {
             do { audio = try await self.capture.stop(sessionID: captureID) }
             catch {
                 active.sounds?.end(sessionID: active.session.id, playStop: false)
-                await active.media?.finish()
+                await active.audioReduction?.finish()
                 throw error
             }
+            await active.audioReduction?.finish()
             active.sounds?.end(sessionID: active.session.id, playStop: !active.session.cancelled)
-            await active.media?.finish()
             active.audio = audio
             await active.frameTask?.value
             await active.eventTask?.value
@@ -568,7 +569,7 @@ final class AppModel: ObservableObject {
                 do { try await self.capture.cancel(sessionID: captureID) }
                 catch { self.diagnostics.report(.microphoneCaptureFailed, operation: active.session.id) }
             }
-            await active.media?.finish()
+            await active.audioReduction?.finish()
             active.finishEvents()
             await active.frameTask?.value
             await active.eventTask?.value
