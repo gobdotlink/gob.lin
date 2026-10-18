@@ -178,7 +178,9 @@ struct SpokenWordCounter {
             // Abbreviation-style tokens keep their full stop ("Dia."); the cloud wants the word alone.
             let word = (lemma.flatMap { $0.isEmpty ? nil : $0 } ?? String(text[range])).lowercased()
                 .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
-            if word.count > 1, word.contains(where: \.isLetter) { words.append(word) }
+            // One letter of an alphabet is noise, but one Chinese or Japanese character is often a whole noun (书, 車).
+            let ideograph = word.count == 1 && word.unicodeScalars.allSatisfy(\.properties.isIdeographic)
+            if word.count > 1 || ideograph, word.contains(where: \.isLetter) { words.append(word) }
             return true
         }
         return words

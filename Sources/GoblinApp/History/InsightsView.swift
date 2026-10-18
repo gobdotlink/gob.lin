@@ -397,7 +397,7 @@ private struct ActivityRow: View {
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
-                    .accessibilityValue("\(day.words) words across \(day.hours.filter { $0 > 0 }.count) hours")
+                    .accessibilityValue(hourSummary(day))
                 }
             }
             .padding(.top, 22)
@@ -429,8 +429,18 @@ private struct ActivityRow: View {
         calendar.isDateInToday(days[index].date) ? "Today" : days[index].date.formatted(.dateTime.weekday(.wide))
     }
 
+    /// Every active hour with its count, so VoiceOver hears what hovering shows.
+    private func hourSummary(_ day: InsightDay) -> String {
+        let active = day.hours.indices.filter { day.hours[$0] > 0 }
+        guard !active.isEmpty else { return "No words" }
+        return active.map { "\(hourName($0)), \(day.hours[$0].formatted()) \(day.hours[$0] == 1 ? "word" : "words")" }.joined(separator: "; ")
+    }
+
+    /// The hour on a fixed date in GMT, which has every hour; today's date skips one when the clocks go forward.
     private func hourName(_ hour: Int) -> String {
-        calendar.date(bySettingHour: hour, minute: 0, second: 0, of: Date())?.formatted(date: .omitted, time: .shortened) ?? "\(hour)"
+        var style = Date.FormatStyle(date: .omitted, time: .shortened)
+        style.timeZone = .gmt
+        return Date(timeIntervalSinceReferenceDate: Double(hour) * 3600).formatted(style)
     }
 }
 

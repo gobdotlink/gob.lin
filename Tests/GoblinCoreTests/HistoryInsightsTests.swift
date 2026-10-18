@@ -156,14 +156,18 @@ struct HistoryInsightsTests {
         for (timestamp, text) in [("2026-10-14T11:00:00Z", "The charts look great and the chart is done."),
                                   ("2026-10-12T09:00:00Z", "The goblin made two charts in Dia."),
                                   ("2026-10-11T09:00:00Z", "Last week's chart"),
+                                  ("2026-10-13T09:00:00Z", "我买了一本书。"),
+                                  ("2026-10-13T10:00:00Z", "本と車が好きです。"),
                                   ("2026-10-14T13:00:00Z", "Future chart")] {
             _ = try await store.insert(HistoryEntry(rawText: "", finalText: text, createdAt: date(timestamp)))
         }
         let cloud = try await store.spokenWords(now: now, calendar: calendar())
-        #expect(cloud.weekEntries == 2 && cloud.todayEntries == 1)
+        #expect(cloud.weekEntries == 4 && cloud.todayEntries == 1)
         #expect(cloud.week.first == InsightWord(word: "chart", count: 3) && cloud.week.contains(InsightWord(word: "goblin", count: 1)))
         #expect(cloud.today.first == InsightWord(word: "chart", count: 2))
         #expect(!cloud.week.contains { ["the", "and", "be", "is", "look", "great", "make", "made", "two"].contains($0.word) })
         #expect(cloud.week.allSatisfy { !$0.word.hasSuffix(".") })
+        // A one-character Chinese noun counts; Japanese particles, which the tagger cannot classify, do not.
+        #expect(cloud.week.contains { $0.word == "书" } && !cloud.week.contains { ["と", "が", "は"].contains($0.word) })
     }
 }
