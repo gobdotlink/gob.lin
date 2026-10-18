@@ -70,7 +70,9 @@ extension DiagnosticFailure {
         case .rewriteConfiguration: ("Cleanup isn't set up", "Finish it in Cleanup settings, or turn it off.")
         case .rewriteTimeout, .rewriteTransport, .rewriteHTTPStatus, .rewriteInvalidResponse:
             ("Cleanup didn't work", "Your words went in as you said them.")
-        case .insertionTargetChanged, .insertionClipboardBusy, .insertionNotAcknowledged, .insertionFailed:
+        case .insertionNotAcknowledged:
+            ("Check the last dictation", "The app didn't confirm delivery. Check before pasting again.")
+        case .insertionTargetChanged, .insertionClipboardBusy, .insertionFailed:
             ("A dictation didn't go in", "It's waiting in History.")
         case .noTranscriptAvailable: ("Nothing to paste yet", "Dictate something first.")
         case .historyUnavailable, .historySaveFailed, .historyOperationFailed: ("History had a problem", "Open History to see what happened.")

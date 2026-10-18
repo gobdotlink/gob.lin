@@ -214,7 +214,19 @@ private struct GeneralSettingsView: View {
             }
         } header: { CapsHeader("Behaviour") }
         Section {
-            LabeledContent("Paste last dictation again") { KeyCombo(label: "⌥⇧⌘V") }
+            Picker("Insert dictation into", selection: $insertion.destination) {
+                Text("Current text field").tag(DictationDestination.currentField)
+                Text("Where I started").tag(DictationDestination.originalField)
+            }
+            .pickerStyle(.menu)
+            Text(insertion.destination == .currentField
+                 ? "Paste where your cursor is when the transcript is ready."
+                 : "Insert where you started dictation, even after switching apps. If it can't land there, it stays ready for manual paste.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            LabeledContent { KeyCombo(label: "⌥⇧⌘V") } label: {
+                Text("Paste last dictation again")
+                Text("Choose a text field and use this shortcut to paste your last transcript again.")
+            }
             StatusRow(insertionLight, Text(insertion.status))
             if insertion.hasRecoveryClipboard {
                 StatusRow(.waiting, Text("Your last dictation is on the clipboard.")) {

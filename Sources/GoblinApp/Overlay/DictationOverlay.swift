@@ -60,6 +60,7 @@ private struct OverlayGoblin: View {
         case .polishing: .squint
         case .inserted: .closed
         case .milestone: .cackle
+        case .readyToPaste: .side
         case .error(let notice): NoticeCopy(notice).face
         }
     }
@@ -82,7 +83,11 @@ private struct OverlayBubble: View {
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
 
     private var compact: Bool {
-        switch model.visiblePhase { case .arming, .inserted: true; default: false }
+        switch model.visiblePhase {
+        case .arming: true
+        case .inserted(let result): result.notice == nil
+        default: false
+        }
     }
 
     var body: some View {
@@ -177,22 +182,40 @@ private struct OverlayBubble: View {
                 }
             }
         case .inserted(let result):
-            HStack(spacing: 9) {
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon)
-                Group {
-                    if let application = result.application { Text("Typed into \(Text(application).fontWeight(.semibold))") }
-                    else { Text("Typed it in") }
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon)
+                    Group {
+                        if let application = result.application { Text("Text landed in \(Text(application).fontWeight(.semibold))") }
+                        else { Text("Text delivered") }
+                    }
+                    .font(.system(size: 13.5))
+                    Text("\(result.words.formatted()) \(result.words == 1 ? "word" : "words") · \(result.seconds.formatted(.number.precision(.fractionLength(2)))) s")
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
                 }
-                .font(.system(size: 13.5))
-                Text("\(result.words.formatted()) \(result.words == 1 ? "word" : "words") · \(result.seconds.formatted(.number.precision(.fractionLength(2)))) s")
-                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
+                if let notice = result.notice {
+                    Subline { Text(NoticeCopy(notice).sentence).fixedSize(horizontal: false, vertical: true) }
+                }
+            }
+        case .readyToPaste(let application, let shortcut):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(systemName: "doc.on.clipboard").foregroundStyle(GoblinBrand.neon)
+                    Text(application.map { "Ready to paste into \($0)" } ?? "Ready to paste")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                Subline {
+                    Text(shortcut ? "Focus a text field, then press ⌥⇧⌘V. Your words are in History." : "Your words are in History.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         case .milestone(let words):
             HStack(spacing: 12) {
                 PixelSprite(sprite: .candle, scale: 2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(words.formatted()) words yapped.").font(.system(size: 14, weight: .semibold))
-                    Text("About \(max(1, words / 250).formatted()) pages you didn't type.").font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
+                    Text(model.deliveryApplication.map { "Text landed in \($0)" } ?? "About \(max(1, words / 250).formatted()) pages you didn't type.")
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
                 }
             }
         case .error(let notice):
@@ -301,13 +324,13 @@ private struct NoticeCopy {
             sentence = "I can't type for you until Accessibility is allowed."
             detail = "Permissions › Accessibility"; hand = .palm; action = ("Open Setup…", .setup)
         case .insertionTargetChanged:
-            sentence = "You switched apps, so I didn't type it. It's in History."
-            detail = "Insert › the app changed"
+            sentence = "The original field is unavailable. Focus a text field and press ⌥⇧⌘V."
+            detail = "Your words are in History"
         case .insertionClipboardBusy:
             sentence = "The clipboard changed, so I didn't type it. It's in History."
             detail = "Insert › clipboard busy"
         case .insertionNotAcknowledged:
-            sentence = "That app didn't confirm the paste. Check it before trying again."
+            sentence = "That app didn't confirm the text arrived. Check it before trying again."
             detail = "Insert › not confirmed"
         case .insertionFailed:
             sentence = "I couldn't type it in. It's in History."

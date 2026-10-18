@@ -5,11 +5,14 @@ import GoblinCore
 import SwiftUI
 
 enum InsertionOutcome: Equatable {
-    case idle, pending, success, unverified, failure(DiagnosticFailure)
+    case idle, pending, success, readyToPaste, unverified, failure(DiagnosticFailure)
 }
 
 @MainActor
 final class TextInsertionService: ObservableObject {
+    @Published var destination: DictationDestination {
+        didSet { defaults.set(destination.rawValue, forKey: "goblin.dictationDestination") }
+    }
     @Published var trailingSpace: Bool {
         didSet { defaults.set(trailingSpace, forKey: "goblin.trailingSpace") }
     }
@@ -18,7 +21,7 @@ final class TextInsertionService: ObservableObject {
     }
     /// Where the last verified insertion landed, for the post-paste edit watcher.
     private(set) var lastAnchor: InsertionAnchor?
-    @Published private(set) var status = "Ready to insert into your focused app"
+    @Published private(set) var status = "Ready to insert your dictation"
     @Published private(set) var busy = false
     @Published private(set) var hasRecoveryClipboard = false
     @Published private(set) var outcome: InsertionOutcome = .idle
@@ -42,6 +45,7 @@ final class TextInsertionService: ObservableObject {
         self.pasteboard = pasteboard
         self.defaults = defaults
         self.registerShortcuts = registerShortcuts
+        destination = defaults.string(forKey: "goblin.dictationDestination").flatMap(DictationDestination.init(rawValue:)) ?? .originalField
         trailingSpace = defaults.object(forKey: "goblin.trailingSpace") as? Bool ?? true
         watchEdits = defaults.object(forKey: "goblin.watchEditsAfterPaste") as? Bool ?? true
         guard registerShortcuts else { return }
@@ -63,6 +67,14 @@ final class TextInsertionService: ObservableObject {
     }
 
     func insert(_ transcript: String, onPasteSent: (() -> Void)? = nil) async {
+        await insert(transcript, originalTarget: nil, automatic: false, onPasteSent: onPasteSent)
+    }
+
+    func insert(_ transcript: String, into originalTarget: FocusedText?, onPasteSent: (() -> Void)? = nil) async {
+        await insert(transcript, originalTarget: originalTarget, automatic: true, onPasteSent: onPasteSent)
+    }
+
+    private func insert(_ transcript: String, originalTarget: FocusedText?, automatic: Bool, onPasteSent: (() -> Void)?) async {
         guard !busy else { setStatus("A paste is still awaiting confirmation", outcome: .failure(.insertionNotAcknowledged)); return }
         guard !transcript.isEmpty else { setStatus("No transcript to paste", outcome: .failure(.noTranscriptAvailable)); return }
         guard AXIsProcessTrusted() else { setStatus("Allow Accessibility before inserting text", outcome: .failure(.insertionPermissionMissing)); return }
@@ -71,7 +83,7 @@ final class TextInsertionService: ObservableObject {
         lastAnchor = nil
         defer { busy = false }
         let text = InsertionPolicy.text(transcript, trailingSpace: trailingSpace)
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
+        if !automatic, NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
             guard let previousApplication, !previousApplication.isTerminated else {
                 setStatus("Focus the app you want to paste into first", outcome: .failure(.insertionTargetChanged)); return
             }
@@ -85,20 +97,60 @@ final class TextInsertionService: ObservableObject {
                 setStatus("The intended app did not regain focus; nothing was inserted", outcome: .failure(.insertionTargetChanged)); return
             }
         }
-        guard !Task.isCancelled, let target = FocusedText.capture(), target.pid != getpid(), !target.secure,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == target.pid else {
+        guard !Task.isCancelled else {
+            setStatus("Insertion cancelled; no text was inserted", outcome: .failure(.insertionTargetChanged)); return
+        }
+        var target: FocusedText
+        if automatic {
+            guard let originalTarget, originalTarget.pid != getpid(),
+                  let application = NSRunningApplication(processIdentifier: originalTarget.pid), !application.isTerminated,
+                  !originalTarget.secure else { readyToPaste(); return }
+            if originalTarget.applicationFallback {
+                guard originalTarget.isStillFocused() else { readyToPaste(); return }
+                target = originalTarget
+            } else {
+                target = FocusedText.read(pid: originalTarget.pid, element: originalTarget.element)
+                guard originalTarget.hasSameContext(as: target) else { readyToPaste(); return }
+            }
+        } else if let focused = FocusedText.capture(), focused.pid != getpid(), !focused.secure {
+            target = focused
+        } else {
             setStatus("No accessible focused text target; nothing was inserted", outcome: .failure(.insertionFailed)); return
         }
         let bundle = NSRunningApplication(processIdentifier: target.pid)?.bundleIdentifier ?? ""
         let quirks = AppInsertionQuirks.forBundle(bundle)
-        let expected = target.value.flatMap { before in
+        let background = !target.isStillFocused()
+        // Empty web editors may accept a value write while selected-text writes are a no-op.
+        let valueInsertion = background && target.selection == NSRange(location: 0, length: 0)
+            && originalTarget?.selection == target.selection && originalTarget?.value == target.value
+            && (target.value == "" || target.value == "\n") && target.supportsValueInsertion
+        if background {
+            guard automatic, !quirks.remoteDesktop, target.window != nil,
+                  valueInsertion || target.supportsDirectInsertion,
+                  valueInsertion || !quirks.preferPaste || target.isApplicationFocused() else { readyToPaste(); return }
+        }
+        if let originalTarget, !target.applicationFallback, let selection = originalTarget.selection,
+           let before = originalTarget.value, target.value == before, target.selection != selection {
+            guard InsertionPolicy.expectedValue(before: before, selectedRange: selection, inserted: text) != nil,
+                  isSafe(target, background: background, quirks: quirks) else { readyToPaste(); return }
+            var range = CFRange(location: selection.location, length: selection.length)
+            guard let value = AXValueCreate(.cfRange, &range),
+                  AXUIElementSetAttributeValue(target.element, kAXSelectedTextRangeAttribute as CFString, value) == .success else {
+                readyToPaste(); return
+            }
+            let refreshed = FocusedText.read(pid: target.pid, element: target.element)
+            guard target.hasSameContext(as: refreshed), refreshed.value == before, refreshed.selection == selection,
+                  isSafe(refreshed, background: background, quirks: quirks) else { readyToPaste(); return }
+            target = refreshed
+        }
+        let expected = valueInsertion ? text : target.value.flatMap { before in
             target.selection.flatMap { InsertionPolicy.expectedValue(before: before, selectedRange: $0, inserted: text,
                                                                      replacesEmptyLineBreak: quirks.emptyEditorLineBreak) }
         }
         if !quirks.remoteDesktop, let expected, expected == target.value, let selection = target.selection {
             let fresh = FocusedText.read(pid: target.pid, element: target.element)
             guard fresh.value == expected, fresh.selection == selection, !fresh.secure,
-                  target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+                  isSafe(target, background: background, quirks: quirks) else {
                 setStatus("The target changed before confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
             }
             // Use the unchanged, validated selection's UTF-16 end; equivalent text can have different lengths.
@@ -107,8 +159,8 @@ final class TextInsertionService: ObservableObject {
                 _ = AXUIElementSetAttributeValue(target.element, kAXSelectedTextRangeAttribute as CFString, range)
             }
             let observed = FocusedText.read(pid: target.pid, element: target.element)
-            guard observed.value == expected, !observed.secure, target.isStillFocused(),
-                  !Task.isCancelled, !IsSecureEventInputEnabled() else {
+            guard observed.value == expected, !observed.secure,
+                  isSafe(target, background: background, quirks: quirks) else {
                 setStatus("The target changed while confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
             }
             lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
@@ -118,22 +170,38 @@ final class TextInsertionService: ObservableObject {
                 : "Text already matched the dictation · clipboard preserved; caret placement was not confirmed", outcome: .success)
             return
         }
-        if !quirks.preferPaste && !target.applicationFallback, let expected {
+        if (!quirks.preferPaste || background) && !quirks.remoteDesktop && !target.applicationFallback, let expected {
             var settable = DarwinBoolean(false)
-            if AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success, settable.boolValue {
-                guard target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+            let attribute = valueInsertion ? kAXValueAttribute : kAXSelectedTextAttribute
+            if AXUIElementIsAttributeSettable(target.element, attribute as CFString, &settable) == .success, settable.boolValue {
+                let fresh = FocusedText.read(pid: target.pid, element: target.element)
+                guard target.hasSameContext(as: fresh), fresh.value == target.value, fresh.selection == target.selection,
+                      isSafe(target, background: background, quirks: quirks, valueInsertion: valueInsertion) else {
                     setStatus("Focus or Secure Input changed before insertion", outcome: .failure(.insertionTargetChanged)); return
                 }
-                let result = AXUIElementSetAttributeValue(target.element, kAXSelectedTextAttribute as CFString, text as CFString)
+                let result = AXUIElementSetAttributeValue(target.element, attribute as CFString, text as CFString)
                 if result == .success {
                     let verified = await DirectInsertionVerification.wait(expected: expected,
                         readValue: { FocusedText.read(pid: target.pid, element: target.element).value },
-                        isSafe: { target.isStillFocused() && !IsSecureEventInputEnabled() })
+                        isSafe: { self.isSafe(target, background: background, quirks: quirks, valueInsertion: valueInsertion) })
                     if verified {
+                        var caretConfirmed = !valueInsertion
+                        if valueInsertion, FocusedText.read(pid: target.pid, element: target.element).value == expected,
+                           isSafe(target, background: background, quirks: quirks, valueInsertion: true) {
+                            var caret = CFRange(location: text.utf16.count, length: 0)
+                            if let range = AXValueCreate(.cfRange, &caret),
+                               AXUIElementSetAttributeValue(target.element, kAXSelectedTextRangeAttribute as CFString, range) == .success {
+                                caretConfirmed = await DirectInsertionVerification.wait(expected: NSRange(location: caret.location, length: 0),
+                                    readValue: { FocusedText.read(pid: target.pid, element: target.element).selection },
+                                    isSafe: { self.isSafe(target, background: background, quirks: quirks, valueInsertion: true)
+                                        && FocusedText.read(pid: target.pid, element: target.element).value == expected })
+                            }
+                        }
                         if let selection = target.selection {
                             lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
                         }
-                        setStatus("Direct insertion verified in the focused app · clipboard preserved", outcome: .success)
+                        let caretStatus = caretConfirmed ? "" : " · caret placement was not confirmed"
+                        setStatus("Text landed in \(NSRunningApplication(processIdentifier: target.pid)?.localizedName ?? "the original app") · clipboard preserved\(caretStatus)", outcome: .success)
                     } else {
                         setStatus("The app accepted an Accessibility write but did not confirm the edit; no duplicate paste was attempted", outcome: .failure(.insertionNotAcknowledged))
                     }
@@ -145,10 +213,11 @@ final class TextInsertionService: ObservableObject {
                 }
             }
         }
+        guard !background else { readyToPaste(); return }
         guard let code = KeyboardLayout.pasteKeyCode() else { setStatus("Could not resolve Paste for this keyboard layout", outcome: .failure(.insertionFailed)); return }
         let preservationCount = pasteboard.changeCount
         guard let snapshot = clipboardToPreserve() else { setStatus("The current clipboard could not be preserved; nothing was pasted", outcome: .failure(.insertionClipboardBusy)); return }
-        guard target.isStillFocused(), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+        guard pasteTargetIsUnchanged(target), !Task.isCancelled, !IsSecureEventInputEnabled() else {
             setStatus("Focus or Secure Input changed before paste", outcome: .failure(.insertionTargetChanged)); return
         }
         let provider = TranscriptDataProvider(text: text)
@@ -187,7 +256,7 @@ final class TextInsertionService: ObservableObject {
                 setStatus("Another app changed the clipboard; its contents were preserved. Your previous clipboard remains recoverable", outcome: .failure(.insertionClipboardBusy))
                 return
             }
-            guard target.isStillFocused() else {
+            guard isSafe(target, background: false, quirks: quirks) else {
                 setStatus("Focus changed; transcript remains on clipboard and the previous clipboard is recoverable", outcome: .failure(.insertionTargetChanged))
                 return
             }
@@ -215,6 +284,29 @@ final class TextInsertionService: ObservableObject {
         }
         // This deadline only abandons verification. It must never trigger a clipboard restore.
         setStatus("Paste sent; the edit could not be verified. Check the target before retrying. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .unverified)
+    }
+
+    private func readyToPaste() {
+        setStatus("Ready to paste. Focus a text field and press ⌥⇧⌘V, or use Paste Last Dictation.", outcome: .readyToPaste)
+    }
+
+    private func isSafe(_ target: FocusedText, background: Bool, quirks: AppInsertionQuirks, valueInsertion: Bool = false) -> Bool {
+        guard !Task.isCancelled, AXIsProcessTrusted(), !IsSecureEventInputEnabled(),
+              let app = NSRunningApplication(processIdentifier: target.pid), !app.isTerminated else { return false }
+        if target.applicationFallback { return !background && target.isStillFocused() }
+        let fresh = FocusedText.read(pid: target.pid, element: target.element)
+        guard target.hasSameContext(as: fresh), target.window == nil || target.hasLiveWindow else { return false }
+        if !background { return target.isStillFocused() }
+        return target.hasLiveWindow && fresh.value != nil && fresh.selection != nil
+            && (valueInsertion || !quirks.preferPaste || target.isApplicationFocused())
+    }
+
+    private func pasteTargetIsUnchanged(_ target: FocusedText) -> Bool {
+        guard target.isStillFocused() else { return false }
+        if target.applicationFallback { return true }
+        let fresh = FocusedText.read(pid: target.pid, element: target.element)
+        return target.hasSameContext(as: fresh) && fresh.value == target.value && fresh.selection == target.selection
+            && (target.window == nil || target.hasLiveWindow)
     }
 
     func restorePreviousClipboard() {
@@ -275,7 +367,7 @@ final class TextInsertionService: ObservableObject {
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false),
               let commandUp = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: false) else { return false }
-        guard target.isStillFocused(), pasteboard.changeCount == unverifiedChangeCount else { return false }
+        guard pasteTargetIsUnchanged(target), pasteboard.changeCount == unverifiedChangeCount else { return false }
         for event in [commandDown, keyDown, keyUp, commandUp] { event.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventTag) }
         commandDown.flags = .maskCommand
         keyDown.flags = .maskCommand
@@ -285,7 +377,7 @@ final class TextInsertionService: ObservableObject {
         // Key-up must always be sent, including cancellation/focus loss, so Command cannot stick.
         defer { commandUp.post(tap: .cghidEventTap) }
         try? await Task.sleep(for: .milliseconds(100))
-        guard !Task.isCancelled, target.isStillFocused(), !IsSecureEventInputEnabled(),
+        guard !Task.isCancelled, pasteTargetIsUnchanged(target), !IsSecureEventInputEnabled(),
               pasteboard.changeCount == unverifiedChangeCount else { return false }
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)

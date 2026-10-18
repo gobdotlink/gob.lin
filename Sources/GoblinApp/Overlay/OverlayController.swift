@@ -7,6 +7,7 @@ import SwiftUI
 enum OverlayPhase: Equatable {
     case hidden, arming, listening, transcribing, polishing
     case inserted(OverlayResult)
+    case readyToPaste(application: String?, shortcut: Bool = true)
     case milestone(words: Int)
     case error(OverlayNotice)
 
@@ -18,6 +19,7 @@ enum OverlayPhase: Equatable {
         case .transcribing: "Transcribing"
         case .polishing: "Cleaning up"
         case .inserted: "Typed"
+        case .readyToPaste: "Ready to paste"
         case .milestone: "Milestone"
         case .error: "Needs attention"
         }
@@ -33,6 +35,7 @@ struct OverlayResult: Equatable {
     var words: Int
     /// Key-up to text, in seconds.
     var seconds: Double
+    var notice: OverlayNotice? = nil
 }
 
 struct OverlayNotice: Equatable {
@@ -55,6 +58,7 @@ final class OverlayModel: ObservableObject {
     @Published var phase: OverlayPhase = .hidden {
         didSet {
             if phase != .hidden { visiblePhase = phase }
+            if case .inserted(let result) = phase { deliveryApplication = result.application }
             if phase == .listening, listeningStarted == nil { listeningStarted = Date() }
         }
     }
@@ -68,6 +72,7 @@ final class OverlayModel: ObservableObject {
     @Published var committedText = ""
     @Published var tentativeText = ""
     @Published var handsFree = false
+    private(set) var deliveryApplication: String?
     @Published var listeningStarted: Date?
     /// Seconds of audio, frozen when listening ends.
     @Published var audioSeconds: Double?
@@ -112,6 +117,7 @@ final class OverlayModel: ObservableObject {
         listeningStarted = nil
         audioSeconds = nil
         cleanupLabel = ""
+        deliveryApplication = nil
         mirrored = false
     }
 }
@@ -130,6 +136,7 @@ final class OverlayController {
     private var orderOutTask: Task<Void, Never>?
     private var screen: NSScreen?
     private var displayObserver: NSObjectProtocol?
+    private var completionNotices: [OverlayPhase] = []
     var position: OverlayPosition = .bottom { didSet { model.edge = position; reposition() } }
 
     init() {
@@ -205,7 +212,26 @@ final class OverlayController {
             do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
             guard let self, self.model.phase == .hidden else { return }
             self.panel.orderOut(nil)
+            if !self.completionNotices.isEmpty {
+                let notice = self.completionNotices.removeFirst()
+                self.showCompletion(notice, session: UUID())
+            }
         }
+    }
+
+    /// Older results wait for the current recording's overlay instead of replacing its words.
+    func showCompletion(_ phase: OverlayPhase, session: UUID) {
+        if session != sessionID, model.phase != .hidden {
+            if case .readyToPaste(let application, _) = phase {
+                completionNotices.append(.readyToPaste(application: application, shortcut: false))
+            } else {
+                completionNotices.append(phase)
+            }
+            return
+        }
+        let current = session == sessionID ? session : begin(onCancel: {})
+        update(phase, session: current)
+        hide(after: 3, session: current)
     }
 
     /// In 140 ms, out 120 ms, ease-out. Reduce Motion keeps the fade and drops the movement in the view.
@@ -224,6 +250,7 @@ final class OverlayController {
     }
 
     func shutdown() {
+        completionNotices.removeAll()
         hide()
         orderOutTask?.cancel()
         panel.orderOut(nil)

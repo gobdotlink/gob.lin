@@ -1,18 +1,28 @@
 import AppKit
 
+enum DictationDestination: String {
+    case currentField, originalField
+}
+
 @MainActor
 final class DictationSession {
     let id = UUID()
     let createdAt = Date()
     let captureStarted = ContinuousClock.now
     let target: NSRunningApplication?
+    let originalText: FocusedText?
+    let destination: DictationDestination
     var overlayID: UUID?
     var audioOwnedByHistory = false
     var historyOnly = false
     private(set) var cancelled = false
 
-    init(target: NSRunningApplication? = NSWorkspace.shared.frontmostApplication) {
+    init(target: NSRunningApplication? = NSWorkspace.shared.frontmostApplication,
+         destination: DictationDestination = .originalField) {
+        self.destination = destination
         self.target = target?.processIdentifier == getpid() ? nil : target
+        let focused = self.target == nil || destination == .currentField ? nil : FocusedText.capture(timeout: 0.05)
+        originalText = focused?.pid == self.target?.processIdentifier ? focused : nil
     }
 
     func cancel() { cancelled = true }
@@ -20,11 +30,6 @@ final class DictationSession {
     func checkCancellation() throws {
         guard !cancelled else { throw CancellationError() }
         try Task.checkCancellation()
-    }
-
-    var targetIsFocused: Bool {
-        guard let target, !target.isTerminated else { return false }
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
     }
 }
 
