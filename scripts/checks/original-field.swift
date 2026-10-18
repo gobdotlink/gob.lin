@@ -35,7 +35,12 @@ struct OriginalFieldCheck {
                 target.activate(options: [.activateIgnoringOtherApps])
                 try await wait("target activation") { NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier }
                 let started = ContinuousClock.now
-                let session = DictationSession()
+                try require(service.destination == .originalField, "Fresh preferences changed the original-field default")
+                let session = DictationSession(destination: service.destination)
+                service.destination = .currentField
+                let reopened = TextInsertionService(defaults: defaults, registerShortcuts: false)
+                try require(reopened.destination == .currentField, "Destination preference was not saved")
+                reopened.shutdown()
                 report["captureMilliseconds"] = Double(started.duration(to: .now).components.attoseconds) / 1e15
                 guard let original = session.originalText, original.value == "left 🧌 right", original.supportsDirectInsertion else {
                     throw Failure("Original native editor was not captured as writable: \(String(describing: session.originalText))")
@@ -82,6 +87,9 @@ struct OriginalFieldCheck {
 
                 let model = AppModel(dataDirectory: root.appendingPathComponent(UUID().uuidString), defaults: defaults, servicesEnabled: false)
                 await model.history.reload()
+                foreground.makeKeyAndOrderFront(nil)
+                app.activate()
+                try await wait("original-field completion foreground") { NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() }
                 session.overlayID = model.overlay.begin(onCancel: {})
                 let audio = root.appendingPathComponent(UUID().uuidString + ".wav")
                 try Data([0x52, 0x49, 0x46, 0x46]).write(to: audio)
@@ -94,8 +102,34 @@ struct OriginalFieldCheck {
                     throw Failure("Verified completion did not name its destination")
                 }
                 try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), "Completion activated the target app")
-                await model.shutdown()
                 report["appModelCompletionAndHistory"] = true
+
+                let currentSession = DictationSession(target: nil, destination: model.insertion.destination)
+                model.insertion.destination = .originalField
+                target.activate()
+                try await wait("current-field destination app") { NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier }
+                try set(original.element, kAXFocusedAttribute, kCFBooleanTrue)
+                try await wait("current-field destination editor") { FocusedText.capture().map { CFEqual($0.element, original.element) } ?? false }
+                let beforeCurrent = FocusedText.read(pid: original.pid, element: original.element).value!
+                var end = CFRange(location: beforeCurrent.utf16.count, length: 0)
+                try set(original.element, kAXSelectedTextRangeAttribute, AXValueCreate(.cfRange, &end)!)
+                currentSession.overlayID = model.overlay.begin(onCancel: {})
+                let currentAudio = root.appendingPathComponent(UUID().uuidString + ".wav")
+                try Data([0x52, 0x49, 0x46, 0x46]).write(to: currentAudio)
+                try await model.finishDictation(.init(rawText: " current", finalText: " current", tone: .formal, polished: false),
+                    model: "fixture", audioURL: currentAudio, duration: 1, timings: DictationTimings(), session: currentSession)
+                try require(model.insertion.outcome == .success && FocusedText.read(pid: original.pid, element: original.element).value == beforeCurrent + " current",
+                            "Current-field mode followed the start field or a setting changed mid-recording")
+                try require(model.history.entries.contains { $0.id == currentSession.id && $0.targetBundleIdentifier == target.bundleIdentifier && $0.targetApplicationName == target.localizedName },
+                            "Current-field History did not name the actual destination")
+                guard case .inserted(let currentDelivery) = model.overlay.model.phase, currentDelivery.application == target.localizedName else {
+                    throw Failure("Current-field notice did not name its destination")
+                }
+                try require(NSPasteboard.general.changeCount == clipboardCount && FocusedText.read(pid: original.pid, element: valueOnly).value == "value 🧌",
+                            "Current-field insertion changed the clipboard or another editor")
+                report["destinationPreferenceAndSessionSnapshot"] = true
+                report["currentFieldCompletionAndHistory"] = true
+                await model.shutdown()
                 foreground.makeKeyAndOrderFront(nil)
                 app.activate(ignoringOtherApps: true)
                 try await wait("foreground after model fixture shutdown") { NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() }
@@ -121,6 +155,7 @@ struct OriginalFieldCheck {
                 try require(NSPasteboard.general.changeCount == clipboardCount, "Ambiguous write attempted a duplicate paste")
                 report["ambiguousWriteNotRetried"] = true
 
+                let noticeForeground = NSWorkspace.shared.frontmostApplication?.processIdentifier
                 let old = overlay.begin(onCancel: {})
                 let current = overlay.begin(onCancel: {})
                 overlay.update(.listening, committed: "New recording", session: current)
@@ -130,7 +165,7 @@ struct OriginalFieldCheck {
                 try await wait("queued completion") { if case .inserted = overlay.model.phase { return true }; return false }
                 try await Task.sleep(for: .milliseconds(700))
                 try capture(overlay, to: root.appendingPathComponent("delivery-notice.png"))
-                try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), "Delivery notice stole focus")
+                try require(NSWorkspace.shared.frontmostApplication?.processIdentifier == noticeForeground, "Delivery notice changed the foreground app")
                 report["destinationNoticeQueuedWithoutFocusChange"] = true
                 let oldRecovery = overlay.begin(onCancel: {})
                 let newRecording = overlay.begin(onCancel: {})
@@ -181,6 +216,9 @@ struct OriginalFieldCheck {
             } catch {
                 report["passed"] = false
                 report["error"] = String(describing: error)
+                report["foregroundApp"] = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+                report["foregroundPID"] = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                report["probePID"] = getpid()
             }
             try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: root.appendingPathComponent("result.json"))
             overlay.shutdown()

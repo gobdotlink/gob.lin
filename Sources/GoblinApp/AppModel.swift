@@ -343,7 +343,7 @@ final class AppModel: ObservableObject {
     private func beginDictation() {
         guard activeCapture == nil else { return }
         finishEditObservation()
-        let session = DictationSession()
+        let session = DictationSession(destination: insertion.destination)
         let lease: SpeechModelLease
         do { lease = try speechModels.beginSession() }
         catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
@@ -694,6 +694,7 @@ final class AppModel: ObservableObject {
         var delivered = false
         var deliverySeconds = 0.0
         var readyToPaste = false
+        var deliveryApplication = session.destination == .originalField ? session.target : nil
         if !text.isEmpty {
             lastTranscript = result.finalText
             if let overlayID = session.overlayID {
@@ -710,12 +711,20 @@ final class AppModel: ObservableObject {
                 if !insertion.busy && insertionTask == nil {
                     insertionAttempted = true
                     diagnostics.developmentLog.record(.insertionStarted, area: .insertion, operation: session.id)
+                    let insertionTarget: FocusedText?
+                    if session.destination == .currentField {
+                        let focused = FocusedText.capture(timeout: 0.05)
+                        deliveryApplication = focused.flatMap { $0.pid == getpid() ? nil : NSRunningApplication(processIdentifier: $0.pid) }
+                        insertionTarget = deliveryApplication == nil ? nil : focused
+                    } else {
+                        insertionTarget = session.target?.isTerminated == false ? session.originalText : nil
+                    }
                     let showChip = { [weak self] in
                         guard !chipShown, result.warning == nil, let self, let overlayID = session.overlayID else { return }
                         chipShown = true
                         // Key-up is when capture ended; the chip reports key-up to text.
                         let seconds = (Self.milliseconds(since: session.captureStarted) - timings.captureMilliseconds) / 1000
-                        self.overlay.update(.inserted(OverlayResult(application: session.target?.localizedName,
+                        self.overlay.update(.inserted(OverlayResult(application: deliveryApplication?.localizedName,
                             words: result.finalText.split(whereSeparator: \.isWhitespace).count,
                             seconds: seconds.isFinite ? max(0, seconds) : 0)), session: overlayID)
                         self.overlay.hide(after: 0.6, session: overlayID)
@@ -723,8 +732,7 @@ final class AppModel: ObservableObject {
                     // Pastes report as soon as they're sent; direct Accessibility writes once verified.
                     finishEditObservation()
                     pendingEditObservationID = session.id
-                    let target = session.target?.isTerminated == false ? session.originalText : nil
-                    await insertion.insert(result.finalText, into: target, onPasteSent: showChip)
+                    await insertion.insert(result.finalText, into: insertionTarget, onPasteSent: showChip)
                     insertionAnchor = insertion.takeLastAnchor()
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
@@ -759,8 +767,8 @@ final class AppModel: ObservableObject {
         if !insertionAttempted { try session.checkCancellation() }
         let entry = HistoryEntry(id: session.id, rawText: result.rawText, finalText: result.finalText,
             tone: result.tone.rawValue, polished: result.polished,
-            targetBundleIdentifier: session.target?.bundleIdentifier,
-            targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,
+            targetBundleIdentifier: deliveryApplication?.bundleIdentifier,
+            targetApplicationName: deliveryApplication?.localizedName, createdAt: session.createdAt,
             completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
             processingWarning: warning)
         let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
@@ -775,11 +783,11 @@ final class AppModel: ObservableObject {
         if saved { try? FileManager.default.removeItem(at: audioURL) }
         if let overlayID = session.overlayID, !session.cancelled, !Task.isCancelled {
             if readyToPaste {
-                overlay.showCompletion(.readyToPaste(application: session.target?.localizedName), session: overlayID)
+                overlay.showCompletion(.readyToPaste(application: deliveryApplication?.localizedName), session: overlayID)
             } else if delivered {
                 let notice = warning.map { OverlayNotice(message: $0, failure: warningFailure) }
                 if !chipShown || warning != nil {
-                    overlay.showCompletion(.inserted(OverlayResult(application: session.target?.localizedName,
+                    overlay.showCompletion(.inserted(OverlayResult(application: deliveryApplication?.localizedName,
                         words: entry.wordCount, seconds: deliverySeconds.isFinite ? max(0, deliverySeconds) : 0, notice: notice)), session: overlayID)
                 }
                 if saved, warning == nil { await celebrateMilestone(adding: entry.wordCount, overlay: overlayID) }

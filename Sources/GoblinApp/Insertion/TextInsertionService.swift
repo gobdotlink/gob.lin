@@ -10,6 +10,9 @@ enum InsertionOutcome: Equatable {
 
 @MainActor
 final class TextInsertionService: ObservableObject {
+    @Published var destination: DictationDestination {
+        didSet { defaults.set(destination.rawValue, forKey: "goblin.dictationDestination") }
+    }
     @Published var trailingSpace: Bool {
         didSet { defaults.set(trailingSpace, forKey: "goblin.trailingSpace") }
     }
@@ -42,6 +45,7 @@ final class TextInsertionService: ObservableObject {
         self.pasteboard = pasteboard
         self.defaults = defaults
         self.registerShortcuts = registerShortcuts
+        destination = defaults.string(forKey: "goblin.dictationDestination").flatMap(DictationDestination.init(rawValue:)) ?? .originalField
         trailingSpace = defaults.object(forKey: "goblin.trailingSpace") as? Bool ?? true
         watchEdits = defaults.object(forKey: "goblin.watchEditsAfterPaste") as? Bool ?? true
         guard registerShortcuts else { return }
