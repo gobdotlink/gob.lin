@@ -125,6 +125,25 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if id == requestID { isLoading = false }
     }
 
+    /// Background write from the post-paste watcher. Failures stay silent:
+    /// the dictation itself is already saved, and a deleted entry wins.
+    func applyEditObservation(_ result: EditObservationResult) async {
+        guard let store else { return }
+        do {
+            try await store.updateEditObservation(id: result.entryID, outcome: result.outcome,
+                                                  editDistance: result.editDistance,
+                                                  maximumEditDistance: result.maximumEditDistance,
+                                                  editedText: result.editedText)
+        } catch { return }
+        if let index = entries.firstIndex(where: { $0.id == result.entryID }) {
+            entries[index].editOutcome = result.outcome
+            entries[index].editDistance = result.editDistance
+            entries[index].maximumEditDistance = result.maximumEditDistance
+            entries[index].editedText = result.outcome == .edited ? result.editedText : nil
+            revision += 1
+        }
+    }
+
     func setStarred(_ starred: Bool, entry: HistoryEntry) async {
         do {
             try await store?.setStarred(starred, id: entry.id)

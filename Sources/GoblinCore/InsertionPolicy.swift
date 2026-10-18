@@ -6,7 +6,12 @@ public enum InsertionPolicy {
         return transcript + " "
     }
 
-    public static func expectedValue(before: String, selectedRange: NSRange, inserted: String) -> String? {
+    public static func expectedValue(before: String, selectedRange: NSRange, inserted: String,
+                                     replacesEmptyLineBreak: Bool = false) -> String? {
+        // Some contenteditable editors expose an empty paragraph's placeholder as a newline.
+        if replacesEmptyLineBreak, before == "\n", selectedRange == NSRange(location: 0, length: 0) {
+            return inserted
+        }
         let text = before as NSString
         guard selectedRange.location != NSNotFound, selectedRange.location >= 0, selectedRange.length >= 0,
               selectedRange.location <= text.length, selectedRange.length <= text.length - selectedRange.location else { return nil }

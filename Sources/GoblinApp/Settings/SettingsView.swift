@@ -208,6 +208,10 @@ private struct GeneralSettingsView: View {
                 Text("Add a space after each take")
                 Text("So the next one doesn't run into this one.")
             }
+            Toggle(isOn: $insertion.watchEdits) {
+                Text("Watch edits after paste")
+                Text("Watch for 30 seconds and show corrections in History. Secure fields and password managers are excluded.")
+            }
         } header: { CapsHeader("Behaviour") }
         Section {
             LabeledContent("Paste last dictation again") { KeyCombo(label: "⌥⇧⌘V") }

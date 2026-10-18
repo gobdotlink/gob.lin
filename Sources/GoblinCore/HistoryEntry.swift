@@ -38,6 +38,13 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
     public var latencies: DictationTimings
     public var starred: Bool
     public var processingWarning: String?
+    /// Post-paste edit observation, filled in after insertion when the target could be watched.
+    public var editOutcome: EditOutcome?
+    public var editDistance: Int?
+    public var maximumEditDistance: Int?
+    /// The pasted span's final text. Stored only when the outcome is `edited`:
+    /// beyond the edit threshold the field may hold unrelated typing.
+    public var editedText: String?
     public internal(set) var audioFilename: String?
 
     public init(id: UUID = UUID(), rawText: String, finalText: String, tone: String = "formal",

@@ -135,6 +135,21 @@ public actor HistoryStore {
         return accumulator.finish()
     }
 
+    /// Record what became of the pasted text. `editedText` is stored only for
+    /// the `edited` outcome; anything else clears it so a rewrite can never
+    /// persist field contents that may no longer be the dictation.
+    public func updateEditObservation(id: UUID, outcome: EditOutcome, editDistance: Int?,
+                                      maximumEditDistance: Int?, editedText: String?) throws {
+        var saved = try entry(id: id)
+        saved.editOutcome = outcome
+        saved.editDistance = editDistance
+        saved.maximumEditDistance = maximumEditDistance
+        saved.editedText = outcome == .edited ? editedText : nil
+        let metadata = String(decoding: try JSONEncoder().encode(saved), as: UTF8.self)
+        try database.run("UPDATE entries SET metadata = ? WHERE id = ?",
+                         [.text(metadata), .text(id.uuidString)])
+    }
+
     public func setStarred(_ starred: Bool, id: UUID) throws {
         var saved = try entry(id: id)
         saved.starred = starred
