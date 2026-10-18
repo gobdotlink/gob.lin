@@ -1,6 +1,6 @@
 # Privacy
 
-gob.lin is designed for local dictation. Microphone access begins only after permission is granted and a dictation is started. Speech recognition runs on the selected on-device engine; this implementation does not select or download an engine before the benchmark is complete.
+gob.lin is designed for local dictation. Microphone access begins only after permission is granted and a dictation is started. Speech recognition runs on the selected on-device engine. Models and tokenizers download directly from their publishers on Hugging Face during preparation, then work offline. Download requests disclose your IP address and the requested model files to those hosts; they never include recordings, transcripts, dictionary entries or history. Browsing the bundled catalog makes no network request.
 
 Dictionary entries, settings, and history live on your Mac under gob.lin's Application Support directory. History can include the raw transcript, final text, target app information, timing information, and the original audio. Starred entries are kept when applying retention. You can delete entries and their audio from History. Local history is sensitive: people or software with access to your account may be able to read it.
 

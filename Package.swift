@@ -12,12 +12,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7", traits: []),
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1"),
     ],
     targets: [
         .plugin(name: "BuildIdentity", capability: .buildTool()),
         .systemLibrary(name: "CSQLite", providers: [.apt(["libsqlite3-dev"])]),
         .target(name: "GoblinCore", dependencies: ["CSQLite"], plugins: [.plugin(name: "BuildIdentity")]),
-        .target(name: "GoblinEngines", dependencies: ["GoblinCore", .product(name: "FluidAudio", package: "FluidAudio")]),
+        .target(name: "GoblinEngines", dependencies: ["GoblinCore", .product(name: "FluidAudio", package: "FluidAudio"),
+            .product(name: "WhisperKit", package: "argmax-oss-swift")], resources: [.process("Resources")]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines", .product(name: "FluidAudio", package: "FluidAudio")]),
         .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),

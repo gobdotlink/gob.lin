@@ -6,15 +6,17 @@ import GoblinEngines
 
 /// Local timing output can include transcripts; keep detailed JSONL in a private evaluation directory.
 enum SpeechBenchmark {
-    static func prepare(_ engine: ParakeetSpeechEngine, vocabularySupport: Bool = false) async throws {
-        let existed = AsrModels.modelsExist(at: engine.modelDirectory, version: .v3)
+    static func prepare(_ runtime: SpeechModelRuntime, model: SpeechModelDescriptor, vocabularySupport: Bool = false) async throws {
+        let engine = runtime.engine
+        let directory = runtime.store.directory
+        let existed = PinnedSpeechModelStore.isDownloaded(model: model, directory: directory)
         let before = SystemInfo.currentResidentMemoryBytes()
         let start = ContinuousClock.now
-        _ = try await ParakeetModelStore(directory: engine.modelDirectory).ensureAvailable(progress: { _ in })
+        _ = try await runtime.store.ensureAvailable(progress: { _ in })
         let acquisition = milliseconds(since: start)
         let auxiliaryStart = ContinuousClock.now
         if vocabularySupport {
-            try await ModelHub.download(.parakeetCtc110m, to: engine.modelDirectory.deletingLastPathComponent())
+            try await ModelHub.download(.parakeetCtc110m, to: directory.deletingLastPathComponent())
         }
         let auxiliaryAcquisition = vocabularySupport ? milliseconds(since: auxiliaryStart) : 0
         let loadStart = ContinuousClock.now
@@ -30,13 +32,13 @@ enum SpeechBenchmark {
         try write(["recordType": "preparation", "model": engine.identifier, "cacheExistedBefore": existed,
                    "prepareMilliseconds": preparation, "acquisitionMilliseconds": acquisition, "loadMilliseconds": load,
                    "auxiliaryAcquisitionMilliseconds": auxiliaryAcquisition, "vocabularySupport": vocabularySupport,
-                   "auxiliaryCacheBytes": vocabularySupport ? try directoryBytes(engine.modelDirectory.deletingLastPathComponent().appendingPathComponent(Repo.parakeetCtc110m.folderName)) : 0,
+                   "auxiliaryCacheBytes": vocabularySupport ? try directoryBytes(directory.deletingLastPathComponent().appendingPathComponent(Repo.parakeetCtc110m.folderName)) : 0,
                    "cachedReloadMilliseconds": cachedReload,
                    "residentBytesBefore": before.map { $0 as Any } ?? NSNull(), "residentBytesLoaded": loaded.map { $0 as Any } ?? NSNull(),
-                   "residentBytesUnloaded": unloaded.map { $0 as Any } ?? NSNull(), "cacheBytes": try directoryBytes(engine.modelDirectory)])
+                   "residentBytesUnloaded": unloaded.map { $0 as Any } ?? NSNull(), "cacheBytes": try directoryBytes(directory)])
     }
 
-    static func run(_ arguments: [String], engine: ParakeetSpeechEngine) async throws {
+    static func run(_ arguments: [String], engine: any PCMSpeechEngine, directory: URL, options: RecognitionOptions = .init()) async throws {
         guard let source = arguments.first, !source.hasPrefix("--") else {
             throw CommandError.usage("Usage: goblin benchmark <file | directory> [--repeat N] [--windows 1.5,3,6,12] [--cadence-ms 400]")
         }
@@ -82,11 +84,14 @@ enum SpeechBenchmark {
                 .sorted { $0.lastPathComponent < $1.lastPathComponent }
             : [url]
         guard !files.isEmpty else { throw CommandError.usage("No audio files found") }
+        guard vocabularyURL == nil || engine.identifier == SpeechModelCatalog.parakeet.id else {
+            throw CommandError.usage("--vocabulary is a Parakeet diagnostic.")
+        }
         let loadStart = ContinuousClock.now
         try await engine.prepare()
         try write(["recordType": "load", "model": engine.identifier, "milliseconds": milliseconds(since: loadStart),
                    "residentBytes": SystemInfo.currentResidentMemoryBytes().map { $0 as Any } ?? NSNull()])
-        let vocabulary = try await vocabularyURL.map { try VocabularyDiagnostic(termsURL: $0, modelDirectory: engine.modelDirectory) }?.load()
+        let vocabulary = try await vocabularyURL.map { try VocabularyDiagnostic(termsURL: $0, modelDirectory: directory) }?.load()
         for file in files {
             try Task.checkCancellation()
             let audio = try AVAudioFile(forReading: file)
@@ -95,7 +100,7 @@ enum SpeechBenchmark {
             var recognition = TranscriptionResult(text: "")
             for _ in 0..<repeats {
                 let start = ContinuousClock.now
-                recognition = try await engine.transcribe(.init(audioFileURL: file))
+                recognition = try await engine.transcribe(.init(audioFileURL: file, options: options))
                 times.append(milliseconds(since: start))
             }
             try write(["recordType": "batch", "id": file.lastPathComponent, "model": engine.identifier,
@@ -112,30 +117,31 @@ enum SpeechBenchmark {
                                "replacements": boosted.replacements, "detectedTerms": boosted.detectedTerms,
                                "residentBytes": SystemInfo.currentResidentMemoryBytes().map { $0 as Any } ?? NSNull()])
                 }
-                for window in windows { try await benchmarkWindows(samples, file: file, seconds: window, cadenceMilliseconds: cadence, engine: engine) }
+                for window in windows { try await benchmarkWindows(samples, file: file, seconds: window, cadenceMilliseconds: cadence, engine: engine, options: options) }
             }
         }
     }
 
     /// Accelerated replay measures per-window work, not native key-up/insertion or queue latency.
-    private static func benchmarkWindows(_ samples: [Float], file: URL, seconds: Double, cadenceMilliseconds: Double, engine: ParakeetSpeechEngine) async throws {
+    private static func benchmarkWindows(_ samples: [Float], file: URL, seconds: Double, cadenceMilliseconds: Double,
+                                         engine: any PCMSpeechEngine, options: RecognitionOptions) async throws {
         let stride = Int(cadenceMilliseconds * 16)
         let lookback = Int(seconds * 16_000)
         var end = min(stride, samples.count)
         while end < samples.count {
             try await measureWindow(samples, start: max(0, end - lookback), end: end, file: file,
-                                    seconds: seconds, final: false, engine: engine)
+                                    seconds: seconds, final: false, engine: engine, options: options)
             end = min(end + stride, samples.count)
         }
         try await measureWindow(samples, start: max(0, samples.count - lookback), end: samples.count,
-                                file: file, seconds: seconds, final: true, engine: engine)
+                                file: file, seconds: seconds, final: true, engine: engine, options: options)
     }
 
     private static func measureWindow(_ samples: [Float], start: Int, end: Int, file: URL, seconds: Double,
-                                      final: Bool, engine: ParakeetSpeechEngine) async throws {
+                                      final: Bool, engine: any PCMSpeechEngine, options: RecognitionOptions) async throws {
         let window = Array(samples[start..<end])
         let begin = ContinuousClock.now
-        let result = try await engine.transcribe(samples: window)
+        let result = try await engine.transcribe(samples: window, options: options)
         try write(["recordType": "window", "id": file.lastPathComponent, "lookbackSeconds": seconds,
                    "audioPositionSeconds": Double(end) / 16_000, "windowStartSeconds": Double(start) / 16_000,
                    "final": final, "milliseconds": milliseconds(since: begin), "text": result.text,

@@ -7,24 +7,32 @@ public enum SpeechRuntimeError: Error, LocalizedError {
     case windowTooLong
     case modelNotInstalled
     case speechDetectorNotInstalled
+    case languageRequired
+    case unsupportedLanguage(String)
+    case decoderLimit
 
     public var errorDescription: String? {
         switch self {
         case .invalidSamples: "Speech samples must be finite, normalized 16 kHz mono PCM."
         case .windowTooLong: "Live recognition windows must be at most 15 seconds."
-        case .modelNotInstalled: "Parakeet is not installed. Prepare the model before transcription."
+        case .modelNotInstalled: "The selected speech model is not installed. Prepare the model before transcription."
         case .speechDetectorNotInstalled: "The speech detector is missing. Retry model preparation in Settings while online."
+        case .languageRequired: "This model requires an explicit recognition language."
+        case .unsupportedLanguage(let code): "This model does not support the recognition language \(code)."
+        case .decoderLimit: "The model could not finish decoding this audio. The recording is kept; try another speech model."
         }
     }
 }
 
 /// One model and one serialized inference owner, shared by file and bounded-tail recognition.
 public actor ParakeetSpeechEngine: PCMSpeechEngine {
-    public nonisolated let identifier = "parakeet-tdt-v3"
+    public nonisolated let identifier: String
     public nonisolated let maximumWindowSamples = 240_000
     public nonisolated let modelDirectory: URL
+    private let model: SpeechModelDescriptor
+    let version: AsrModelVersion
     private var manager: AsrManager?
-    private var speechDetector: VadManager?
+    private var speechDetector: SpeechActivityDetector?
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
@@ -33,8 +41,24 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
             .appendingPathComponent("gob.lin/models/parakeet-tdt-0.6b-v3", isDirectory: true)
     }
 
-    public init(modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory) {
+    public init(model: SpeechModelDescriptor = SpeechModelCatalog.parakeet,
+                modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory) {
+        precondition(model.kind == .parakeet)
+        self.model = model
+        identifier = model.id
+        version = Self.version(for: model)
         self.modelDirectory = modelDirectory
+    }
+
+    static func version(for model: SpeechModelDescriptor) -> AsrModelVersion {
+        switch model.id {
+        case "parakeet-tdt-v3": .v3
+        case "parakeet-redux": .redux
+        case "parakeet-ultra": .ultra
+        case "phonon-2": .phonon2
+        case "parakeet-tdt-ctc-110m": .tdtCtc110m
+        default: preconditionFailure("Unsupported Parakeet model: \(model.id)")
+        }
     }
 
     public func prepare() async throws {
@@ -42,20 +66,11 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
         defer { release() }
         try Task.checkCancellation()
         if manager != nil, speechDetector != nil { return }
-        guard AsrModels.modelsExist(at: modelDirectory, version: .v3) else {
+        guard PinnedSpeechModelStore.isDownloaded(model: model, directory: modelDirectory) else {
             throw SpeechRuntimeError.modelNotInstalled
         }
-        let detectorURL = modelDirectory.deletingLastPathComponent()
-            .appendingPathComponent(Repo.vad.folderName, isDirectory: true)
-            .appendingPathComponent(ModelNames.VAD.sileroVadFile, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: detectorURL.path) else {
-            throw SpeechRuntimeError.speechDetectorNotInstalled
-        }
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = .cpuAndNeuralEngine
-        let detectorModel = try MLModel(contentsOf: detectorURL, configuration: configuration)
-        let detector = VadManager(config: VadConfig(defaultThreshold: 0.5), vadModel: detectorModel)
-        let models = try AsrModels.loadLocal(from: modelDirectory, version: .v3, encoderPrecision: .int8)
+        let detector = try SpeechActivityDetector.load(beside: modelDirectory)
+        let models = try AsrModels.loadLocal(from: modelDirectory, version: version, encoderPrecision: .int8)
         try Task.checkCancellation()
         let loadedManager = AsrManager(config: .default)
         try await loadedManager.loadModels(models)
@@ -86,42 +101,33 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
         try Task.checkCancellation()
         guard let manager else { throw SpeechRuntimeError.modelNotInstalled }
         let samples = try AudioConverter().resampleAudioFile(request.audioFileURL)
-        return try await recognize(samples, manager: manager)
+        return try await recognize(samples, manager: manager, options: request.options)
     }
 
-    public func transcribe(samples: [Float]) async throws -> TranscriptionResult {
+    public func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
         guard samples.count <= maximumWindowSamples else { throw SpeechRuntimeError.windowTooLong }
         guard samples.allSatisfy({ $0.isFinite && abs($0) <= 1 }) else { throw SpeechRuntimeError.invalidSamples }
         await acquire()
         defer { release() }
         try Task.checkCancellation()
         guard let manager else { throw SpeechRuntimeError.modelNotInstalled }
-        return try await recognize(samples, manager: manager)
+        return try await recognize(samples, manager: manager, options: options)
     }
 
-    private func recognize(_ samples: [Float], manager: AsrManager) async throws -> TranscriptionResult {
+    private func recognize(_ samples: [Float], manager: AsrManager, options: RecognitionOptions) async throws -> TranscriptionResult {
         guard let speechDetector else { throw SpeechRuntimeError.speechDetectorNotInstalled }
-        if samples.isEmpty { return TranscriptionResult(text: "", speechPresence: .notDetected) }
-        // Fresh detector state per window/session; never normalize quiet speech to a fixed level.
-        var vadState = VadStreamState.initial()
-        var speechEnd: Int?
-        for start in stride(from: 0, to: samples.count, by: VadManager.chunkSize) {
-            try Task.checkCancellation()
-            let end = min(samples.count, start + VadManager.chunkSize)
-            let activity = try await speechDetector.processStreamingChunk(Array(samples[start..<end]), state: vadState)
-            vadState = activity.state
-            if activity.probability >= 0.5 { speechEnd = end }
-        }
+        let language = try options.validatedLanguage(for: model).flatMap(Language.init(rawValue:))
+        let presence = try await speechDetector.presence(in: samples)
         try Task.checkCancellation()
-        guard let speechEnd else {
+        guard presence != .notDetected else {
             return TranscriptionResult(text: "", speechPresence: .notDetected)
         }
         let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: 16_000)
         let padded = samples.count < minimum ? samples + [Float](repeating: 0, count: minimum - samples.count) : samples
-        var state = TdtDecoderState.make(decoderLayers: 2)
-        let result = try await manager.transcribe(padded, decoderState: &state)
+        var state = TdtDecoderState.make(decoderLayers: version.decoderLayers)
+        let result = try await manager.transcribe(padded, decoderState: &state, language: language)
         try Task.checkCancellation()
-        return Self.result(result, speechPresence: .detected(endSeconds: Double(speechEnd) / 16_000))
+        return Self.result(result, speechPresence: presence)
     }
 
     private static func result(_ result: ASRResult, speechPresence: SpeechPresence) -> TranscriptionResult {

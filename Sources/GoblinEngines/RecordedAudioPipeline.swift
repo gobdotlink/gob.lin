@@ -43,16 +43,18 @@ public enum RecordedAudioError: Error, LocalizedError {
 public struct RecordedAudioPipeline: Sendable {
     public typealias Postprocessor = @Sendable (String) async throws -> ProcessedTranscript
     public let engine: any SpeechEngine
+    private let options: RecognitionOptions
     private let postprocessor: Postprocessor?
 
-    public init(engine: any SpeechEngine, postprocessor: Postprocessor? = nil) {
+    public init(engine: any SpeechEngine, options: RecognitionOptions = .init(), postprocessor: Postprocessor? = nil) {
         self.engine = engine
+        self.options = options
         self.postprocessor = postprocessor
     }
 
     public init(engine: any SpeechEngine, processor: TranscriptPostprocessor, dictionaryEntries: [DictionaryEntry],
-                tone: DictationTone, rewriteSettings: RewriteSettings, apiKey: String = "") {
-        self.init(engine: engine) { raw in
+                tone: DictationTone, rewriteSettings: RewriteSettings, apiKey: String = "", options: RecognitionOptions = .init()) {
+        self.init(engine: engine, options: options) { raw in
             let result = await processor.process(raw, dictionaryEntries: dictionaryEntries, tone: tone,
                                                  rewriteSettings: rewriteSettings, apiKey: apiKey)
             return ProcessedTranscript(text: result.finalText, tone: result.tone.rawValue, polished: result.polished,
@@ -67,7 +69,7 @@ public struct RecordedAudioPipeline: Sendable {
             throw RecordedAudioError.invalidFile
         }
         let recognitionStart = ContinuousClock.now
-        let recognition = try await engine.transcribe(TranscriptionRequest(audioFileURL: audioFileURL))
+        let recognition = try await engine.transcribe(TranscriptionRequest(audioFileURL: audioFileURL, options: options))
         let recognitionTime = milliseconds(since: recognitionStart)
         var processed = ProcessedTranscript(text: recognition.text)
         var processingError: String?

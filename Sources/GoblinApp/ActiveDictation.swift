@@ -35,7 +35,7 @@ final class ActiveDictation {
         self.session = session
         self.lease = lease
         self.readiness = readiness
-        live = LiveTranscriber(engine: readiness)
+        live = LiveTranscriber(engine: readiness, options: lease.options, previewAvailable: lease.livePreview)
         // Audio drains independently of the UI; only meter snapshots may be coalesced.
         (frames, frameContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         (levels, levelContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))

@@ -2,8 +2,9 @@
 
 Parakeet TDT v3 is the first/default model, using FluidAudio **0.17.7**, pinned to
 `503b4bd1bbf7220882de39fe8ae6716aae4132da`. The adapter uses the int8 Core ML
-encoder with the SDK's CPU/Neural Engine placement. The model catalog exposes
-one actual implementation; native streaming and custom vocabulary remain false.
+encoder with the SDK's CPU/Neural Engine placement. The [model catalog](models.md)
+also offers Whisper, SenseVoice and Nemotron runtimes; the measurements below cover Parakeet only.
+Native streaming and recognizer vocabulary biasing remain false for these adapters.
 
 `ParakeetModelStore` owns acquisition and cache integrity. `ParakeetSpeechEngine`
 loads locally and serializes preparation, file recognition, bounded PCM recognition,

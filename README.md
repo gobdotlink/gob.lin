@@ -11,7 +11,7 @@ companion, Xcode project, stable local signing, and a macOS build workflow.
 
 ## Build and run
 
-Requires macOS 26+ and Xcode 26.3+ (Swift 6.2). FluidAudio 0.17.7 provides local Parakeet recognition.
+Requires macOS 26+ and Xcode 26.3+ (Swift 6.2). FluidAudio 0.17.7 and WhisperKit 1.1.1 provide local speech recognition.
 The signing scripts use the tools included with macOS; Homebrew is not required.
 
 ```sh
@@ -117,7 +117,10 @@ GitHub release with generated notes. To build an archive without publishing, use
 - `Resources`: app metadata and hardened-runtime entitlements.
 
 The engine protocol accepts a local audio file and returns recognized text.
-Parakeet TDT v3 is the first/default runtime. The PCM boundary accepts bounded
+Parakeet TDT v3 is the default runtime; the [17-model catalog](docs/models.md)
+offers four recommended choices plus intermediate and English-only Whisper sizes,
+Parakeet derivatives, SenseVoice and Nemotron.
+The PCM boundary accepts bounded
 16 kHz mono windows and returns token timings for live-session text handling.
 See [runtime measurements and limits](docs/speech-runtime.md).
 
@@ -173,10 +176,12 @@ swift run goblin eval A.jsonl B.jsonl
 swift run goblin eval A.jsonl B.jsonl --json > report.json
 ```
 
-Audio transcription/replay uses Parakeet through the shared `RecordedAudioPipeline`
+Audio transcription/replay uses the selected model through the shared `RecordedAudioPipeline`
 and `SpeechEngine` boundary. Run `prepare-model` once to acquire and compile the
 model; recognition commands load local models only and return `model_not_installed`
-(exit 3) when missing. `--model-dir <path>` overrides the exact compiled model folder.
+(exit 3) when missing. `goblin models` lists catalog IDs and capabilities;
+`--model <id> --language auto|<code>` selects recognition options.
+`--model-dir <path>` overrides the exact compiled model folder.
 The optional postprocessor keeps raw text and a visible error when rewriting fails.
 
 `goblin benchmark <file | directory> [--repeat N]` emits local batch timing JSONL,

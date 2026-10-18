@@ -11,7 +11,7 @@ private actor DeliveryEngine: PCMSpeechEngine {
     func prepare() async throws {}
     func unload() async {}
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { .init(text: "") }
-    func transcribe(samples: [Float]) async throws -> TranscriptionResult { .init(text: "delivered") }
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult { .init(text: "delivered") }
 }
 
 private actor DeliveryStore: SpeechModelAcquiring {
