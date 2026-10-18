@@ -1,6 +1,6 @@
 # Speech models
 
-The app ships 17 local model choices, with four recommended choices for common needs. Settings opens the recommendation shortlist; **All models** exposes the complete catalog with search, language and live-preview filters. Filtering changes the visible choices without switching the selected model. Download sizes come from the pinned file manifests, including tokenizers; a shared 1.1 MB speech detector is acquired separately.
+The app ships 17 local model choices, with four recommended choices for common needs. Settings opens the recommendation shortlist; **All Models** exposes the complete catalog. Search and the **Supports Language** filter stay visible on both tabs and preserve their values. Filtering changes the visible choices without switching the selected model or dictation language. Each stable row shows its tradeoff, download size, language coverage and whether text appears while speaking or after recording. Language counts open searchable lists of the actual supported languages. Only **Use Model** or **Download & Use** starts a switch; readiness, download progress and Cancel share the row’s action area without expanding it. Download sizes come from the pinned file manifests, including tokenizers; a shared 1.1 MB speech detector is acquired separately.
 
 | Model | Download | Role | Recognition language | Live preview | Recommended |
 | --- | --- | --- | --- | --- | --- |
@@ -52,7 +52,7 @@ Nemotron resets its cache and language hint for every preview window or file req
 
 Persisted language intent survives switching to an incompatible model. The effective value falls back to automatic detection where available, otherwise English (or the model's first supported language). Settings disclose the fallback without rewriting the user's preference. Matching handles region/script subtags, Norwegian `no`/`nb` and Filipino `tl`/`fil`. Speech recognition language is separate from app UI language and translation; these adapters transcribe in the original language.
 
-Idle unloading defaults to 15 minutes and supports Never, 5, 15 and 60 minutes. Session leases and in-progress selection protect runtime memory. An idle unload drains before a subsequent preparation. Unload retains downloaded files. Settings show model purpose, download size, language/preview capabilities, progress, cancellation, retry/repair and observed load durations.
+Idle unloading defaults to 15 minutes and supports Never, 5, 15 and 60 minutes. Session leases and in-progress selection protect runtime memory. An idle unload drains before a subsequent preparation. Unload retains downloaded files. Settings show model tradeoffs, download size, supported languages, progress, cancellation and retry/repair. The dictation-language control is separate from catalog filters and readiness. Runtime and observed load durations are inside Model Details.
 
 ## CLI and validation
 

@@ -34,6 +34,23 @@ public struct SpeechModelDescriptor: Sendable, Equatable, Identifiable {
     public let capabilities: SpeechModelCapabilities
     public var downloadBytes: Int64 { SpeechModelAssets.manifest(for: id).files.reduce(0) { $0 + $1.size } }
     public var runtime: String { kind == .whisper ? "WhisperKit · Core ML" : "FluidAudio · Core ML" }
+    public var selectionSummary: String {
+        switch id {
+        case "parakeet-tdt-v3": "Efficient everyday dictation in European languages."
+        case "whisper-tiny": "Small download; lower accuracy on difficult speech."
+        case "whisper-large-v3-turbo": "100 languages; a smaller download than full Large v3."
+        case "whisper-large-v3": "Full-size multilingual. More memory and processing time."
+        case "parakeet-redux": "Smaller encoder; the same languages as Parakeet v3."
+        case "parakeet-ultra": "Retrained Parakeet with a larger encoder."
+        case "phonon-2": "Compressed English-only Parakeet derivative."
+        case "parakeet-tdt-ctc-110m": "Compact English-only model with 110M parameters."
+        case "sensevoice-small": "East Asian languages and English. Text after recording."
+        case "nemotron-3.5": "Multilingual alternative with text while speaking."
+        default: capabilities.languageControl == .fixed
+            ? "English only. Larger sizes need more memory."
+            : "Broad language coverage. Larger sizes need more memory."
+        }
+    }
 }
 
 public enum SpeechModelCatalog {

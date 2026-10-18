@@ -46,14 +46,16 @@ private actor CheckEngine: PCMSpeechEngine {
 
 private actor CheckStore: SpeechModelAcquiring {
     nonisolated let directory = URL(fileURLWithPath: "/tmp/model-check-cache")
+    let delay: Duration
     var attempts = 0
     var failNext = false
     var callback: (@Sendable (SpeechModelPreparationProgress) -> Void)?
+    init(delay: Duration = .milliseconds(40)) { self.delay = delay }
     func ensureAvailable(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws -> SpeechModelCacheUse {
         attempts += 1
         callback = progress
         progress(.init(phase: .downloading, fractionCompleted: 0.4))
-        try await Task.sleep(for: .milliseconds(40))
+        try await Task.sleep(for: delay)
         if failNext { failNext = false; throw CheckFailure(message: "Simulated transfer failure") }
         return .cached
     }
@@ -268,6 +270,8 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         catch let error as CheckFailure { try expect(error.message == "Simulated model load failure", "Unexpected model failure") }
         try expect(service.selectedModel.id == SpeechModelCatalog.whisperTiny.id && service.state == .ready, "Failed switch did not restore the previous runtime")
         try expect(defaults.string(forKey: "speechModelID") == SpeechModelCatalog.whisperTiny.id, "Failed candidate replaced saved selection")
+        try expect(service.selectionFailureModelID == SpeechModelCatalog.whisperTurbo.id && service.selectionFailure != nil,
+                   "Failed switch lost the model needed to show its retry action after reopening Settings")
         await stores[SpeechModelCatalog.whisperTurbo.id]!.emitLateProgress()
         try await Task.sleep(for: .milliseconds(10))
         try expect(service.state == .ready, "Failed candidate's stale progress overwrote restored state")
@@ -283,6 +287,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         catch is CancellationError { }
         try expect(service.state == .ready && service.canChangeModel && service.selectedModel.id == SpeechModelCatalog.whisperTiny.id,
                    "Cancelled switch did not drain and restore")
+        try expect(service.selectionFailureModelID == nil, "Cancellation left an unrelated model marked as failed")
 
         let leasedCancellation = Task { try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id) }
         try await waitForSwitch(service)
@@ -609,21 +614,35 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
             let store = ParakeetModelStore(directory: try ParakeetModelStore.defaultDirectory())
             service = SpeechModelService(engine: ParakeetSpeechEngine(modelDirectory: store.directory), store: store, defaults: defaults)
         } else {
-            let store = CheckStore()
+            let store = CheckStore(delay: .milliseconds(800))
             await store.failOnce()
-            service = SpeechModelService(engine: CheckEngine(), store: store, defaults: defaults)
+            service = SpeechModelService(defaults: defaults, makeRuntime: { model in
+                SpeechModelRuntime(engine: CheckEngine(model.id), store: store)
+            })
         }
         defer { ModelHub.offlineMode = false }
+        @MainActor func shoot(_ name: String, _ view: some View, width: CGFloat = 650, height: CGFloat = 980,
+                              dark: Bool = false, accessible: Bool = false) async throws {
+            app.appearance = NSAppearance(named: accessible
+                ? (dark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua)
+                : (dark ? .darkAqua : .aqua))
+            let host = NSHostingView(rootView: view
+                .preferredColorScheme(dark ? .dark : .light)
+                .frame(width: width, height: height, alignment: .topLeading).caseBackground())
+            host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            try await Task.sleep(for: .milliseconds(30))
+            try snapshot(host, to: directory.appendingPathComponent(name + ".png"))
+            print("Captured \(name)")
+        }
+        @MainActor func page(_ all: Bool = false, query: String = "", language: String = "all") -> some View {
+            Form { ModelSettingsView(service: service, showAllModels: all, search: query, languageFilter: language) }
+                .formStyle(PlateFormStyle())
+        }
         service.preload()
-        let host = NSHostingView(rootView: Form { ModelSettingsView(service: service) }.formStyle(.grouped).preferredColorScheme(.dark)
-            .frame(width: 620, height: 820, alignment: .topLeading).background(Color(red: 0.09, green: 0.10, blue: 0.12)))
-        host.frame = NSRect(x: 0, y: 0, width: 620, height: 820)
-        try snapshot(host, to: directory.appendingPathComponent("model-preparation-layout.png"))
+        try await shoot("model-preparation-layout", page(), dark: true)
         if real {
             preparation: for await state in service.$state.values {
                 switch state {
-                case .preparing(let progress) where progress.phase == .compiling:
-                    try snapshot(host, to: directory.appendingPathComponent("model-coreml-layout.png"))
                 case .ready: break preparation
                 case .failed(let error): throw CheckFailure(message: error)
                 default: break
@@ -631,13 +650,33 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
             }
         } else {
             try await settle(service)
-            try snapshot(host, to: directory.appendingPathComponent("model-failure-layout.png"))
+            try await shoot("model-failure-layout", page(), dark: true)
             service.retry()
             try await settle(service)
         }
-        try snapshot(host, to: directory.appendingPathComponent("model-ready-layout.png"))
+        for dark in [false, true] {
+            let suffix = dark ? "dark" : "light"
+            try await shoot("model-ready-" + suffix, page(), dark: dark)
+            try await shoot("model-all-" + suffix, page(true), dark: dark)
+            try await shoot("model-hebrew-" + suffix, page(language: "he"), dark: dark)
+            try await shoot("model-empty-" + suffix, page(query: "sensevoice"), dark: dark)
+            try await shoot("model-languages-" + suffix, ModelLanguagesPopover(model: SpeechModelCatalog.parakeet),
+                            width: 320, height: 330, dark: dark)
+            try await shoot("model-accessible-" + suffix, page(), dark: dark, accessible: true)
+        }
+        try await shoot("model-narrow", page(), width: 564, dark: true)
+        if !real {
+            let switching = Task { try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id) }
+            while service.pendingModel == nil { await Task.yield() }
+            try await shoot("model-switch-layout", page(), dark: true)
+            try await shoot("model-pending-filter-layout", page(language: "zh"), dark: true)
+            service.cancelPreparation()
+            do { try await switching.value; throw CheckFailure(message: "Captured switch ignored cancellation") }
+            catch is CancellationError { }
+            try await shoot("model-cancelled-switch-layout", page(), dark: true)
+        }
         await service.shutdown()
-        print("Captured native model-settings layouts with \(real ? "real offline runtime" : "simulated preparation states"); no microphone or permissions requested")
+        print("Captured production plates/popover in light, dark and high-contrast appearances; isolated defaults, no app launch, microphone or permissions")
     }
 
     @MainActor private static func snapshot(_ view: NSView, to url: URL) throws {

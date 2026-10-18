@@ -49,6 +49,7 @@ final class SpeechModelService: ObservableObject {
     @Published private(set) var selectionProgress: SpeechModelPreparationProgress?
     @Published private(set) var preferredLanguage: String
     @Published private(set) var selectionFailure: String?
+    @Published private(set) var selectionFailureModelID: String?
     @Published private(set) var activeSessionCount = 0
     @Published private(set) var preparationStartedAt: Date?
     @Published private(set) var lastLoadTiming: SpeechModelLoadTiming?
@@ -163,6 +164,7 @@ final class SpeechModelService: ObservableObject {
         self.preparationID = preparationID
         pendingModel = descriptor
         selectionFailure = nil
+        selectionFailureModelID = nil
         preparationStartedAt = Date()
         selectionProgress = .init(phase: .checkingCache)
         let task = Task { [weak self] in
@@ -193,6 +195,7 @@ final class SpeechModelService: ObservableObject {
                 self.acquisitionID = nil
                 await candidate.engine.unload()
                 self.selectionFailure = error is CancellationError ? "Model switch cancelled. Previous selection kept." : error.localizedDescription
+                self.selectionFailureModelID = error is CancellationError ? nil : descriptor.id
                 if !self.stopping, wasLoaded, unloadedPrevious {
                     // Restoration runs outside the cancelled switch so the previous model can recover.
                     let restore = Task { try await previous.engine.prepare() }
