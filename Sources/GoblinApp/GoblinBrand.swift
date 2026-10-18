@@ -37,7 +37,7 @@ enum GoblinBrand {
     }
 
     static func registerFonts() {
-        for name in ["Workbench", "VT323"] {
+        for name in ["Workbench", "VT323", "PressStart2P"] {
             guard let url = assetDirectory?.appendingPathComponent(name + ".ttf") else { continue }
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }

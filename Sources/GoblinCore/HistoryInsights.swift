@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 public struct InsightWords: Sendable, Identifiable {
     public var date: Date
@@ -6,9 +7,19 @@ public struct InsightWords: Sendable, Identifiable {
     public var id: Date { date }
 }
 
+/// One day of the Activity week: the words started in each hour of the day.
+public struct InsightDay: Sendable, Identifiable {
+    public var date: Date
+    /// 24 buckets by hour of day. A repeated fall-back hour shares its bucket; a skipped one stays empty.
+    public var hours: [Int]
+    public var words: Int { hours.reduce(0, +) }
+    public var id: Date { date }
+}
+
 public struct InsightApplication: Sendable, Identifiable {
     public var id: String
     public var name: String
+    public var bundleIdentifier: String?
     public var words: Int
 }
 
@@ -20,16 +31,26 @@ public struct HistoryInsights: Sendable {
     public var timedEntryCount = 0
     public var timedWords = 0
     public var audioSeconds: Double = 0
+    /// Timed words and recorded audio from this calendar week only.
+    public var weekTimedWords = 0
+    public var weekAudioSeconds: Double = 0
     public var currentStreak = 0
     public var longestStreak = 0
+    /// The last seven days, ending today.
     public var days: [InsightWords] = []
-    public var hours: [InsightWords] = []
+    /// The calendar week that was asked for, Monday (or the calendar's first weekday) first.
+    public var week: [InsightDay] = []
+    /// When the oldest entry with words started, so the week stepper knows where History ends.
+    public var firstEntryDate: Date?
     public var applications: [InsightApplication] = []
     public var calendar: Calendar
 
-    public var wordsPerMinute: Double? {
-        guard audioSeconds > 0 else { return nil }
-        let value = Double(timedWords) / audioSeconds * 60
+    public var wordsPerMinute: Double? { Self.pace(words: timedWords, seconds: audioSeconds) }
+    public var weekWordsPerMinute: Double? { Self.pace(words: weekTimedWords, seconds: weekAudioSeconds) }
+
+    private static func pace(words: Int, seconds: Double) -> Double? {
+        guard seconds > 0 else { return nil }
+        let value = Double(words) / seconds * 60
         return value.isFinite ? value : nil
     }
 
@@ -41,16 +62,16 @@ struct HistoryInsightsAccumulator {
     private let calendar: Calendar
     private let today: Date
     private let weekStart: Date
-    private let selectedDay: DateInterval
+    private let shownWeek: DateInterval
     private var dailyWords: [Date: Int] = [:]
-    private var hourlyWords: [Date: Int] = [:]
+    private var weekHours: [Date: [Int]] = [:]
     private var applications: [String: InsightApplication] = [:]
 
-    init(now: Date, day: Date, calendar: Calendar) {
+    init(now: Date, week: Date, calendar: Calendar) {
         self.calendar = calendar
         today = calendar.startOfDay(for: now)
         weekStart = calendar.dateInterval(of: .weekOfYear, for: now)!.start
-        selectedDay = calendar.dateInterval(of: .day, for: day)!
+        shownWeek = calendar.dateInterval(of: .weekOfYear, for: week)!
         result = HistoryInsights(calendar: calendar)
     }
 
@@ -58,18 +79,23 @@ struct HistoryInsightsAccumulator {
         result.entryCount += 1
         guard words > 0 else { return }
         result.totalWords += words
+        result.firstEntryDate = min(result.firstEntryDate ?? date, date)
         let day = calendar.startOfDay(for: date)
         dailyWords[day, default: 0] += words
         if day == today { result.todayWords += words }
-        if date >= weekStart { result.weekWords += words }
-        if date >= selectedDay.start, date < selectedDay.end {
-            let hour = selectedDay.start.addingTimeInterval(floor(date.timeIntervalSince(selectedDay.start) / 3600) * 3600)
-            hourlyWords[hour, default: 0] += words
+        let thisWeek = date >= weekStart
+        if thisWeek { result.weekWords += words }
+        if date >= shownWeek.start, date < shownWeek.end {
+            weekHours[day, default: Array(repeating: 0, count: 24)][calendar.component(.hour, from: date)] += words
         }
         if let duration, duration.isFinite, duration > 0 {
             result.timedEntryCount += 1
             result.timedWords += words
             result.audioSeconds += duration
+            if thisWeek {
+                result.weekTimedWords += words
+                result.weekAudioSeconds += duration
+            }
         }
         let bundle = bundle?.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,7 +106,7 @@ struct HistoryInsightsAccumulator {
             app.words += words
             applications[key] = app
         } else {
-            applications[key] = InsightApplication(id: key, name: label ?? identifier ?? "Unknown app", words: words)
+            applications[key] = InsightApplication(id: key, name: label ?? identifier ?? "Unknown app", bundleIdentifier: identifier, words: words)
         }
     }
 
@@ -91,11 +117,11 @@ struct HistoryInsightsAccumulator {
                 return InsightWords(date: day, words: dailyWords[day, default: 0])
             }
         }
-        var hour = selectedDay.start
-        while hour < selectedDay.end {
-            result.hours.append(InsightWords(date: hour, words: hourlyWords[hour, default: 0]))
-            guard let next = calendar.date(byAdding: .hour, value: 1, to: hour), next > hour else { break }
-            hour = next
+        result.week = (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: shownWeek.start).map {
+                let day = calendar.startOfDay(for: $0)
+                return InsightDay(date: day, hours: weekHours[day] ?? Array(repeating: 0, count: 24))
+            }
         }
         let activeDays = dailyWords.keys.sorted()
         var previous: Date?
@@ -117,5 +143,52 @@ struct HistoryInsightsAccumulator {
             return $0.id < $1.id
         }
         return result
+    }
+}
+
+// MARK: - Word cloud
+
+public struct InsightWord: Sendable, Identifiable, Hashable {
+    public var word: String
+    public var count: Int
+    public var id: String { word }
+}
+
+/// The nouns said most today and this calendar week.
+public struct InsightWordCloud: Sendable {
+    public var today: [InsightWord] = []
+    public var week: [InsightWord] = []
+    public var todayEntries = 0
+    public var weekEntries = 0
+}
+
+/// Picks the nouns out of dictated text, by dictionary form, so "chart" and "charts" count as one word.
+struct SpokenWordCounter {
+    private let tagger = NLTagger(tagSchemes: [.lexicalClass, .lemma])
+
+    func nouns(in text: String) -> [String] {
+        tagger.string = text
+        // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
+        let classified = tagger.dominantLanguage.map { NLTagger.availableTagSchemes(for: .word, language: $0).contains(.lexicalClass) } ?? false
+        var words: [String] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
+                             options: [.omitWhitespace, .omitPunctuation, .omitOther]) { tag, range in
+            guard !classified || tag == .noun else { return true }
+            let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
+            // Abbreviation-style tokens keep their full stop ("Dia."); the cloud wants the word alone.
+            let word = (lemma.flatMap { $0.isEmpty ? nil : $0 } ?? String(text[range])).lowercased()
+                .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
+            // One letter of an alphabet is noise, but one Chinese or Japanese character is often a whole noun (书, 車).
+            let ideograph = word.count == 1 && word.unicodeScalars.allSatisfy(\.properties.isIdeographic)
+            if word.count > 1 || ideograph, word.contains(where: \.isLetter) { words.append(word) }
+            return true
+        }
+        return words
+    }
+
+    static func top(_ counts: [String: Int], limit: Int) -> [InsightWord] {
+        counts.map { InsightWord(word: $0.key, count: $0.value) }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.word < $1.word }
+            .prefix(limit).map { $0 }
     }
 }

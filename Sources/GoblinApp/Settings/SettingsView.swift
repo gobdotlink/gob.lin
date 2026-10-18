@@ -346,6 +346,7 @@ private struct AboutSettingsView: View {
                         Button("Third-Party Notices") { NSWorkspace.shared.open(directory.appendingPathComponent("Third-party-notices.md")) }
                         Button("Workbench · SIL Open Font License 1.1") { NSWorkspace.shared.open(directory.appendingPathComponent("Workbench-OFL.txt")) }
                         Button("VT323 · SIL Open Font License 1.1") { NSWorkspace.shared.open(directory.appendingPathComponent("VT323-OFL.txt")) }
+                        Button("Press Start 2P · SIL Open Font License 1.1") { NSWorkspace.shared.open(directory.appendingPathComponent("PressStart2P-OFL.txt")) }
                     }
                 }
                 .menuIndicator(.hidden).fixedSize()
