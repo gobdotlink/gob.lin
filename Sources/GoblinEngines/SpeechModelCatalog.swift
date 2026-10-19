@@ -32,6 +32,8 @@ public struct SpeechModelDescriptor: Sendable, Equatable, Identifiable {
     public let kind: SpeechRuntimeKind
     public let cacheFolder: String
     public let capabilities: SpeechModelCapabilities
+    /// First day of the month the upstream model was published.
+    public let released: Date
     public var downloadBytes: Int64 { SpeechModelAssets.manifest(for: id).files.reduce(0) { $0 + $1.size } }
     public var runtime: String { kind == .whisper ? "WhisperKit · Core ML" : "FluidAudio · Core ML" }
     public var selectionSummary: String {
@@ -56,13 +58,13 @@ public struct SpeechModelDescriptor: Sendable, Equatable, Identifiable {
 public enum SpeechModelCatalog {
     public static let parakeet = model("parakeet-tdt-v3", "Parakeet TDT v3", purpose: "Everyday default",
         detail: "Efficient dictation across 25 European languages. A preferred language guides the writing script; it cannot force one language over another using the same script.",
-        kind: .parakeet, folder: "parakeet-tdt-0.6b-v3", control: .scriptHint)
+        kind: .parakeet, released: (2025, 8), folder: "parakeet-tdt-0.6b-v3", control: .scriptHint)
     public static let whisperTiny = model("whisper-tiny", "Whisper Tiny", purpose: "Compact multilingual",
-        detail: "A compact multilingual model for short, simple speech when download size matters more than accuracy.", kind: .whisper)
+        detail: "A compact multilingual model for short, simple speech when download size matters more than accuracy.", kind: .whisper, released: (2022, 9))
     public static let whisperTurbo = model("whisper-large-v3-turbo", "Whisper Large v3 Turbo", purpose: "Broad language coverage",
-        detail: "A compressed multilingual model with a smaller decoder than full Large v3. Supports automatic or explicit language selection.", kind: .whisper)
+        detail: "A compressed multilingual model with a smaller decoder than full Large v3. Supports automatic or explicit language selection.", kind: .whisper, released: (2024, 10))
     public static let whisperLarge = model("whisper-large-v3", "Whisper Large v3", purpose: "Full-size multilingual",
-        detail: "The full multilingual model for difficult recordings. Requires a larger download and more memory and processing time.", kind: .whisper)
+        detail: "The full multilingual model for difficult recordings. Requires a larger download and more memory and processing time.", kind: .whisper, released: (2023, 11))
     public static let whisperTinyEnglish = whisper("tiny", english: true)
     public static let whisperBase = whisper("base")
     public static let whisperBaseEnglish = whisper("base", english: true)
@@ -72,22 +74,22 @@ public enum SpeechModelCatalog {
     public static let whisperMediumEnglish = whisper("medium", english: true)
     public static let parakeetRedux = model("parakeet-redux", "Parakeet Redux", purpose: "Compact European-language model",
         detail: "A ternary retraining of Parakeet v3 with a smaller encoder. Covers the same 25 languages and offers writing-script hints.",
-        kind: .parakeet, recommended: false, control: .scriptHint)
+        kind: .parakeet, released: (2026, 9), recommended: false, control: .scriptHint)
     public static let parakeetUltra = model("parakeet-ultra", "Parakeet Ultra", purpose: "Retrained multilingual Parakeet",
         detail: "A post-trained Parakeet v3 derivative with a larger encoder. An alternative for difficult dictation across 25 European languages; offers writing-script hints.",
-        kind: .parakeet, recommended: false, control: .scriptHint)
+        kind: .parakeet, released: (2026, 9), recommended: false, control: .scriptHint)
     public static let phonon = model("phonon-2", "Phonon-2", purpose: "Compact English Parakeet derivative",
         detail: "An English-only retraining of Parakeet with compressed five-value encoder weights. Uses the fixed 15-second encoder conversion.",
-        kind: .parakeet, recommended: false, automatic: false, control: .fixed)
+        kind: .parakeet, released: (2026, 9), recommended: false, automatic: false, control: .fixed)
     public static let parakeetCompact = model("parakeet-tdt-ctc-110m", "Parakeet TDT-CTC 110M", purpose: "Small English transducer",
         detail: "A 110-million-parameter English recognizer with a smaller decoder and vocabulary than Parakeet v3. A compact alternative to the larger English models.",
-        kind: .parakeet, recommended: false, automatic: false, control: .fixed)
+        kind: .parakeet, released: (2024, 9), recommended: false, automatic: false, control: .fixed)
     public static let senseVoice = model("sensevoice-small", "SenseVoice Small", purpose: "Chinese, Cantonese, Japanese and Korean",
         detail: "A compact recognizer for Mandarin, Cantonese, English, Japanese and Korean. Offers automatic detection or a language hint. Text appears after recording.",
-        kind: .senseVoice, recommended: false, preview: false, control: .hint)
+        kind: .senseVoice, released: (2024, 7), recommended: false, preview: false, control: .hint)
     public static let nemotron = model("nemotron-3.5", "Nemotron 3.5", purpose: "Streaming-trained multilingual alternative",
         detail: "A cache-aware 2026 recognizer with automatic detection or language hints. Offers 28 languages that support transcription without further training. The app uses bounded live-preview windows.",
-        kind: .nemotron, recommended: false, control: .hint)
+        kind: .nemotron, released: (2026, 6), recommended: false, control: .hint)
     public static let supported = [parakeet, whisperTiny, whisperTurbo, whisperLarge,
         parakeetRedux, parakeetUltra, phonon, parakeetCompact, senseVoice, nemotron,
         whisperTinyEnglish, whisperBase, whisperBaseEnglish, whisperSmall, whisperSmallEnglish, whisperMedium, whisperMediumEnglish]
@@ -120,16 +122,17 @@ public enum SpeechModelCatalog {
             purpose: english ? "\(name) English-only" : "\(name) multilingual",
             detail: english ? "An English-only Whisper model. Choose its size to trade download and memory use against recognition quality; other languages require a multilingual model."
                 : "An intermediate Whisper size between Tiny and Large. Offers broad language coverage with automatic detection or explicit language selection.",
-            kind: .whisper, recommended: false, automatic: !english, control: english ? .fixed : .explicit)
+            kind: .whisper, released: (2022, 9), recommended: false, automatic: !english, control: english ? .fixed : .explicit)
     }
 
     private static func model(_ id: String, _ name: String, purpose: String, detail: String, kind: SpeechRuntimeKind,
-                              recommended: Bool = true,
+                              released: (year: Int, month: Int), recommended: Bool = true,
                               folder: String? = nil, automatic: Bool = true, preview: Bool = true,
                               control: SpeechLanguageControl = .explicit) -> SpeechModelDescriptor {
         SpeechModelDescriptor(id: id, name: name, purpose: purpose, detail: detail, recommended: recommended, kind: kind, cacheFolder: folder ?? id,
             capabilities: SpeechModelCapabilities(livePreview: preview, automaticLanguage: automatic, languageControl: control,
-                                                 languageCodes: SpeechModelAssets.manifest(for: id).languages))
+                                                 languageCodes: SpeechModelAssets.manifest(for: id).languages),
+            released: Calendar(identifier: .gregorian).date(from: DateComponents(year: released.year, month: released.month))!)
     }
 }
 

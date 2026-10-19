@@ -214,6 +214,9 @@ struct SpeechModelRow: View {
                     .popover(isPresented: $showLanguages) { ModelLanguagesPopover(model: model) }
                     Text("·")
                     Text(model.capabilities.livePreview ? "Text while speaking" : "Text after recording")
+                    Text("·")
+                    Text(model.released, format: .dateTime.month(.abbreviated).year())
+                        .accessibilityLabel("Released \(model.released.formatted(.dateTime.month(.wide).year()))")
                 }.font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(spacing: 7) { action }
