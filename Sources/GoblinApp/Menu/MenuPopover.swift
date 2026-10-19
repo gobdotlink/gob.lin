@@ -57,9 +57,9 @@ private struct PopoverHeader: View {
     var body: some View {
         let status = model.status
         return HStack(spacing: 10) {
-            PixelSprite(sprite: diagnostics.hasWarning ? .side : .shut, scale: 0.5)
+            PixelSprite(sprite: diagnostics.hasWarning ? .side : .shut, scale: 1)
             VStack(alignment: .leading, spacing: 5) {
-                GoblinWordmark(size: 16)
+                GoblinWordmark(size: 24)
                 HStack(spacing: 6) {
                     StatusLight(state: status.light, size: 7)
                     if status.light == .ready, model.mascotState == .idle {
