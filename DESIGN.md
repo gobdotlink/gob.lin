@@ -40,7 +40,7 @@ The values live in `GoblinBrand`. This table is what it must contain.
 ### Type
 
 - SF Pro for everything, using system text styles.
-- Workbench for the wordmark "gob.lin" only, at sizes that are multiples of 4: 16 pt in the popover header, 48 pt on About.
+- Workbench for the wordmark "gob.lin" only, at sizes that are multiples of 4: 24 pt in the popover header, 48 pt on About.
 - VT323 for the tagline `$ sudo autism --unmuted` only. It appears on About and on the last first-run step, nowhere else. `$` and `autism` are neon.
 - Press Start 2P for the Insights word cloud only. Draw it at its native 8 pt with antialiasing off, then scale by whole numbers on a 2 pt grid, like the sprites.
 - SF Mono for values a person would copy: URLs, model IDs, a masked API key.
@@ -72,7 +72,7 @@ Reuse these before writing new ones:
 
 ### Pixel art
 
-- **Whole-number scales only.** The head is 64 pt or 128 pt, plus 32 pt in the popover header. Draw with `.interpolation(.none)`.
+- **Whole-number scales only.** The head is 64 pt or 128 pt. Draw with `.interpolation(.none)`.
 - **The whole head always shows.** Nothing overlaps the face, and no container clips it.
 - **Hands grip an edge or do a job** (quill, palm), at the head's scale.
 - **Frames swap; they never tween.** Panels around the goblin animate; the sprite changes frame.
@@ -150,7 +150,7 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 
 `GoblinApp.swift`. Use `MenuBarExtra` in window style: a 360 pt glass panel. Top to bottom:
 
-1. **Header:** the goblin at 32 pt (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button.
+1. **Header:** the goblin at 64 pt (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button.
 2. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
 3. **Update:** only when an update is available, with a Restart button.
 4. **Microphone:** a picker plus press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved.
