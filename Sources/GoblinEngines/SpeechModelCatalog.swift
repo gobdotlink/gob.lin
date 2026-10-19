@@ -32,7 +32,7 @@ public struct SpeechModelDescriptor: Sendable, Equatable, Identifiable {
     public let kind: SpeechRuntimeKind
     public let cacheFolder: String
     public let capabilities: SpeechModelCapabilities
-    /// First day of the month the upstream model was published.
+    /// Mid-month of the month the upstream model was published, so time zone shifts never change the month.
     public let released: Date
     public var downloadBytes: Int64 { SpeechModelAssets.manifest(for: id).files.reduce(0) { $0 + $1.size } }
     public var runtime: String { kind == .whisper ? "WhisperKit · Core ML" : "FluidAudio · Core ML" }
@@ -132,7 +132,7 @@ public enum SpeechModelCatalog {
         SpeechModelDescriptor(id: id, name: name, purpose: purpose, detail: detail, recommended: recommended, kind: kind, cacheFolder: folder ?? id,
             capabilities: SpeechModelCapabilities(livePreview: preview, automaticLanguage: automatic, languageControl: control,
                                                  languageCodes: SpeechModelAssets.manifest(for: id).languages),
-            released: Calendar(identifier: .gregorian).date(from: DateComponents(year: released.year, month: released.month))!)
+            released: Calendar(identifier: .gregorian).date(from: DateComponents(year: released.year, month: released.month, day: 15))!)
     }
 }
 
