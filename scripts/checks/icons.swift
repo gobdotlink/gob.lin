@@ -34,14 +34,27 @@ struct IconCheck {
 
     static func checkMenuStates() {
         for scale in [1, 2] {
-            let rendered = MascotState.allCases.map { state in
-                let image = GoblinBrand.menuImage(state)
-                precondition(image.size == NSSize(width: 22, height: 22) && !image.isTemplate)
-                precondition(image.accessibilityDescription == "gob.lin " + state.rawValue)
-                return pixels(image, size: 22 * scale)
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                NSAppearance(named: appearance)!.performAsCurrentDrawingAppearance {
+                    let rendered = MascotState.allCases.map { state in
+                        let image = GoblinBrand.menuImage(state)
+                        precondition(image.size == NSSize(width: 22, height: 22) && !image.isTemplate)
+                        precondition(image.accessibilityDescription == "gob.lin " + state.rawValue)
+                        return pixels(image, size: 22 * scale)
+                    }
+                    precondition(Set(rendered).count == MascotState.allCases.count, "Menu states must be distinct")
+                }
             }
-            precondition(Set(rendered).count == MascotState.allCases.count, "Menu states must be distinct")
         }
+    }
+
+    /// The menu bar keeps one image per state, so that same image must redraw when the bar turns dark.
+    static func checkMenuAppearance() {
+        let idle = GoblinBrand.menuImage(.idle)
+        var light = Data(), dark = Data()
+        NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance { light = pixels(idle, size: 44) }
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance { dark = pixels(idle, size: 44) }
+        precondition(light != dark, "A dark menu bar must redraw the cached icon with its neon edge")
     }
 
     static func writePreview(to path: String) throws {
@@ -68,7 +81,9 @@ struct IconCheck {
                 NSBezierPath(roundedRect: NSRect(x: x, y: y, width: 146, height: 36), xRadius: 5, yRadius: 5).fill()
                 (dark ? "Dark" : "Light" as NSString).draw(at: NSPoint(x: x + 10, y: y + 11),
                     withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: dark ? NSColor.white : NSColor.darkGray])
-                GoblinBrand.menuImage(state).draw(in: NSRect(x: x + 111, y: y + 7, width: 22, height: 22))
+                NSAppearance(named: dark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
+                    GoblinBrand.menuImage(state).draw(in: NSRect(x: x + 111, y: y + 7, width: 22, height: 22))
+                }
             }
         }
         try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
@@ -91,7 +106,8 @@ struct IconCheck {
             precondition(icon.representations.contains { $0.pixelsWide == 16 })
             precondition(icon.representations.contains { $0.pixelsWide == 1024 })
             for size in [16, 32, 128, 256, 512, 1024] { _ = pixels(icon, size: size) }
-            for name in ["goblin-shut", "goblin-yap", "goblin-look", "hand-grip", "goblin-menu", "goblin-menu@2x"] {
+            for name in ["goblin-shut", "goblin-yap", "goblin-look", "hand-grip", "goblin-menu", "goblin-menu@2x",
+                         "goblin-menu-dark", "goblin-menu-dark@2x"] {
                 let packaged = app.resourceURL!.appendingPathComponent("Assets/" + name + ".png")
                 let packagedBytes = try Data(contentsOf: packaged)
                 let sourceBytes = try Data(contentsOf: assets.appendingPathComponent(name + ".png"))
@@ -107,14 +123,16 @@ struct IconCheck {
             }
             print("PASS signed-bundle artwork: \(path)")
         }
-        let artwork = GoblinBrand.menuArtwork()
-        precondition(artwork.size == NSSize(width: 22, height: 22))
-        for dimension in [22, 44] {
-            precondition(artwork.representations.contains { $0.pixelsWide == dimension && $0.pixelsHigh == dimension },
-                "Load both menu artwork scales at the same 22-point logical size")
+        for artwork in [GoblinBrand.menuArtwork(), GoblinBrand.menuArtwork(dark: true)] {
+            precondition(artwork.size == NSSize(width: 22, height: 22))
+            for dimension in [22, 44] {
+                precondition(artwork.representations.contains { $0.pixelsWide == dimension && $0.pixelsHigh == dimension },
+                    "Load both menu artwork scales at the same 22-point logical size")
+            }
         }
         let originalMenu = pixels(GoblinBrand.menuImage(.idle), size: 44)
         checkMenuStates()
+        checkMenuAppearance()
         if let path = ProcessInfo.processInfo.environment["GOBLIN_ICON_PREVIEW"] { try writePreview(to: path) }
         let shut = assets.appendingPathComponent("goblin-shut.png")
         let yap = assets.appendingPathComponent("goblin-yap.png")

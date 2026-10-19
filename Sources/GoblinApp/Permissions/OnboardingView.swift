@@ -261,7 +261,7 @@ struct OnboardingView: View {
             if take != nil { takeField.frame(width: 440).padding(.top, 20) }
             HStack(spacing: 12) {
                 HStack(spacing: 12) {
-                    Image(nsImage: GoblinBrand.menuArtwork()).padding(.horizontal, 4).frame(height: 22)
+                    Image(nsImage: GoblinBrand.menuImage(.idle)).padding(.horizontal, 4).frame(height: 22)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
                     Image(systemName: "wifi").font(.system(size: 13))
                     Text(Date(), format: .dateTime.hour().minute()).font(.system(size: 12, weight: .medium)).monospacedDigit()

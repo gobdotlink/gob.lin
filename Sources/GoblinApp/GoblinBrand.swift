@@ -65,17 +65,19 @@ enum GoblinBrand {
         return image
     }
 
-    static func menuArtwork() -> NSImage {
+    /// The dark artwork has a neon edge instead of black, for dark menu bars.
+    static func menuArtwork(dark: Bool = false) -> NSImage {
+        let name = dark ? "goblin-menu-dark" : "goblin-menu"
         guard let assets = assetDirectory,
-              let data = try? Data(contentsOf: assets.appendingPathComponent("goblin-menu.png")),
+              let data = try? Data(contentsOf: assets.appendingPathComponent(name + ".png")),
               let normal = NSBitmapImageRep(data: data) else {
-            return sprite("goblin-menu")
+            return sprite(name)
         }
         let size = NSSize(width: 22, height: 22)
         let image = NSImage(size: size)
         normal.size = size
         image.addRepresentation(normal)
-        if let data = try? Data(contentsOf: assets.appendingPathComponent("goblin-menu@2x.png")),
+        if let data = try? Data(contentsOf: assets.appendingPathComponent(name + "@2x.png")),
            let retina = NSBitmapImageRep(data: data) {
             retina.size = size
             image.addRepresentation(retina)
@@ -85,10 +87,13 @@ enum GoblinBrand {
     }
 
     static func menuImage(_ state: MascotState) -> NSImage {
-        let goblin = menuArtwork()
+        let light = menuArtwork(), dark = menuArtwork(dark: true)
         let image = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { bounds in
+            // AppKit runs this handler again for each appearance, so the edge follows the
+            // menu bar's own light or dark look rather than the app's.
+            let isDark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             NSGraphicsContext.current?.imageInterpolation = .none
-            goblin.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
+            (isDark ? dark : light).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
             if state != .idle {
                 let color: NSColor = switch state {
                 case .recording: .systemRed
@@ -96,7 +101,7 @@ enum GoblinBrand {
                 case .warning: .systemYellow
                 case .idle: .clear
                 }
-                NSColor.black.setFill()
+                (isDark ? NSColor(GoblinBrand.neon) : .black).setFill()
                 NSBezierPath(ovalIn: NSRect(x: 14, y: 0, width: 8, height: 8)).fill()
                 color.setFill()
                 NSBezierPath(ovalIn: NSRect(x: 15, y: 1, width: 6, height: 6)).fill()
