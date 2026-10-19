@@ -156,6 +156,8 @@ for today’s, this calendar week’s, and total saved words, weighted dictation
 a seven-day word chart, a selectable day’s hourly timeline, and words by app.
 Calculations stay local and use all retained History entries, independent of search
 or pagination. Deletion and retention reduce totals; starred entries still count.
+The word cloud and "Where I typed" graphs share a Today / This Week / All Time
+selector. App counts and percentages use only words saved in the selected period.
 
 Words use History’s saved final-text whitespace count. Reprocessing creates another
 entry and counts again. WPM uses final words divided by recorded audio minutes

@@ -1,6 +1,18 @@
 import Foundation
 import NaturalLanguage
 
+public enum InsightPeriod: Int, Sendable {
+    case today, week, allTime
+
+    public func start(now: Date, calendar: Calendar) -> Date? {
+        switch self {
+        case .today: calendar.startOfDay(for: now)
+        case .week: calendar.dateInterval(of: .weekOfYear, for: now)?.start
+        case .allTime: nil
+        }
+    }
+}
+
 public struct InsightWords: Sendable, Identifiable {
     public var date: Date
     public var words: Int
@@ -154,12 +166,10 @@ public struct InsightWord: Sendable, Identifiable, Hashable {
     public var id: String { word }
 }
 
-/// The nouns said most today and this calendar week.
+/// The nouns said most in the requested period.
 public struct InsightWordCloud: Sendable {
-    public var today: [InsightWord] = []
-    public var week: [InsightWord] = []
-    public var todayEntries = 0
-    public var weekEntries = 0
+    public var words: [InsightWord] = []
+    public var entryCount = 0
 }
 
 /// Picks the nouns out of dictated text, by dictionary form, so "chart" and "charts" count as one word.

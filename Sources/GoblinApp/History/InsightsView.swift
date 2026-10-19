@@ -5,19 +5,43 @@ import SwiftUI
 struct InsightsView: View {
     @ObservedObject var history: HistoryModel
     @State private var insights: HistoryInsights?
-    @State private var cloud: InsightWordCloud?
+    @State private var details: PeriodDetails?
+    @State private var detailsError: String?
     /// 0 is this week; −1 the week before.
     @State private var weekOffset = 0
-    @State private var cloudRange = CloudRange.today
+    @State private var period = InsightPeriod.today
     @State private var refreshID = UUID()
     @State private var error: String?
 
-    private enum CloudRange: Hashable { case today, week }
+    private struct PeriodDetails {
+        var period: InsightPeriod
+        var insights: HistoryInsights
+        var cloud: InsightWordCloud
+    }
+
+    private var selectedDetails: PeriodDetails? { details?.period == period ? details : nil }
+
+    private var periodTitle: String {
+        switch period {
+        case .today: "Today"
+        case .week: "This Week"
+        case .allTime: "All Time"
+        }
+    }
+
+    private var periodDescription: String {
+        switch period {
+        case .today: "today"
+        case .week: "this week"
+        case .allTime: "across all saved history"
+        }
+    }
 
     private struct Request: Equatable {
         var week: Int
         var revision: Int
         var refresh: UUID
+        var period: InsightPeriod = .allTime
     }
 
     var body: some View {
@@ -35,7 +59,7 @@ struct InsightsView: View {
         }
         .formStyle(PlateFormStyle())
         .task(id: Request(week: weekOffset, revision: history.revision, refresh: refreshID)) { await load() }
-        .task(id: Request(week: 0, revision: history.revision, refresh: refreshID)) { await loadCloud() }
+        .task(id: Request(week: 0, revision: history.revision, refresh: refreshID, period: period)) { await loadDetails() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in refresh() }
@@ -62,9 +86,10 @@ struct InsightsView: View {
             HStack {
                 Text("What you talked about")
                 Spacer()
-                Picker("Period", selection: $cloudRange) {
-                    Text("Today").tag(CloudRange.today)
-                    Text("This Week").tag(CloudRange.week)
+                Picker("Word cloud and apps period", selection: $period) {
+                    Text("Today").tag(InsightPeriod.today)
+                    Text("This Week").tag(InsightPeriod.week)
+                    Text("All Time").tag(InsightPeriod.allTime)
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.small)
                 .tint(GoblinBrand.moss)
@@ -72,15 +97,27 @@ struct InsightsView: View {
                 .padding(.trailing, 14)
             }
         }
-        Section("Where I typed") {
-            if data.applications.isEmpty { Text("Apps show up here once History has words.").foregroundStyle(.secondary) }
-            ForEach(data.applications) { app in appRow(app, total: data.totalWords) }
+        Section {
+            if let data = selectedDetails?.insights {
+                if data.applications.isEmpty { Text("No words typed \(periodDescription) yet.").foregroundStyle(.secondary) }
+                ForEach(data.applications) { app in appRow(app, total: data.totalWords) }
+            } else if detailsError != nil {
+                Text("App totals are unavailable.").foregroundStyle(.secondary)
+            } else {
+                Text("Counting apps…").foregroundStyle(.secondary)
+            }
+        } header: {
+            HStack {
+                Text("Where I typed")
+                Spacer()
+                Text(periodTitle).textCase(nil).tracking(0).padding(.trailing, 14)
+            }
         }
         Section {
             DisclosureGroup("How I count") {
                 Text("Based on \(data.entryCount.formatted()) saved History entries. Deleting entries and retention lower these totals. Words come from each entry's saved final text, so re-transcriptions and rewrites count again.")
                 Text("Talking time is this week's recorded audio, silence included. Speaking pace divides this week's words by that time; entries without usable audio are left out.")
-                Text("The word cloud shows the nouns you said most, read from this week's saved text, and counts \"chart\" and \"charts\" as one word.")
+                Text("The word cloud and app graphs use the selected period. App percentages use that period's total words. The cloud shows the nouns you said most and counts \"chart\" and \"charts\" as one word.")
                 Text("Days and hours use when each dictation started, in \(data.calendar.timeZone.identifier). Weeks begin on \(weekStart(data).formatted(.dateTime.weekday(.wide))). A streak needs words on consecutive days and can end today or yesterday.")
                 Text("Everything is counted on this Mac. Insights never send transcripts or statistics anywhere.")
             }
@@ -189,31 +226,33 @@ struct InsightsView: View {
     // MARK: Word cloud
 
     @ViewBuilder private var cloudRow: some View {
-        let today = cloudRange == .today
-        let words = (today ? cloud?.today : cloud?.week) ?? []
-        let entries = (today ? cloud?.todayEntries : cloud?.weekEntries) ?? 0
-        let period = today ? "today" : "this week"
-        if cloud != nil, words.isEmpty {
+        let cloud = selectedDetails?.cloud
+        let words = cloud?.words ?? []
+        let entries = cloud?.entryCount ?? 0
+        if let detailsError {
+            Label(detailsError, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            Button("Try Again") { refresh() }
+        } else if cloud != nil, words.isEmpty {
             HStack(spacing: 10) {
                 PixelSprite(sprite: .zz, scale: 2)
-                Text("Nothing yet \(period). I'm napping.").foregroundStyle(.secondary)
+                Text("Nothing yet \(periodDescription). I'm napping.").foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 120)
         } else if cloud != nil {
             VStack(spacing: 4) {
-                PixelWordCloud(words: words, seed: cloudSeed, period: period)
-                Text("From \(entries.formatted()) \(entries == 1 ? "dictation" : "dictations") \(period). Hover a word to see how often you said it.")
+                PixelWordCloud(words: words, seed: cloudSeed, period: periodDescription)
+                Text("From \(entries.formatted()) \(entries == 1 ? "dictation" : "dictations") \(periodDescription). Hover a word to see how often you said it.")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit()
                     .frame(maxWidth: .infinity)
             }
         } else {
-            Text("Reading this week's words…").foregroundStyle(.secondary)
+            Text("Reading words \(periodDescription)…").foregroundStyle(.secondary)
         }
     }
 
     /// One picture per day and period, so the cloud doesn't reshuffle on every visit.
     private var cloudSeed: UInt64 {
-        UInt64(Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0) &* 2 + (cloudRange == .week ? 1 : 0)
+        UInt64(Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0) &* 3 + UInt64(period.rawValue)
     }
 
     // MARK: Apps
@@ -262,9 +301,24 @@ struct InsightsView: View {
         }
     }
 
-    @MainActor private func loadCloud() async {
-        guard let store = history.store, let words = try? await store.spokenWords(), !Task.isCancelled else { return }
-        cloud = words
+    @MainActor private func loadDetails() async {
+        let requestedPeriod = period
+        details = nil
+        detailsError = nil
+        do {
+            guard let store = history.store else { throw HistoryError.database("History is unavailable, so there's nothing to count yet.") }
+            let now = Date(), calendar = Calendar.current
+            let data = try await store.insights(now: now, week: now, calendar: calendar,
+                                                since: requestedPeriod.start(now: now, calendar: calendar))
+            let cloud = try await store.spokenWords(now: now, calendar: calendar, period: requestedPeriod)
+            try Task.checkCancellation()
+            guard requestedPeriod == period else { return }
+            details = PeriodDetails(period: requestedPeriod, insights: data, cloud: cloud)
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, requestedPeriod == period else { return }
+            detailsError = error.localizedDescription
+        }
     }
 }
 

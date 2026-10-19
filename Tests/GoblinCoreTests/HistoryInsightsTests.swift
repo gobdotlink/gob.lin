@@ -162,12 +162,59 @@ struct HistoryInsightsTests {
             _ = try await store.insert(HistoryEntry(rawText: "", finalText: text, createdAt: date(timestamp)))
         }
         let cloud = try await store.spokenWords(now: now, calendar: calendar())
-        #expect(cloud.weekEntries == 4 && cloud.todayEntries == 1)
-        #expect(cloud.week.first == InsightWord(word: "chart", count: 3) && cloud.week.contains(InsightWord(word: "goblin", count: 1)))
-        #expect(cloud.today.first == InsightWord(word: "chart", count: 2))
-        #expect(!cloud.week.contains { ["the", "and", "be", "is", "look", "great", "make", "made", "two"].contains($0.word) })
-        #expect(cloud.week.allSatisfy { !$0.word.hasSuffix(".") })
+        let today = try await store.spokenWords(now: now, calendar: calendar(), period: .today)
+        let allTime = try await store.spokenWords(now: now, calendar: calendar(), period: .allTime)
+        #expect(cloud.entryCount == 4 && today.entryCount == 1 && allTime.entryCount == 5)
+        #expect(cloud.words.first == InsightWord(word: "chart", count: 3) && cloud.words.contains(InsightWord(word: "goblin", count: 1)))
+        #expect(today.words.first == InsightWord(word: "chart", count: 2))
+        #expect(allTime.words.first == InsightWord(word: "chart", count: 4))
+        #expect(!cloud.words.contains { ["the", "and", "be", "is", "look", "great", "make", "made", "two"].contains($0.word) })
+        #expect(cloud.words.allSatisfy { !$0.word.hasSuffix(".") })
         // A one-character Chinese noun counts; Japanese particles, which the tagger cannot classify, do not.
-        #expect(cloud.week.contains { $0.word == "书" } && !cloud.week.contains { ["と", "が", "は"].contains($0.word) })
+        #expect(cloud.words.contains { $0.word == "书" } && !cloud.words.contains { ["と", "が", "は"].contains($0.word) })
+    }
+
+    @Test func selectedPeriodsKeepAppSharesAndCloudWithinTheSameDates() async throws {
+        let directory = try directory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try HistoryStore(directory: directory)
+        let now = date("2026-11-04T12:00:00Z")
+        let cal = calendar("America/Los_Angeles")
+        for (timestamp, words, app) in [("2026-11-02T07:59:59Z", 4, "Old app"),
+                                       ("2026-11-02T08:00:00Z", 2, "Editor"),
+                                       ("2026-11-04T07:59:59Z", 1, "Editor"),
+                                       ("2026-11-04T08:00:00Z", 3, "Mail"),
+                                       ("2026-11-04T12:00:00Z", 1, ""),
+                                       ("2026-11-04T12:00:01Z", 9, "Future app")] {
+            _ = try await store.insert(HistoryEntry(rawText: "", finalText: Array(repeating: "chart", count: words).joined(separator: " "),
+                                                    targetApplicationName: app, createdAt: date(timestamp)))
+        }
+        for (period, total, entries, appWords) in [
+            (InsightPeriod.today, 4, 2, ["Mail": 3, "Unknown app": 1]),
+            (.week, 7, 4, ["Editor": 3, "Mail": 3, "Unknown app": 1]),
+            (.allTime, 11, 5, ["Old app": 4, "Editor": 3, "Mail": 3, "Unknown app": 1])
+        ] {
+            let data = try await store.insights(now: now, week: now, calendar: cal, since: period.start(now: now, calendar: cal))
+            let cloud = try await store.spokenWords(now: now, calendar: cal, period: period)
+            #expect(data.totalWords == total && data.entryCount == entries)
+            #expect(Dictionary(uniqueKeysWithValues: data.applications.map { ($0.name, $0.words) }) == appWords)
+            #expect(data.applications.reduce(0) { $0 + $1.words } == data.totalWords)
+            #expect(cloud.entryCount == entries && cloud.words == [InsightWord(word: "chart", count: total)])
+        }
+        let tomorrow = date("2026-11-05T12:00:00Z")
+        let empty = try await store.insights(now: tomorrow, week: tomorrow, calendar: cal,
+                                             since: InsightPeriod.today.start(now: tomorrow, calendar: cal))
+        let emptyCloud = try await store.spokenWords(now: tomorrow, calendar: cal, period: .today)
+        #expect(empty.totalWords == 0 && empty.applications.isEmpty)
+        #expect(emptyCloud.entryCount == 0 && emptyCloud.words.isEmpty)
+    }
+
+    @Test func periodBoundariesRespectLocalCalendarAndDaylightSaving() {
+        let now = date("2026-11-04T12:00:00Z")
+        let cal = calendar("America/Los_Angeles")
+        #expect(InsightPeriod.today.start(now: now, calendar: cal) == date("2026-11-04T08:00:00Z"))
+        #expect(InsightPeriod.week.start(now: now, calendar: cal) == date("2026-11-02T08:00:00Z"))
+        #expect(InsightPeriod.week.start(now: now, calendar: calendar("America/Los_Angeles", firstWeekday: 1)) == date("2026-11-01T07:00:00Z"))
+        #expect(InsightPeriod.allTime.start(now: now, calendar: cal) == nil)
     }
 }
