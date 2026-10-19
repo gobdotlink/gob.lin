@@ -136,27 +136,23 @@ public actor HistoryStore {
         return accumulator.finish()
     }
 
-    /// The nouns said most today and this calendar week. Reads saved final text from this week's rows only
-    /// and keeps nothing but a word count.
-    public func spokenWords(now: Date = Date(), calendar: Calendar = .current, limit: Int = 40) throws -> InsightWordCloud {
-        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)!.start.timeIntervalSince1970
-        let today = calendar.startOfDay(for: now).timeIntervalSince1970
+    /// Reads saved final text in the requested period, retaining only word counts.
+    public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40) throws -> InsightWordCloud {
+        let since = period.start(now: now, calendar: calendar)
+        let lowerBound = since == nil ? "" : " AND created_at >= ?"
+        var values: [SQLValue] = [.number(now.timeIntervalSince1970)]
+        if let since { values.append(.number(since.timeIntervalSince1970)) }
         let counter = SpokenWordCounter()
-        var week: [String: Int] = [:], day: [String: Int] = [:], cloud = InsightWordCloud()
-        try database.forEachRow("SELECT created_at, final_text FROM entries WHERE created_at >= ? AND created_at <= ?",
-                                [.number(weekStart), .number(now.timeIntervalSince1970)]) { row in
+        var counts: [String: Int] = [:], cloud = InsightWordCloud()
+        try database.forEachRow("SELECT final_text FROM entries WHERE created_at <= ?\(lowerBound)", values) { row in
             try Task.checkCancellation()
-            guard let timestamp = Double(row[0] ?? ""), let text = row[1], !text.isEmpty else { return }
-            let isToday = timestamp >= today
-            cloud.weekEntries += 1
-            if isToday { cloud.todayEntries += 1 }
+            guard let text = row[0], !text.isEmpty else { return }
+            cloud.entryCount += 1
             for word in counter.nouns(in: text) {
-                week[word, default: 0] += 1
-                if isToday { day[word, default: 0] += 1 }
+                counts[word, default: 0] += 1
             }
         }
-        cloud.week = SpokenWordCounter.top(week, limit: limit)
-        cloud.today = SpokenWordCounter.top(day, limit: limit)
+        cloud.words = SpokenWordCounter.top(counts, limit: limit)
         return cloud
     }
 

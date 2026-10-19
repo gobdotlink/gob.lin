@@ -202,8 +202,8 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **Insights:** plates on the case, numbers in monospaced digits, chart bars in moss.
   - This week: the week's words as the one big number, the talking time in the goblin's voice ("You talked for 59 minutes. I did all the typing."), and the look-down goblin at 128 pt with its quill, sitting on the plate's divider. Below it: Today, Speaking pace and Streak.
   - Activity: Words per day beside When you talk. Seven bars stand on faint full-height tracks with a dashed average, labelled on today and the peak. Today is the full-moss bar and the bold row. The hour grid is 7 × 24 square cells in four steps of moss. Hovering a bar or a square shows its count, and ‹ › step a week at a time.
-  - What you talked about: the pixel word cloud for Today or This Week. The side-eye goblin grips the top edge of the biggest word, and smaller goblins and sparks appear only where a gap fits them. The layout is seeded by the day, so it doesn't reshuffle on every visit. Hovering a word shows how often you said it.
-  - Where I typed: app icon, name, words and share over a thin moss track. Then "How I count".
+  - What you talked about: the pixel word cloud with a shared Today / This Week / All Time selector for the cloud and app graphs. The side-eye goblin grips the top edge of the biggest word, and smaller goblins and sparks appear only where a gap fits them. The layout is seeded by the day and period, so it doesn't reshuffle on every visit. Hovering a word shows how often you said it.
+  - Where I typed: the selected period beside the heading, then app icon, name, words and share over a thin moss track. Counts and shares use the selected period's words. Then "How I count".
 - **Empty:** the closed goblin at 128 pt with Zz, then "Nothing to snitch on yet." and "Hold fn and say something. I'll keep the receipts."
 - **Problems:** save errors and unsaved dictations are amber status plates with one action each.
 
