@@ -308,7 +308,14 @@ private struct Mask {
 
     init(cropping source: [Bool], width sourceWidth: Int, x: Int, y: Int, toWidth width: Int, height: Int) {
         self.width = width; self.height = height
-        bits = (0..<height).flatMap { row in source[((y + row) * sourceWidth + x)..<((y + row) * sourceWidth + x + width)] }
+        // A plain loop: the equivalent flatMap over slices exceeds the type checker's time limit in release builds.
+        var bits: [Bool] = []
+        bits.reserveCapacity(width * height)
+        for row in 0..<height {
+            let start: Int = (y + row) * sourceWidth + x
+            bits.append(contentsOf: source[start..<(start + width)])
+        }
+        self.bits = bits
     }
 
     /// Every pixel becomes a k × k block.
