@@ -88,6 +88,7 @@ Reuse these before writing new ones:
 | closed | `goblin-closed.png` | The inserted nod, idle blinks, asleep |
 | sheepish | `goblin-sheepish.png` | The goblin's own fault, like failed cleanup. The sweat drop is drawn in. |
 | cackle | `goblin-cackle.png` | The first take and milestones only |
+| eyes | `goblin-eyes-ahead.png`, `goblin-eyes-<n…nw>.png` | Popover header only: slit pupils looking ahead or toward the pointer |
 | grip hands | `hand-grip.png` | Gripping the top edge of a card or field. Mirror it for the right hand. |
 | open palm | `hand-palm.png` | "Not touching that": no microphone, password field |
 | quill fist | `hand-quill.png` | Transcribing |
@@ -96,6 +97,8 @@ Reuse these before writing new ones:
 The first two frames already ship in `Sources/GoblinApp/Assets/`. The rest are in `docs/design/sprites/`. Copy one into Assets when a surface needs it, and run `xcodegen generate` afterwards. The old 7 × 7 fists in `hands.png` are retired once the grip hands land.
 
 The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar they're neon. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
+
+The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a three-pixel slit pupil in each eye and the glow redrawn around it, one frame per compass point. Looking down starts from `goblin-look`, so the lid drops too. To move a slit, edit its table and rerun the script.
 
 ### Voice
 
@@ -150,7 +153,7 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 
 `GoblinApp.swift`. Use `MenuBarExtra` in window style: a 360 pt glass panel. Top to bottom:
 
-1. **Header:** the goblin at 64 pt (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button.
+1. **Header:** the goblin at 64 pt, whose eyes follow the pointer anywhere over the popover and look ahead when it leaves (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button.
 2. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
 3. **Update:** only when an update is available, with a Restart button.
 4. **Microphone:** a picker plus press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved.

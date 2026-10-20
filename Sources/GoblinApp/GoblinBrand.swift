@@ -129,6 +129,9 @@ extension NSColor {
 enum Sprite: String, CaseIterable {
     case shut = "goblin-shut", yap = "goblin-yap", look = "goblin-look", squint = "goblin-squint"
     case side = "goblin-side", closed = "goblin-closed", sheepish = "goblin-sheepish", cackle = "goblin-cackle"
+    case eyesAhead = "goblin-eyes-ahead", eyesN = "goblin-eyes-n", eyesNE = "goblin-eyes-ne", eyesE = "goblin-eyes-e"
+    case eyesSE = "goblin-eyes-se", eyesS = "goblin-eyes-s", eyesSW = "goblin-eyes-sw", eyesW = "goblin-eyes-w"
+    case eyesNW = "goblin-eyes-nw"
     case gripHand = "hand-grip", palm = "hand-palm", quill = "hand-quill"
     case zz = "prop-zz", drop = "prop-drop", candle = "prop-candle", spark = "prop-spark", coin = "prop-coin"
 
