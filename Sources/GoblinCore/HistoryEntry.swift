@@ -30,6 +30,9 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
     public var polished: Bool
     public var targetBundleIdentifier: String?
     public var targetApplicationName: String?
+    /// The app frontmost when dictation started, whose dictionary scope applied; "" when none (gob.lin itself).
+    /// It can differ from the target when text is delivered to the field focused at the end.
+    public var dictionaryBundleIdentifier: String?
     public var createdAt: Date
     public var completedAt: Date
     public var audioDuration: Double
@@ -49,7 +52,7 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
 
     public init(id: UUID = UUID(), rawText: String, finalText: String, tone: String = "formal",
                 polished: Bool = false, targetBundleIdentifier: String? = nil,
-                targetApplicationName: String? = nil, createdAt: Date = Date(),
+                targetApplicationName: String? = nil, dictionaryBundleIdentifier: String? = nil, createdAt: Date = Date(),
                 completedAt: Date = Date(), audioDuration: Double = 0, model: String = "",
                 latencies: DictationTimings = DictationTimings(), starred: Bool = false, processingWarning: String? = nil) {
         self.id = id
@@ -59,6 +62,7 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
         self.polished = polished
         self.targetBundleIdentifier = targetBundleIdentifier
         self.targetApplicationName = targetApplicationName
+        self.dictionaryBundleIdentifier = dictionaryBundleIdentifier
         self.createdAt = createdAt
         self.completedAt = completedAt
         self.audioDuration = audioDuration
@@ -69,6 +73,11 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
         self.processingWarning = processingWarning
         self.audioFilename = nil
     }
+}
+
+extension HistoryEntry {
+    /// The app whose dictionary terms reprocessing should use. Entries saved before scopes fall back to the target.
+    public var dictionaryScope: String? { dictionaryBundleIdentifier ?? targetBundleIdentifier }
 }
 
 public struct HistoryRetention: Codable, Sendable, Equatable {

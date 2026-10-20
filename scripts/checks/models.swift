@@ -729,6 +729,15 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         for dark in [false, true] { try await shoot("dictionary-unsupported-\(dark ? "dark" : "light")", dark: dark) }
         try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id)
         for dark in [false, true] { try await shoot("dictionary-supported-\(dark ? "dark" : "light")", dark: dark) }
+        try expect(model.put(DictionaryEntry(spelling: "PostHog", aliases: ["post hog"], apps: ["com.apple.Terminal", "com.apple.TextEdit"])),
+                   "Could not create app-scoped fixture")
+        for dark in [false, true] { try await shoot("dictionary-scoped-\(dark ? "dark" : "light")", dark: dark, height: 900) }
+        let scopeHost = NSHostingView(rootView: Form { DictionaryAppScopeEditor(apps: .constant(["com.apple.Terminal", "com.apple.TextEdit"])) }
+            .formStyle(.grouped).frame(width: 460, height: 260))
+        scopeHost.frame = NSRect(x: 0, y: 0, width: 460, height: 260)
+        scopeHost.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(500))
+        try snapshot(scopeHost, to: directory.appendingPathComponent("dictionary-entry-apps.png"))
         var settings = RewriteSettings()
         settings.enabled = true
         settings.cleanup = .light

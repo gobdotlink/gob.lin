@@ -12,6 +12,9 @@ final class DictationSession {
     let target: NSRunningApplication?
     let originalText: FocusedText?
     let destination: DictationDestination
+    /// Selects app-scoped dictionary terms for the whole dictation, including later History reprocessing.
+    /// "" matches no app, so dictating from gob.lin itself uses only terms for every app.
+    var dictionaryScope: String { target?.bundleIdentifier ?? "" }
     var overlayID: UUID?
     var audioOwnedByHistory = false
     var historyOnly = false

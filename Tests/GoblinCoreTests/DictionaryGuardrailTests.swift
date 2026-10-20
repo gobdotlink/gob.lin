@@ -51,3 +51,44 @@ import Testing
     #expect(throws: (any Error).self) { try repository.load() }
     #expect(try String(contentsOf: repository.url, encoding: .utf8) == "bad json")
 }
+
+@Test func appScopesSelectEntriesAndKeepOlderFilesCompatible() throws {
+    let everywhere = DictionaryEntry(spelling: "Postgres")
+    let coding = DictionaryEntry(spelling: "PostHog", apps: ["com.t3tools.t3code", "sh.paseo.app"])
+    let writing = DictionaryEntry(spelling: "Lisa", apps: ["com.microsoft.Word"])
+    let entries = [everywhere, coding, writing]
+    #expect(entries.active(in: "com.t3tools.t3code").map(\.spelling) == ["Postgres", "PostHog"])
+    #expect(entries.active(in: "com.microsoft.Word").map(\.spelling) == ["Postgres", "Lisa"])
+    #expect(entries.active(in: "com.apple.Notes").map(\.spelling) == ["Postgres"])
+    #expect(entries.active(in: nil).map(\.spelling) == ["Postgres"])
+
+    // Files written before app scopes have no `apps` key; unscoped entries are still written without one.
+    let legacy = #"{"version":1,"entries":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","spelling":"Kalikin","aliases":["calican"]}]}"#
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-scopes-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data(legacy.utf8).write(to: url)
+    let repository = DictionaryRepository(url: url)
+    let loaded = try repository.load()
+    #expect(loaded.count == 1 && loaded[0].apps.isEmpty && loaded[0].applies(to: "any.app"))
+    try repository.save(loaded)
+    #expect(!String(decoding: try Data(contentsOf: url), as: UTF8.self).contains("apps"))
+
+    try repository.save([DictionaryEntry(id: loaded[0].id, spelling: "Kalikin", apps: [" sh.paseo.app ", "com.t3tools.t3code", "sh.paseo.app"])])
+    #expect(try repository.load()[0].apps == ["com.t3tools.t3code", "sh.paseo.app"])
+    // Scoped files are version 2 so earlier versions refuse them instead of silently dropping the scopes.
+    #expect(String(decoding: try Data(contentsOf: url), as: UTF8.self).contains(#""version" : 2"#))
+    try repository.save([DictionaryEntry(id: loaded[0].id, spelling: "Kalikin")])
+    #expect(String(decoding: try Data(contentsOf: url), as: UTF8.self).contains(#""version" : 1"#))
+    #expect(throws: DictionaryError.self) { try DictionaryRepository.validated([DictionaryEntry(spelling: "Luna", apps: ["not a bundle id"])]) }
+
+    // History keeps the app dictation started in; entries saved before that field fall back to their target.
+    var history = HistoryEntry(rawText: "a", finalText: "a", targetBundleIdentifier: "com.microsoft.Word",
+                               dictionaryBundleIdentifier: "com.t3tools.t3code")
+    #expect(history.dictionaryScope == "com.t3tools.t3code")
+    history.dictionaryBundleIdentifier = ""
+    #expect(entries.active(in: history.dictionaryScope).map(\.spelling) == ["Postgres"])
+    history.dictionaryBundleIdentifier = nil
+    #expect(history.dictionaryScope == "com.microsoft.Word")
+    let decoded = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(history))
+    #expect(decoded.dictionaryBundleIdentifier == nil && decoded.dictionaryScope == "com.microsoft.Word")
+}

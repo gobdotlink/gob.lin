@@ -16,7 +16,19 @@ The pinned Whisper decoder accepts 111 prompt tokens. The shared planner uses th
 
 Each dictation snapshots its vocabulary with its model/language options before capture. Live windows, original-file recovery and history retranscription use those options without sharing mutable vocabulary between requests. Word alignment accounts for the prompt prefix, preserving timestamps for live merging. Empty dictionaries retain the unprompted decoding path.
 
-Exact aliases continue to work for every model and every entry. When Cleanup is enabled at a non-None level, its prompt receives all preferred spellings, including those excluded from native recognition. Adding dictionary terms never enables Cleanup.
+Exact aliases continue to work for every model and every active entry. When Cleanup is enabled at a non-None level, its prompt receives the active preferred spellings, including those excluded from native recognition. Adding dictionary terms never enables Cleanup.
+
+## App scopes
+
+An entry can be limited to apps by bundle identifier (`apps`; empty means every app). Each dictation uses the entries for the app that was frontmost when it started, plus every unscoped entry. The same set drives native recognition, exact aliases and Cleanup's preferred spellings. Dictating while gob.lin itself is frontmost uses unscoped entries only. History records that app with each entry, separately from the app the text was delivered to, and rewrite and retranscription reuse it; entries saved before this fall back to their target app. A spelling or alias still belongs to one entry, which can list several apps.
+
+Files without `apps` load as unscoped. A dictionary with no scoped entries is still saved as version 1 without the key, so earlier versions read it unchanged. Once any entry is scoped the file is saved as version 2: earlier versions report the dictionary as unavailable and leave the file intact rather than drop the scopes.
+
+Settings choose apps from the open apps or any application bundle, show “Only in …” under scoped terms, and filter the list by app. The native capacity preview covers unscoped terms; app terms join them in their apps and share the limit. CLI `transcribe` and `replay` accept `--app <bundle-id>` to select the same set.
+
+Why scope: in the [dictionary evaluation](evaluation/dictionary-biasing.md), Cleanup given the 16 relevant terms recovered 86/96 names on unseen clips against 74/96 with all 120 terms, and Parakeet's guarded correction lost names with the longer list too. Neither list changed ordinary sentences, so a wrong or missing scope costs recall rather than introducing errors.
+
+![Scoped terms in Dictionary settings](evidence/gob-14/dictionary-scoped-light.png)
 
 CLI `transcribe` and audio `replay` use the default dictionary, or the JSON file selected with `--dictionary`. Supported models receive the same native prompt; `transcribe` reports included/excluded terms and token usage in `dictionaryUsage`. Recorded-transcript replay does not run recognition. Benchmarks retain their explicit diagnostic controls. `dictionary-eval` compares dictionary biasing across Parakeet CTC correction, Whisper prompting and a CLI-only Moonshine key-term diagnostic; see [Dictionary biasing evaluation](evaluation/dictionary-biasing.md).
 

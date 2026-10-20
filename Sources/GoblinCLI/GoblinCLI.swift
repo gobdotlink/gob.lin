@@ -67,7 +67,10 @@ struct GoblinCLI {
                     }
                     dictionary = DictionaryRepository(url: URL(fileURLWithPath: arguments[index + 1]))
                 }
-                options = RecognitionOptions(language: options.language, vocabulary: try dictionary.load().map(\.spelling))
+                guard arguments.filter({ $0 == "--app" }).count <= 1 else { throw CommandError.usage("--app accepts one bundle identifier") }
+                let application = arguments.firstIndex(of: "--app").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+                options = RecognitionOptions(language: options.language,
+                                             vocabulary: try dictionary.load().active(in: application).map(\.spelling))
             }
             if arguments.first == "prepare-model" {
                 guard arguments.count == 1 || arguments == ["prepare-model", "--vocabulary-support"] else {
@@ -117,7 +120,7 @@ private struct GoblinCommands {
         case ["--self-check"]: print("GoblinCore, GoblinEngines, and system SQLite loaded successfully.")
         case [], ["--help"], ["-h"]: print(Self.help)
         case let values where values.first == "transcribe":
-            guard values.count >= 2, !values[1].hasPrefix("--") else { throw CommandError.usage("Usage: goblin transcribe <audio-file> [--process] [--rewrite] [--tone <tone>] [--dictionary <path>]") }
+            guard values.count >= 2, !values[1].hasPrefix("--") else { throw CommandError.usage("Usage: goblin transcribe <audio-file> [--process] [--rewrite] [--tone <tone>] [--dictionary <path>] [--app <bundle-id>]") }
             var options = CLIProcessingOptions(enabled: true)
             var index = 2
             while index < values.count {
@@ -304,7 +307,7 @@ private struct GoblinCommands {
     Parakeet's language preference guides the writing script, not a same-script language lock.
     Transcribe/replay/benchmark load local models only.
     Run prepare-model once before recognition. Recognition and benchmarks run locally.
-    Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>.
+    Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>, --app <bundle-id>.
     Transcribe/replay also send preferred spellings to models with customVocabulary support.
     Whole terms fit alphabetically within the native token budget; transcribe reports dictionaryUsage.
     --rewrite additionally opts into your enabled provider and reads its saved key.

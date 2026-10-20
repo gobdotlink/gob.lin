@@ -4,20 +4,54 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var spelling: String
     public var aliases: [String]
+    /// Bundle identifiers of the apps this entry is used in. Empty means every app.
+    public var apps: [String]
 
-    public init(id: UUID = UUID(), spelling: String, aliases: [String] = []) {
+    public init(id: UUID = UUID(), spelling: String, aliases: [String] = [], apps: [String] = []) {
         self.id = id
         self.spelling = spelling
         self.aliases = aliases
+        self.apps = apps
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, spelling, aliases, apps }
+
+    // Entries saved before app scopes have no `apps` key and apply everywhere.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        spelling = try container.decode(String.self, forKey: .spelling)
+        aliases = try container.decode([String].self, forKey: .aliases)
+        apps = try container.decodeIfPresent([String].self, forKey: .apps) ?? []
+    }
+
+    // Unscoped entries keep the original file shape.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(spelling, forKey: .spelling)
+        try container.encode(aliases, forKey: .aliases)
+        if !apps.isEmpty { try container.encode(apps, forKey: .apps) }
+    }
+
+    /// Whether dictation into `application` (a bundle identifier, nil when unknown) uses this entry.
+    public func applies(to application: String?) -> Bool {
+        apps.isEmpty || application.map(apps.contains) == true
     }
 }
 
+extension Array where Element == DictionaryEntry {
+    /// Entries for every app, plus those scoped to `application`.
+    public func active(in application: String?) -> [DictionaryEntry] { filter { $0.applies(to: application) } }
+}
+
 public enum DictionaryError: LocalizedError {
-    case invalidTerm, duplicate(String), unsupportedVersion
+    case invalidTerm, invalidApp, duplicate(String), unsupportedVersion
 
     public var errorDescription: String? {
         switch self {
         case .invalidTerm: "Spellings and aliases must contain words on a single line."
+        case .invalidApp: "An app scope must be an application bundle identifier."
         case .duplicate(let term): "“\(term)” already belongs to a dictionary entry."
         case .unsupportedVersion: "This dictionary was written by a newer version of gob.lin."
         }
@@ -42,7 +76,7 @@ public struct DictionaryRepository: Sendable {
     public func load() throws -> [DictionaryEntry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         let document = try JSONDecoder().decode(Document.self, from: Data(contentsOf: url))
-        guard document.version == 1 else { throw DictionaryError.unsupportedVersion }
+        guard [1, 2].contains(document.version) else { throw DictionaryError.unsupportedVersion }
         return try Self.validated(document.entries)
     }
 
@@ -50,7 +84,9 @@ public struct DictionaryRepository: Sendable {
         let entries = try Self.validated(entries)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(Document(entries: entries))
+        // Version 2 marks app scopes: earlier versions refuse it and leave the file intact rather than drop the scopes.
+        let version = entries.contains { !$0.apps.isEmpty } ? 2 : 1
+        let data = try encoder.encode(Document(version: version, entries: entries))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
     }
@@ -70,7 +106,9 @@ public struct DictionaryRepository: Sendable {
                 if let owner = owners[key], owner != entry.id { throw DictionaryError.duplicate(value) }
                 owners[key] = entry.id
             }
-            return DictionaryEntry(id: entry.id, spelling: spelling, aliases: Array(Set(aliases)).sorted())
+            let apps = entry.apps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            guard apps.allSatisfy({ !$0.contains(where: \.isWhitespace) }) else { throw DictionaryError.invalidApp }
+            return DictionaryEntry(id: entry.id, spelling: spelling, aliases: Array(Set(aliases)).sorted(), apps: Array(Set(apps)).sorted())
         }
     }
 

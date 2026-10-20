@@ -220,7 +220,7 @@ final class AppModel: ObservableObject {
         if settings.enabled && settings.cleanup != .none {
             history.rewriteAction = { [weak self] entry, _ in
                 guard let self, !self.shuttingDown else { throw CancellationError() }
-                let result = await self.processTranscript(entry.rawText)
+                let result = await self.processTranscript(entry.rawText, application: entry.dictionaryScope)
                 return HistoryReprocessResult(rawText: result.rawText, finalText: result.finalText,
                     tone: result.tone.rawValue, polished: result.polished, model: entry.model,
                     latencies: result.timings, warning: result.warning?.message)
@@ -228,12 +228,13 @@ final class AppModel: ObservableObject {
         } else { history.rewriteAction = nil }
         history.retranscribeAction = servicesEnabled ? { [weak self] entry, audioURL in
             guard let self, !self.shuttingDown, let audioURL else { throw RecordedAudioError.invalidFile }
-            let lease = try self.speechModels.beginSession(vocabulary: self.dictionary.entries.map(\.spelling))
+            let lease = try self.speechModels.beginSession(
+                vocabulary: self.dictionary.entries.active(in: entry.dictionaryScope).map(\.spelling))
             defer { self.speechModels.endSession(lease) }
             let engine = try await self.speechModels.readyEngine(for: lease)
             let run = try await RecordedAudioPipeline(engine: engine, options: lease.options).transcribe(audioURL)
             try Task.checkCancellation()
-            let result = await self.processTranscript(run.rawText)
+            let result = await self.processTranscript(run.rawText, application: entry.dictionaryScope)
             try Task.checkCancellation()
             var timings = run.timings
             timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
@@ -268,7 +269,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func processTranscript(_ raw: String) async -> TranscriptProcessingResult {
+    /// `application` is the bundle identifier dictated into; it selects that app's dictionary terms.
+    func processTranscript(_ raw: String, application: String?) async -> TranscriptProcessingResult {
         let operation = UUID()
         diagnostics.developmentLog.record(.processingStarted, area: .application, operation: operation)
         var completed = DevelopmentDetails()
@@ -297,7 +299,8 @@ final class AppModel: ObservableObject {
         }
         let rewriting = settings.enabled && settings.cleanup != .none && !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if rewriting { diagnostics.developmentLog.record(.rewriteStarted, area: .rewrite, operation: operation) }
-        let result = await processor.process(raw, dictionaryEntries: dictionary.entries, tone: tone, rewriteSettings: settings, apiKey: key)
+        let result = await processor.process(raw, dictionaryEntries: dictionary.entries.active(in: application), tone: tone,
+                                             rewriteSettings: settings, apiKey: key)
         completed.failure = result.warning
         completed.timings = result.timings
         completed.succeeded = result.warning == nil
@@ -345,7 +348,7 @@ final class AppModel: ObservableObject {
         finishEditObservation()
         let session = DictationSession(destination: insertion.destination)
         let lease: SpeechModelLease
-        do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.map(\.spelling)) }
+        do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.active(in: session.dictionaryScope).map(\.spelling)) }
         catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
         let readiness = Task<any PCMSpeechEngine, Error> { [speechModels] in
             try await speechModels.readyEngine(for: lease)
@@ -590,7 +593,8 @@ final class AppModel: ObservableObject {
         let session = active.session
         let duration = (try? AVAudioFile(forReading: url)).map { Double($0.length) / $0.processingFormat.sampleRate } ?? 0
         let entry = HistoryEntry(id: session.id, rawText: "", finalText: "", targetBundleIdentifier: session.target?.bundleIdentifier,
-            targetApplicationName: session.target?.localizedName, createdAt: session.createdAt,
+            targetApplicationName: session.target?.localizedName, dictionaryBundleIdentifier: session.dictionaryScope,
+            createdAt: session.createdAt,
             audioDuration: active.audio?.duration ?? duration, model: active.lease.modelID,
             latencies: DictationTimings(captureMilliseconds: active.captureMilliseconds,
                                        asrMilliseconds: await active.live.computeMilliseconds),
@@ -676,7 +680,7 @@ final class AppModel: ObservableObject {
             overlay.model.cleanupLabel = "\(cleanup.cleanup.title) · \(cleanup.provider.title)"
             overlay.update(.polishing, committed: raw, tentative: "", session: overlayID)
         }
-        let result = await processTranscript(raw)
+        let result = await processTranscript(raw, application: session.dictionaryScope)
         try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
     }
 
@@ -769,8 +773,8 @@ final class AppModel: ObservableObject {
         let entry = HistoryEntry(id: session.id, rawText: result.rawText, finalText: result.finalText,
             tone: result.tone.rawValue, polished: result.polished,
             targetBundleIdentifier: deliveryApplication?.bundleIdentifier,
-            targetApplicationName: deliveryApplication?.localizedName, createdAt: session.createdAt,
-            completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
+            targetApplicationName: deliveryApplication?.localizedName, dictionaryBundleIdentifier: session.dictionaryScope,
+            createdAt: session.createdAt, completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
             processingWarning: warning)
         let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
         if saved, pendingEditObservationID == session.id, insertion.watchEdits, !shuttingDown,
