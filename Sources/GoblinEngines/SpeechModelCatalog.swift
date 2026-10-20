@@ -8,7 +8,7 @@ public struct SpeechModelCapabilities: Sendable, Equatable {
     public let fileTranscription = true
     public let pcmTranscription = true
     public let nativeStreaming = false
-    public let customVocabulary = false
+    public let customVocabulary: Bool
     public let livePreview: Bool
     public let automaticLanguage: Bool
     public let languageControl: SpeechLanguageControl
@@ -130,7 +130,7 @@ public enum SpeechModelCatalog {
                               folder: String? = nil, automatic: Bool = true, preview: Bool = true,
                               control: SpeechLanguageControl = .explicit) -> SpeechModelDescriptor {
         SpeechModelDescriptor(id: id, name: name, purpose: purpose, detail: detail, recommended: recommended, kind: kind, cacheFolder: folder ?? id,
-            capabilities: SpeechModelCapabilities(livePreview: preview, automaticLanguage: automatic, languageControl: control,
+            capabilities: SpeechModelCapabilities(customVocabulary: kind == .whisper, livePreview: preview, automaticLanguage: automatic, languageControl: control,
                                                  languageCodes: SpeechModelAssets.manifest(for: id).languages),
             released: Calendar(identifier: .gregorian).date(from: DateComponents(year: released.year, month: released.month, day: 15))!)
     }

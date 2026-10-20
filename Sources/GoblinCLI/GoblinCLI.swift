@@ -43,6 +43,7 @@ struct GoblinCLI {
                     ["id": model.id, "name": model.name, "purpose": model.purpose, "detail": model.detail,
                      "runtime": model.runtime, "downloadBytes": model.downloadBytes, "languages": model.capabilities.languageCodes,
                      "automaticLanguage": model.capabilities.automaticLanguage, "livePreview": model.capabilities.livePreview,
+                     "customVocabulary": model.capabilities.customVocabulary,
                      "recommended": model.recommended,
                      "default": model.id == SpeechModelCatalog.defaultModel.id] as [String: Any]
                 }
@@ -50,7 +51,19 @@ struct GoblinCLI {
                 return
             }
             let runtime = SpeechRuntimeFactory.make(model, directory: modelDirectory)
-            let options = model.capabilities.options(for: language)
+            var options = model.capabilities.options(for: language)
+            if model.capabilities.customVocabulary, ["transcribe", "replay"].contains(arguments.first ?? ""),
+               !arguments.contains("--recorded") {
+                var dictionary = DictionaryRepository.applicationDefault
+                if let index = arguments.firstIndex(of: "--dictionary") {
+                    guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--"),
+                          arguments.filter({ $0 == "--dictionary" }).count == 1 else {
+                        throw CommandError.usage("--dictionary requires one path")
+                    }
+                    dictionary = DictionaryRepository(url: URL(fileURLWithPath: arguments[index + 1]))
+                }
+                options = RecognitionOptions(language: options.language, vocabulary: try dictionary.load().map(\.spelling))
+            }
             if arguments.first == "prepare-model" {
                 guard arguments.count == 1 || arguments == ["prepare-model", "--vocabulary-support"] else {
                     throw CommandError.usage("Usage: goblin prepare-model [--vocabulary-support] [--model-dir <path>]")
@@ -277,6 +290,8 @@ private struct GoblinCommands {
     Transcribe/replay/benchmark load local models only.
     Run prepare-model once before recognition. Recognition and benchmarks run locally.
     Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>.
+    Transcribe/replay also send preferred spellings to models with customVocabulary support.
+    Whole terms fit alphabetically within the native token budget; transcribe reports dictionaryUsage.
     --rewrite additionally opts into your enabled provider and reads its saved key.
     Ground truth, jargon, and ordinary-word annotations are needed for accuracy metrics.
     """

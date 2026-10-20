@@ -1,10 +1,27 @@
 import Foundation
 import GoblinCore
 
+public struct SpeechDictionaryUsage: Codable, Equatable, Sendable {
+    public let included: [String]
+    public let excluded: [String]
+    public let tokenCount: Int
+    public let tokenLimit: Int
+}
+
 public struct RecognitionOptions: Sendable, Hashable, Codable {
     /// Nil requests automatic language detection where the model supports it.
     public let language: String?
-    public init(language: String? = nil) { self.language = language }
+    public let vocabulary: [String]
+    public init(language: String? = nil, vocabulary: [String] = []) {
+        self.language = language; self.vocabulary = vocabulary
+    }
+
+    private enum CodingKeys: CodingKey { case language, vocabulary }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        language = try values.decodeIfPresent(String.self, forKey: .language)
+        vocabulary = try values.decodeIfPresent([String].self, forKey: .vocabulary) ?? []
+    }
 }
 
 public struct TranscriptionRequest: Sendable {
@@ -21,11 +38,14 @@ public struct TranscriptionResult: Sendable, Equatable {
     public let text: String
     public let tokens: [TranscriptionToken]
     public let speechPresence: SpeechPresence?
+    public let dictionaryUsage: SpeechDictionaryUsage?
 
-    public init(text: String, tokens: [TranscriptionToken] = [], speechPresence: SpeechPresence? = nil) {
+    public init(text: String, tokens: [TranscriptionToken] = [], speechPresence: SpeechPresence? = nil,
+                dictionaryUsage: SpeechDictionaryUsage? = nil) {
         self.text = text
         self.tokens = tokens
         self.speechPresence = speechPresence
+        self.dictionaryUsage = dictionaryUsage
     }
 }
 

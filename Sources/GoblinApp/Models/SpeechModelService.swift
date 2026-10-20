@@ -113,10 +113,12 @@ final class SpeechModelService: ObservableObject {
     func preload() { startMaintenance(); startPreparation() }
 
     /// Acquire before capture starts and retain until every recognition/fallback worker exits.
-    func beginSession() throws -> SpeechModelLease {
+    func beginSession(vocabulary: [String] = []) throws -> SpeechModelLease {
         guard !stopping else { throw SpeechModelServiceError.stopped }
         guard !repairing, !switchingRuntime, switchTask == nil || loaded else { throw SpeechModelServiceError.modelInUse }
-        let lease = SpeechModelLease(model: selectedModel, options: recognitionOptions)
+        let options = RecognitionOptions(language: recognitionOptions.language,
+            vocabulary: selectedModel.capabilities.customVocabulary ? vocabulary : [])
+        let lease = SpeechModelLease(model: selectedModel, options: options)
         leases.insert(lease)
         activeSessionCount = leases.count
         lastActivity = .now

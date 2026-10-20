@@ -31,6 +31,7 @@ assert sum(model["recommended"] for model in catalog) == 4
 assert sum(model["default"] for model in catalog) == 1
 assert all(model["downloadBytes"] > 0 and model["languages"] for model in catalog)
 assert all(model["id"] != "cohere-transcribe" for model in catalog)
+assert all(model["customVocabulary"] == model["id"].startswith("whisper-") for model in catalog)
 assert "Unknown speech model" in run("models", "--model", "unknown", status=2).stderr
 for model in catalog:
     if model["id"] != "parakeet-tdt-v3":

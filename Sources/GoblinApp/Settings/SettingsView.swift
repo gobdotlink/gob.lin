@@ -96,7 +96,7 @@ struct SettingsView: View {
         case .model:
             if let speechModels { ModelSettingsView(service: speechModels) }
             else { Section { Text("The speech model service is not connected.").foregroundStyle(.secondary) } }
-        case .dictionary: DictionarySettingsView(model: model.dictionary)
+        case .dictionary: DictionarySettingsView(model: model.dictionary, service: speechModels ?? model.speechModels, defaults: model.defaults)
         case .cleanup: RewriteSettingsView(defaults: model.defaults, inspectCredentials: model.servicesEnabled,
                                            onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                            onFailure: { model.showFailure($0) })

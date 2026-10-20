@@ -1,4 +1,5 @@
 import GoblinCore
+import GoblinEngines
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -44,18 +45,88 @@ final class DictionaryModel: ObservableObject {
 
 struct DictionarySettingsView: View {
     @ObservedObject var model: DictionaryModel
+    @ObservedObject var service: SpeechModelService
+    @AppStorage private var rewriteData: Data
     @State private var editing: DictionaryEntry?
     @State private var importing = false
+    @State private var preview: (request: PreviewRequest, usage: SpeechDictionaryUsage)?
+    @State private var previewError: (request: PreviewRequest, message: String)?
 
-    init(model: DictionaryModel = DictionaryModel()) { self.model = model }
+    init(model: DictionaryModel, service: SpeechModelService, defaults: UserDefaults = .standard) {
+        self.model = model; self.service = service
+        _rewriteData = AppStorage(wrappedValue: Data(), RewriteSettingsStore.preferenceKey, store: defaults)
+    }
+
+    private struct PreviewRequest: Hashable {
+        let modelID: String
+        let directory: URL
+        let terms: [String]
+        let installed: Bool
+    }
+
+    private var request: PreviewRequest {
+        PreviewRequest(modelID: service.selectedModel.id, directory: service.directory, terms: model.entries.map(\.spelling),
+                       installed: PinnedSpeechModelStore.isDownloaded(model: service.selectedModel, directory: service.directory))
+    }
+    private var cleanupEnabled: Bool {
+        guard let settings = try? JSONDecoder().decode(RewriteSettings.self, from: rewriteData) else { return false }
+        return settings.enabled && settings.cleanup != .none
+    }
 
     var body: some View {
+        let current = request
+        let usage = preview?.request == current ? preview?.usage : nil
+        Section {
+            LabeledContent {
+                Text(service.selectedModel.name)
+            } label: {
+                Text("Speech Model")
+                if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms in alphabetical order") }
+            }
+            if !model.available {
+                StatusRow(.problem, Text("I couldn't load your dictionary."))
+            } else if !service.selectedModel.capabilities.customVocabulary {
+                StatusRow(.off, Text("\(service.selectedModel.name) doesn't support a native dictionary. I don't send terms during recognition."))
+            } else if model.entries.isEmpty {
+                StatusRow(.ready, Text("\(service.selectedModel.name) supports a native dictionary. I'll send the terms you add automatically."))
+            } else if let usage {
+                StatusRow(usage.excluded.isEmpty ? .ready : .waiting,
+                          Text("I send \(usage.included.count) of \(model.entries.count) terms to \(service.selectedModel.name).").monospacedDigit()) {
+                    Text("\(usage.tokenCount)/\(usage.tokenLimit) tokens").monospacedDigit()
+                }
+            } else if !current.installed {
+                StatusRow(.waiting, Text("Prepare \(service.selectedModel.name) in Model settings so I can check which terms fit."))
+            } else if let error = previewError, error.request == current {
+                StatusRow(.problem, Text("I couldn't check the dictionary limit: \(error.message)"))
+            } else {
+                StatusRow(.waiting, Text("I'm checking which terms fit…"))
+            }
+        } header: { Text("Native Recognition") }
+        .task(id: current) {
+            guard model.available, service.selectedModel.capabilities.customVocabulary, current.installed, !current.terms.isEmpty else { return }
+            do {
+                let result = try await WhisperSpeechEngine.dictionaryUsage(terms: current.terms, model: service.selectedModel, directory: current.directory)
+                try Task.checkCancellation()
+                preview = (current, result)
+            } catch {
+                guard !Task.isCancelled else { return }
+                previewError = (current, error.localizedDescription)
+            }
+        }
+        Section {
+            StatusRow(cleanupEnabled ? .ready : .off,
+                      Text(cleanupEnabled ? "I include all your preferred spellings in the Cleanup prompt, including terms beyond the native limit."
+                                         : "Cleanup is off. I don't send your dictionary to a rewrite model."))
+        } header: { Text("Cleanup") }
         Section {
             if model.entries.isEmpty {
                 ContentUnavailableView("Add your vocabulary", systemImage: "character.book.closed",
                     description: Text("Add a preferred spelling and optional “sounds like” aliases. Import a text file with one term per line."))
             } else {
                 ForEach(model.entries.sorted { $0.spelling.localizedStandardCompare($1.spelling) == .orderedAscending }) { entry in
+                    if usage?.excluded.first == entry.spelling {
+                        StatusRow(.waiting, Text("The terms below don't fit. I don't send them to recognition."))
+                    }
                     LabeledContent {
                         HStack {
                             Button("Edit") { editing = entry }
@@ -65,9 +136,12 @@ struct DictionarySettingsView: View {
                     } label: {
                         Text(entry.spelling).font(.body.monospaced())
                         if !entry.aliases.isEmpty { Text("sounds like: " + entry.aliases.joined(separator: ", ")) }
+                        if usage?.excluded.contains(entry.spelling) == true { Text("Not sent to recognition").foregroundStyle(.secondary) }
                     }
                 }
             }
+            StatusRow(model.entries.isEmpty ? .off : .ready,
+                      Text("I apply exact “sounds like” aliases after recognition with every model, including terms beyond the native limit."))
         } header: {
             HStack {
                 Text("Terms")
@@ -79,8 +153,6 @@ struct DictionarySettingsView: View {
                 }
                 .textCase(nil).font(.callout).controlSize(.small)
             }
-        } footer: {
-            Text("Only words you add are used. Aliases match exact whole words; nothing is guessed.")
         }
         .sheet(item: $editing) { entry in DictionaryEntryEditor(entry: entry, model: model) }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText]) { result in

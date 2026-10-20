@@ -228,7 +228,7 @@ final class AppModel: ObservableObject {
         } else { history.rewriteAction = nil }
         history.retranscribeAction = servicesEnabled ? { [weak self] entry, audioURL in
             guard let self, !self.shuttingDown, let audioURL else { throw RecordedAudioError.invalidFile }
-            let lease = try self.speechModels.beginSession()
+            let lease = try self.speechModels.beginSession(vocabulary: self.dictionary.entries.map(\.spelling))
             defer { self.speechModels.endSession(lease) }
             let engine = try await self.speechModels.readyEngine(for: lease)
             let run = try await RecordedAudioPipeline(engine: engine, options: lease.options).transcribe(audioURL)
@@ -345,7 +345,7 @@ final class AppModel: ObservableObject {
         finishEditObservation()
         let session = DictationSession(destination: insertion.destination)
         let lease: SpeechModelLease
-        do { lease = try speechModels.beginSession() }
+        do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.map(\.spelling)) }
         catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
         let readiness = Task<any PCMSpeechEngine, Error> { [speechModels] in
             try await speechModels.readyEngine(for: lease)

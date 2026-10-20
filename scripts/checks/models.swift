@@ -4,6 +4,7 @@ import CoreML
 import CryptoKit
 import FluidAudio
 import Foundation
+import GoblinCore
 @testable import GoblinEngines
 @testable import GoblinApp
 import SwiftUI
@@ -45,12 +46,14 @@ private actor CheckEngine: PCMSpeechEngine {
 }
 
 private actor CheckStore: SpeechModelAcquiring {
-    nonisolated let directory = URL(fileURLWithPath: "/tmp/model-check-cache")
+    nonisolated let directory: URL
     let delay: Duration
     var attempts = 0
     var failNext = false
     var callback: (@Sendable (SpeechModelPreparationProgress) -> Void)?
-    init(delay: Duration = .milliseconds(40)) { self.delay = delay }
+    init(delay: Duration = .milliseconds(40), directory: URL = URL(fileURLWithPath: "/tmp/model-check-cache")) {
+        self.delay = delay; self.directory = directory
+    }
     func ensureAvailable(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void) async throws -> SpeechModelCacheUse {
         attempts += 1
         callback = progress
@@ -101,6 +104,14 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         if let index = CommandLine.arguments.firstIndex(of: "--whisper-real"), CommandLine.arguments.count > index + 1 {
             try await realWhisper(hebrewSpeech: URL(fileURLWithPath: CommandLine.arguments[index + 1])); return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--dictionary-real"), CommandLine.arguments.count > index + 2 {
+            try await realDictionary(directory: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
+                                     audio: URL(fileURLWithPath: CommandLine.arguments[index + 2])); return
+        }
+        if let index = CommandLine.arguments.firstIndex(of: "--capture-dictionary"), CommandLine.arguments.count > index + 2 {
+            try await captureDictionary(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
+                                        modelDirectory: URL(fileURLWithPath: CommandLine.arguments[index + 2])); return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--capture"), CommandLine.arguments.count > index + 1 {
             try await capture(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])); return
         }
@@ -113,6 +124,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try downloadProgress()
         try await tokenizerBoundary()
         try whisperSuppression()
+        try dictionaryCapacity()
         try await expandedCatalog()
         print("PASS catalog, language, switching, leases, idle, cancellation, retry, acquisition and integrity checks")
     }
@@ -227,19 +239,22 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         }
         let service = SpeechModelService(defaults: defaults, makeRuntime: factory)
         try expect(service.selectedModel == SpeechModelCatalog.defaultModel, "Default model was not selected")
-        let initial = try service.beginSession()
+        let initial = try service.beginSession(vocabulary: ["Parakeet"])
+        try expect(initial.options.vocabulary.isEmpty, "Unsupported model received native dictionary terms")
         _ = try await service.readyEngine(for: initial)
         service.endSession(initial)
         try await service.selectModel(id: SpeechModelCatalog.whisperTiny.id)
         try expect(service.selectedModel.id == SpeechModelCatalog.whisperTiny.id && service.state == .ready, "Selection did not activate a different runtime")
         try expect(defaults.string(forKey: "speechModelID") == service.selectedModel.id, "Successful switch was not persisted")
         try service.selectLanguage("ja-JP")
-        let first = try service.beginSession()
+        let first = try service.beginSession(vocabulary: ["Postgres"])
         let runtime = try await service.readyEngine(for: first)
         try expect(runtime.identifier == SpeechModelCatalog.whisperTiny.id, "Selector only changed metadata")
         try service.selectLanguage("fr")
-        let second = try service.beginSession()
+        let second = try service.beginSession(vocabulary: ["CodeRabbit"])
         try expect(first.options.language == "ja" && second.options.language == "fr", "Language change mutated an existing recording")
+        try expect(first.options.vocabulary == ["Postgres"] && second.options.vocabulary == ["CodeRabbit"],
+                   "Dictionary change mutated an existing recording")
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("model-options-\(UUID()).wav")
         try Data([0]).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
@@ -528,19 +543,95 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         print("PASS Whisper published suppression, English/multilingual first-token mapping and invalid-token rejection")
     }
 
+    private static func dictionaryCapacity() throws {
+        // Character tokens make the exact boundary, separator cost and whole-entry behavior explicit.
+        let encode: (String) -> [Int] = { $0.utf8.map(Int.init) }
+        let empty = try WhisperDictionary.prompt(terms: [], encode: encode)
+        try expect(empty.tokens.isEmpty && empty.usage.excluded.isEmpty, "Empty dictionary generated a prompt")
+        let first = "A" + String(repeating: "x", count: WhisperDictionary.tokenLimit - 2)
+        let boundary = try WhisperDictionary.prompt(terms: ["Z", first], encode: encode)
+        try expect(boundary.tokens.count == WhisperDictionary.tokenLimit && boundary.usage.included == [first]
+                   && boundary.usage.excluded == ["Z"], "Exact-fit entry or separator boundary was truncated")
+        let oversized = "A" + String(repeating: "x", count: WhisperDictionary.tokenLimit)
+        let rejected = try WhisperDictionary.prompt(terms: ["Z", oversized], encode: encode)
+        try expect(rejected.tokens.isEmpty && rejected.usage.excluded == [oversized, "Z"],
+                   "Oversized first entry was split or later terms silently jumped the cutoff")
+        let ordered = try WhisperDictionary.prompt(terms: ["Zoo", "Beta", "alpha"], encode: encode)
+        try expect(ordered.usage.included == ["alpha", "Beta", "Zoo"] && ordered.tokens == encode(" alpha, Beta, Zoo"),
+                   "Dictionary prompt order differs from the visible alphabetical list")
+        let legacy = try JSONDecoder().decode(RecognitionOptions.self, from: Data("{\"language\":\"en\"}".utf8))
+        try expect(legacy == .init(language: "en"), "Old recognition options no longer decode")
+        for model in SpeechModelCatalog.supported {
+            try expect(model.capabilities.customVocabulary == (model.kind == .whisper), "Native dictionary capability routed to another backend")
+        }
+        for type in [MLMultiArrayDataType.float16, .float32, .double] {
+            let original = try MLMultiArray(shape: [8, 4], dataType: type)
+            for index in 0..<32 { original[index] = NSNumber(value: index) }
+            let shifted = try WhisperDictionarySegmentSeeker.alignmentView(original, dropping: 3)
+            try expect(shifted.shape == [5, 4] && shifted[0].intValue == 12 && shifted[19].intValue == 31,
+                       "Alignment prefix removal reads the wrong rows")
+            original[12] = 99
+            try expect(shifted[0].intValue == 99, "Alignment view unexpectedly copied its cache")
+        }
+        print("PASS dictionary whole-entry capacity, stable order, legacy options, backend gating and alignment strides")
+    }
+
+    private static func realDictionary(directory: URL, audio: URL) async throws {
+        let model: SpeechModelDescriptor
+        if let index = CommandLine.arguments.firstIndex(of: "--model"), CommandLine.arguments.count > index + 1,
+           let selected = SpeechModelCatalog.model(id: CommandLine.arguments[index + 1]) { model = selected }
+        else { model = SpeechModelCatalog.whisperTurbo }
+        let engine = WhisperSpeechEngine(model: model, directory: directory)
+        try await engine.prepare()
+        let samples = try AudioConverter().resampleAudioFile(audio)
+        let terms = ["CodeRabbit", "Postgres", "Kalikin"]
+        let options = RecognitionOptions(language: "en", vocabulary: terms)
+        let preview = try await WhisperSpeechEngine.dictionaryUsage(terms: terms, model: model, directory: directory)
+        let file = try await engine.transcribe(.init(audioFileURL: audio, options: options))
+        let pcm = try await engine.transcribe(samples: samples, options: options)
+        for result in [file, pcm] {
+            try expect(!result.text.isEmpty && !result.tokens.isEmpty, "Dictionary prompting discarded recognized speech or word timing")
+            try expect(result.dictionaryUsage == preview, "Recognition and Dictionary settings disagree about included terms")
+            try expect(result.tokens.allSatisfy { $0.startSeconds.isFinite && $0.endSeconds.isFinite && $0.startSeconds >= 0
+                && $0.endSeconds > $0.startSeconds && $0.endSeconds <= Double(samples.count) / 16_000 + 0.1 },
+                "Prompted recognition returned invalid word timing")
+        }
+        let clean = try await engine.transcribe(samples: samples, options: .init(language: "en"))
+        try expect(clean.dictionaryUsage?.included.isEmpty == true && !clean.text.isEmpty && !clean.tokens.isEmpty,
+                   "A previous session's dictionary leaked into an empty-dictionary session")
+        let silence = try await engine.transcribe(samples: [Float](repeating: 0, count: 16_000), options: options)
+        try expect(silence.text.isEmpty && silence.dictionaryUsage == preview, "Dictionary produced words from silence")
+        let automatic = try await engine.transcribe(samples: samples, options: .init(vocabulary: terms))
+        try expect(!automatic.text.isEmpty && !automatic.tokens.isEmpty && automatic.dictionaryUsage == preview,
+                   "Automatic language detection lost the dictionary or its word alignment")
+        let live = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { engine }, options: options)
+        await live.append(samples, at: 0)
+        let finished = try await live.finish()
+        try expect(finished?.text.isEmpty == false, "Prompted live recognition required recovery or discarded its final text")
+        if let index = CommandLine.arguments.firstIndex(of: "--long-file"), CommandLine.arguments.count > index + 1 {
+            let file = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+            let result = try await engine.transcribe(.init(audioFileURL: file, options: options))
+            try expect(result.tokens.last?.endSeconds ?? 0 > 30 && result.text.lowercased().contains("order to the store"),
+                       "Missing final-window speech or timing (last word: \(result.tokens.last?.endSeconds ?? 0)s; ending: \(result.text.suffix(90)))")
+            print("PASS prompted long-file word timing through \(result.tokens.last!.endSeconds) seconds and final-window speech")
+        }
+        print("PASS real prompted Whisper file/PCM word timing, shared tokenizer preview, request isolation and silence; \(file.text)")
+        await engine.unload()
+    }
+
     private static func tokenizerBoundary() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("local-tokenizer-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         var rejected = false
-        do { try await WhisperSpeechEngine.validateLocalTokenizer(model: SpeechModelCatalog.whisperTiny, directory: directory) }
+        do { _ = try await WhisperSpeechEngine.validateLocalTokenizer(model: SpeechModelCatalog.whisperTiny, directory: directory) }
         catch { rejected = true }
         try expect(rejected, "Missing tokenizer was allowed to enter the SDK network fallback")
         let conflicting = directory.appendingPathComponent("models/openai/whisper-tiny")
         try FileManager.default.createDirectory(at: conflicting, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: conflicting.appendingPathComponent("tokenizer.json"))
         do {
-            try await WhisperSpeechEngine.validateLocalTokenizer(model: SpeechModelCatalog.whisperTiny, directory: directory)
+            _ = try await WhisperSpeechEngine.validateLocalTokenizer(model: SpeechModelCatalog.whisperTiny, directory: directory)
             throw CheckFailure(message: "A stale Hub tokenizer overrode the pinned local tokenizer")
         } catch SpeechModelStoreError.invalidCache { }
         print("PASS local tokenizer preflight and stale Hub-cache rejection")
@@ -599,6 +690,61 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try expect(SenseVoiceSpeechEngine.merge("hello repeated phrase", "hello repeated phrase", overlapping: false)
                    == "hello repeated phrase hello repeated phrase", "Repetition after silence was erased")
         print("PASS expanded recommendations/search, factory routing, fixed languages, tokenizer variants, decoder shapes, hints and long-file tails")
+    }
+
+    @MainActor private static func captureDictionary(to directory: URL, modelDirectory: URL) async throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("dictionary-layout-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let suite = "app.goblin.dictionary-layout.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CheckStore(directory: modelDirectory)
+        let service = SpeechModelService(defaults: defaults, makeRuntime: { model in
+            SpeechModelRuntime(engine: CheckEngine(model.id), store: store)
+        })
+        let repository = DictionaryRepository(url: scratch.appendingPathComponent("dictionary.json"))
+        try repository.save([DictionaryEntry(spelling: "CodeRabbit", aliases: ["code rabbit"]),
+                             DictionaryEntry(spelling: "Postgres"), DictionaryEntry(spelling: "Kalikin")])
+        let model = DictionaryModel(repository: repository)
+        @MainActor func shoot(_ name: String, dark: Bool, accessible: Bool = false, height: CGFloat = 700) async throws {
+            app.appearance = NSAppearance(named: accessible
+                ? (dark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua)
+                : (dark ? .darkAqua : .aqua))
+            let host = NSHostingView(rootView: Form { DictionarySettingsView(model: model, service: service, defaults: defaults) }
+                .formStyle(PlateFormStyle()).preferredColorScheme(dark ? .dark : .light)
+                .defaultScrollAnchor(.top)
+                .environment(\._colorSchemeContrast, accessible ? .increased : .standard)
+                .environment(\._accessibilityReduceMotion, accessible)
+                .frame(width: 650, height: height, alignment: .topLeading).caseBackground())
+            host.appearance = app.appearance
+            host.frame = NSRect(x: 0, y: 0, width: 650, height: height)
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(800))
+            try snapshot(host, to: directory.appendingPathComponent(name + ".png"))
+            print("Captured \(name)")
+        }
+        for dark in [false, true] { try await shoot("dictionary-unsupported-\(dark ? "dark" : "light")", dark: dark) }
+        try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id)
+        for dark in [false, true] { try await shoot("dictionary-supported-\(dark ? "dark" : "light")", dark: dark) }
+        var settings = RewriteSettings()
+        settings.enabled = true
+        settings.cleanup = .light
+        try RewriteSettingsStore.save(settings, defaults: defaults)
+        for entry in model.entries { model.delete(entry) }
+        for number in 1...32 { try expect(model.put(DictionaryEntry(spelling: String(format: "Project %03d", number))), "Could not create cutoff fixture") }
+        let usage = try await WhisperSpeechEngine.dictionaryUsage(terms: model.entries.map(\.spelling), model: service.selectedModel, directory: modelDirectory)
+        try expect(!usage.included.isEmpty && !usage.excluded.isEmpty, "Capture fixture doesn't exercise a cutoff")
+        for dark in [false, true] {
+            try await shoot("dictionary-cutoff-\(dark ? "dark" : "light")", dark: dark, height: 2000)
+            try await shoot("dictionary-accessible-\(dark ? "dark" : "light")", dark: dark, accessible: true, height: 2000)
+        }
+        for entry in model.entries { model.delete(entry) }
+        try await shoot("dictionary-empty", dark: false)
+        await service.shutdown()
+        print("PASS production Dictionary views rendered offscreen in light, dark, high contrast and reduced motion; no app launch or microphone")
     }
 
     @MainActor private static func capture(to directory: URL, real: Bool = false) async throws {

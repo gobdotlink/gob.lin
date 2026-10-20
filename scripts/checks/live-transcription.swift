@@ -158,14 +158,14 @@ struct LiveTranscriptionCheck {
         verify(!(await live.requiresFinalRecovery), "Normal pauses needlessly required full-file catch-up")
         verify(await runtime.largestWindow <= 240_000, "Retained resource bound exceeded")
 
-        let preferred = RecognitionOptions(language: "pl")
+        let preferred = RecognitionOptions(language: "pl", vocabulary: ["Postgres", "CodeRabbit"])
         let languageRuntime = SignalPCM()
         let languageLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { languageRuntime }, options: preferred)
         var languagePosition: Int64 = 0
         try await feed(0.1, seconds: 1.2, live: languageLive, position: &languagePosition)
         _ = try await languageLive.finish()
         let used = await languageRuntime.optionsUsed
-        verify(!used.isEmpty && used.allSatisfy { $0 == preferred }, "Preview and final window did not preserve recognition language")
+        verify(!used.isEmpty && used.allSatisfy { $0 == preferred }, "Preview and final window did not preserve language and dictionary")
         let batchRuntime = SignalPCM()
         let batchOnly = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { batchRuntime }, options: preferred, previewAvailable: false)
         await batchOnly.append([Float](repeating: 0.1, count: 480_000), at: 0)

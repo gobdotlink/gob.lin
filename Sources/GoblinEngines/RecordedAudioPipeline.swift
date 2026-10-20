@@ -25,6 +25,7 @@ public struct TranscriptionRun: Codable, Sendable {
     public var model: String
     public var timings: DictationTimings
     public var postprocessingError: String?
+    public var dictionaryUsage: SpeechDictionaryUsage?
 }
 
 public enum RecordedAudioError: Error, LocalizedError {
@@ -54,7 +55,7 @@ public struct RecordedAudioPipeline: Sendable {
 
     public init(engine: any SpeechEngine, processor: TranscriptPostprocessor, dictionaryEntries: [DictionaryEntry],
                 tone: DictationTone, rewriteSettings: RewriteSettings, apiKey: String = "", options: RecognitionOptions = .init()) {
-        self.init(engine: engine, options: options) { raw in
+        self.init(engine: engine, options: RecognitionOptions(language: options.language, vocabulary: dictionaryEntries.map(\.spelling))) { raw in
             let result = await processor.process(raw, dictionaryEntries: dictionaryEntries, tone: tone,
                                                  rewriteSettings: rewriteSettings, apiKey: apiKey)
             return ProcessedTranscript(text: result.finalText, tone: result.tone.rawValue, polished: result.polished,
@@ -84,7 +85,7 @@ public struct RecordedAudioPipeline: Sendable {
         return TranscriptionRun(rawText: recognition.text, finalText: processed.text, tone: processed.tone,
                                 polished: processed.polished, model: engine.identifier,
                                 timings: DictationTimings(asrMilliseconds: recognitionTime, rewriteMilliseconds: rewriteTime),
-                                postprocessingError: processingError)
+                                postprocessingError: processingError, dictionaryUsage: recognition.dictionaryUsage)
     }
 
     private func milliseconds(since start: ContinuousClock.Instant) -> Double {

@@ -11,6 +11,7 @@ public actor WhisperSpeechEngine: PCMSpeechEngine {
     private let directory: URL
     private var runtime: WhisperKit?
     private var decodingOptions: DecodingOptions?
+    private var beginSuppressTokens: [Int] = []
     private var detector: SpeechActivityDetector?
     private var busy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -26,9 +27,10 @@ public actor WhisperSpeechEngine: PCMSpeechEngine {
         try Task.checkCancellation()
         if runtime != nil { return }
         guard PinnedSpeechModelStore.isDownloaded(model: model, directory: directory) else { throw SpeechRuntimeError.modelNotInstalled }
-        try await Self.validateLocalTokenizer(model: model, directory: directory)
+        _ = try await Self.validateLocalTokenizer(model: model, directory: directory)
         let detector = try SpeechActivityDetector.load(beside: directory)
         let runtime = try await WhisperKit(WhisperKitConfig(modelFolder: directory.path, tokenizerFolder: directory,
+            segmentSeeker: WhisperDictionarySegmentSeeker(),
             verbose: false, prewarm: false, load: false, download: false))
         do {
             // Tokenizer injection would skip the SDK's model capability initialization.
@@ -40,6 +42,7 @@ public actor WhisperSpeechEngine: PCMSpeechEngine {
             }
             let configuration = try WhisperGenerationConfiguration.load(from: directory)
             decodingOptions = try configuration.decodingOptions(vocabularySize: vocabularySize)
+            beginSuppressTokens = configuration.beginSuppressTokens
             // The SDK's inferred whitespace ID can be EOT; use the published IDs directly.
             runtime.textDecoder.logitsFilters = [WhisperBeginSuppressionFilter(tokens: configuration.beginSuppressTokens,
                 sampleBegin: runtime.textDecoder.isModelMultilingual ? 4 : 2)]
@@ -64,21 +67,31 @@ public actor WhisperSpeechEngine: PCMSpeechEngine {
         }
     }
 
-    static func validateLocalTokenizer(model: SpeechModelDescriptor, directory: URL) async throws {
+    static func validateLocalTokenizer(model: SpeechModelDescriptor, directory: URL) async throws -> TokenizerWrapper {
         // The SDK prefers its Hub subfolder and falls back to network on parse errors.
         let repository = SpeechModelAssets.manifest(for: model.id).files.first { $0.destination == "tokenizer.json" }!.repository
         let hubFolder = HubApiWrapper(downloadBase: directory).localRepoLocation(.init(id: repository))
         guard !FileManager.default.fileExists(atPath: hubFolder.appendingPathComponent("tokenizer.json").path) else {
             throw SpeechModelStoreError.invalidCache
         }
-        _ = try await AutoTokenizerWrapper.from(modelFolder: directory)
+        return try await AutoTokenizerWrapper.from(modelFolder: directory)
+    }
+
+    public static func dictionaryUsage(terms: [String], model: SpeechModelDescriptor, directory: URL) async throws -> SpeechDictionaryUsage {
+        guard PinnedSpeechModelStore.isDownloaded(model: model, directory: directory) else { throw SpeechRuntimeError.modelNotInstalled }
+        let tokenizer = try await validateLocalTokenizer(model: model, directory: directory)
+        guard let endToken = tokenizer.eosTokenId else { throw SpeechModelStoreError.invalidCache }
+        try Task.checkCancellation()
+        return try WhisperDictionary.prompt(terms: terms) {
+            tokenizer.encode(text: $0, addSpecialTokens: false).filter { $0 < endToken }
+        }.usage
     }
 
     public func unload() async {
         await acquire()
         defer { release() }
         await runtime?.unloadModels()
-        runtime = nil; decodingOptions = nil; detector = nil
+        runtime = nil; decodingOptions = nil; beginSuppressTokens = []; detector = nil
     }
 
     public func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
@@ -105,18 +118,31 @@ public actor WhisperSpeechEngine: PCMSpeechEngine {
         let language = try options.validatedLanguage(for: model)
         guard let detector else { throw SpeechRuntimeError.speechDetectorNotInstalled }
         guard var decodeOptions = decodingOptions else { throw SpeechRuntimeError.modelNotInstalled }
+        guard let tokenizer = runtime.tokenizer else { throw WhisperError.tokenizerUnavailable() }
+        let prompt = try WhisperDictionary.prompt(terms: options.vocabulary) {
+            tokenizer.encode(text: $0).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+        }
         let presence = try await detector.presence(in: samples)
-        guard presence != .notDetected else { return .init(text: "", speechPresence: .notDetected) }
+        guard presence != .notDetected else { return .init(text: "", speechPresence: .notDetected, dictionaryUsage: prompt.usage) }
         decodeOptions.language = language
         decodeOptions.detectLanguage = language == nil && runtime.textDecoder.isModelMultilingual
         decodeOptions.windowClipTime = samples.count <= WhisperKit.sampleRate ? 0 : 1
+        decodeOptions.promptTokens = prompt.tokens.isEmpty ? nil : prompt.tokens
+        let sampleBegin = (runtime.textDecoder.isModelMultilingual ? 4 : 2)
+            + (prompt.tokens.isEmpty ? 0 : prompt.tokens.count + 1)
+        runtime.textDecoder.logitsFilters = [WhisperBeginSuppressionFilter(tokens: beginSuppressTokens, sampleBegin: sampleBegin)]
+        if !prompt.tokens.isEmpty {
+            // The SDK's multilingual timestamp filter looks for the task in the first three tokens.
+            runtime.textDecoder.logitsFilters?.append(TimestampRulesFilter(specialTokens: tokenizer.specialTokens,
+                sampleBegin: sampleBegin, maxInitialTimestampIndex: nil, isModelMultilingual: false))
+        }
         let results = try await runtime.transcribe(audioArray: samples, decodeOptions: decodeOptions)
         try Task.checkCancellation()
         let tokens = results.flatMap(\.allWords).map {
             TranscriptionToken(text: $0.word, startSeconds: Double($0.start), endSeconds: Double($0.end), confidence: $0.probability)
         }
         return .init(text: results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines),
-                     tokens: tokens, speechPresence: presence)
+                     tokens: tokens, speechPresence: presence, dictionaryUsage: prompt.usage)
     }
 
     private func acquire() async {
