@@ -8,6 +8,8 @@ struct CLIProcessingOptions {
     var dictionaryURL: URL?
     /// Bundle identifier whose app-scoped terms apply; terms for every app always apply.
     var application: String?
+    /// Project name whose project-scoped terms apply.
+    var project: String?
 
     mutating func consume(_ arguments: [String], index: inout Int) throws -> Bool {
         switch arguments[index] {
@@ -31,6 +33,11 @@ struct CLIProcessingOptions {
                 throw CommandError.usage("--app requires one application bundle identifier")
             }
             enabled = true; application = arguments[index + 1]; index += 2
+        case "--project":
+            guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--"), project == nil else {
+                throw CommandError.usage("--project requires one project name")
+            }
+            enabled = true; project = arguments[index + 1]; index += 2
         default: return false
         }
         return true
@@ -45,7 +52,8 @@ struct CLIProcessingConfiguration: Sendable {
 
     init(options: CLIProcessingOptions) throws {
         let defaults = UserDefaults(suiteName: GoblinMetadata.bundleIdentifier) ?? .standard
-        entries = try (options.dictionaryURL.map(DictionaryRepository.init(url:)) ?? .applicationDefault).load().active(in: options.application)
+        entries = try (options.dictionaryURL.map(DictionaryRepository.init(url:)) ?? .applicationDefault).load()
+            .active(in: DictionaryScope(application: options.application, project: options.project))
         tone = options.tone ?? DictationTone(rawValue: defaults.string(forKey: DictationTone.preferenceKey) ?? "") ?? .formal
         rewrite = RewriteSettingsStore.load(defaults: defaults)
         apiKey = ""

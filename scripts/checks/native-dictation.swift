@@ -208,7 +208,7 @@ struct NativeDictationCheck {
                 for recorded in model.history.entries {
                     guard let audio = try await model.history.store?.audioFileURL(for: recorded.id) else { throw CheckFailure("An overlapping dictation lost original audio") }
                     let batch = try await RecordedAudioPipeline(engine: runtime).transcribe(audio)
-                    let processed = await model.processTranscript(recorded.rawText, application: recorded.dictionaryScope)
+                    let processed = await model.processTranscript(recorded.rawText, scope: recorded.dictionaryContext)
                     guard processed.finalText == recorded.finalText else { throw CheckFailure("History bypassed shared final postprocessing") }
                     comparisons.append(["audioSeconds": recorded.audioDuration, "liveEqualsBatch": recorded.rawText == batch.rawText,
                         "endingPreserved": recorded.rawText.lowercased().contains("purple violet"), "wordCount": recorded.wordCount])

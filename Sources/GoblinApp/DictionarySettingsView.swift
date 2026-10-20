@@ -8,6 +8,19 @@ final class DictionaryModel: ObservableObject {
     @Published private(set) var entries: [DictionaryEntry] = []
     @Published var error: String?
     @Published private(set) var lastFailure: DiagnosticFailure?
+    /// The app and detected project of the most recent dictation, shown so users can check project detection.
+    @Published var lastContext: (application: String?, project: DetectedProject?)?
+
+    /// Project names to suggest: T3 Code and Paseo projects on this Mac, the last detected project and existing scopes.
+    func knownProjects() async -> [String] {
+        var seen: Set<String> = []
+        let stored = await Task.detached(priority: .userInitiated) {
+            ProjectResolution.t3ProjectTitles() + ProjectResolution.paseoProjectNames()
+        }.value
+        let candidates = [lastContext?.project?.name].compactMap { $0 } + entries.flatMap(\.projects) + stored
+        return candidates.filter { seen.insert(DictionaryScope.projectKey($0)).inserted }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
     private let repository: DictionaryRepository
     private(set) var available = false
 
@@ -53,7 +66,7 @@ struct DictionarySettingsView: View {
     @State private var previewError: (request: PreviewRequest, message: String)?
     @State private var filter = TermFilter.all
 
-    private enum TermFilter: Hashable { case all, everyApp, app(String) }
+    private enum TermFilter: Hashable { case all, everywhere, app(String), project(String) }
 
     init(model: DictionaryModel, service: SpeechModelService, defaults: UserDefaults = .standard) {
         self.model = model; self.service = service
@@ -83,20 +96,37 @@ struct DictionarySettingsView: View {
         }
     }
 
+    private var scopedProjects: [String] {
+        var seen: Set<String> = []
+        return model.entries.flatMap(\.projects).filter { seen.insert(DictionaryScope.projectKey($0)).inserted }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     private var shownEntries: [DictionaryEntry] {
         let entries: [DictionaryEntry]
         switch filter {
         case .all: entries = model.entries
-        case .everyApp: entries = model.entries.filter(\.apps.isEmpty)
+        case .everywhere: entries = model.entries.filter { !$0.isScoped }
         case .app(let id): entries = model.entries.filter { $0.apps.contains(id) }
+        case .project(let name):
+            entries = model.entries.filter { $0.projects.contains { DictionaryScope.projectKey($0) == DictionaryScope.projectKey(name) } }
         }
         return entries.sorted { $0.spelling.localizedStandardCompare($1.spelling) == .orderedAscending }
+    }
+
+    private static func describe(_ source: DetectedProject.Source) -> String {
+        switch source {
+        case .repository: "from the open file's repository"
+        case .t3Database, .t3Interface: "from the T3 Code thread"
+        case .paseoWorkspaces: "from the Paseo workspace"
+        case .paseoInterface: "from Paseo's sidebar, best effort"
+        }
     }
 
     var body: some View {
         let current = request
         let usage = preview?.request == current ? preview?.usage : nil
-        let scoped = model.entries.contains { !$0.apps.isEmpty }
+        let scoped = model.entries.contains(where: \.isScoped)
         Section {
             LabeledContent {
                 Text(service.selectedModel.name)
@@ -124,7 +154,7 @@ struct DictionarySettingsView: View {
                 StatusRow(.waiting, Text("I'm checking which terms fit…"))
             }
             if model.available, service.selectedModel.capabilities.customVocabulary, scoped {
-                StatusRow(.ready, Text("App-specific terms join these when you dictate into their apps and share the same limit."))
+                StatusRow(.ready, Text("App-specific terms join these when you dictate into their apps and share the same limit. Project terms apply after recognition, once I know the project."))
             }
         } header: { Text("Native Recognition") }
         .task(id: current) {
@@ -140,7 +170,7 @@ struct DictionarySettingsView: View {
         }
         Section {
             StatusRow(cleanupEnabled ? .ready : .off,
-                      Text(cleanupEnabled ? "I include the preferred spellings for the app you're dictating into in the Cleanup prompt, including terms beyond the native limit."
+                      Text(cleanupEnabled ? "I include the preferred spellings for the app and project you're dictating into in the Cleanup prompt, including terms beyond the native limit."
                                          : "Cleanup is off. I don't send your dictionary to a rewrite model."))
         } header: { Text("Cleanup") }
         Section {
@@ -151,9 +181,13 @@ struct DictionarySettingsView: View {
                 if scoped {
                     Picker("Show", selection: $filter) {
                         Text("All terms").tag(TermFilter.all)
-                        Text("Used in every app").tag(TermFilter.everyApp)
+                        Text("Used everywhere").tag(TermFilter.everywhere)
                         Divider()
                         ForEach(scopedApps, id: \.self) { id in Text(DictionaryApps.name(id)).tag(TermFilter.app(id)) }
+                        if !scopedProjects.isEmpty {
+                            Divider()
+                            ForEach(scopedProjects, id: \.self) { name in Text("Project: \(name)").tag(TermFilter.project(name)) }
+                        }
                     }
                 }
                 ForEach(shownEntries) { entry in
@@ -169,13 +203,26 @@ struct DictionarySettingsView: View {
                     } label: {
                         Text(entry.spelling).font(.body.monospaced())
                         if !entry.aliases.isEmpty { Text("sounds like: " + entry.aliases.joined(separator: ", ")) }
-                        if !entry.apps.isEmpty { Text("Only in " + DictionaryApps.summary(entry.apps)) }
+                        if entry.isScoped {
+                            Text("Only in " + [entry.apps.isEmpty ? nil : DictionaryApps.summary(entry.apps),
+                                               entry.projects.isEmpty ? nil : "project " + entry.projects.joined(separator: ", ")]
+                                .compactMap { $0 }.joined(separator: " · "))
+                        }
                         if usage?.excluded.contains(entry.spelling) == true { Text("Not sent to recognition").foregroundStyle(.secondary) }
                     }
                 }
             }
             StatusRow(model.entries.isEmpty ? .off : .ready,
                       Text("I apply exact “sounds like” aliases after recognition with every model, including terms beyond the native limit."))
+            if model.entries.contains(where: { !$0.projects.isEmpty }) {
+                if let context = model.lastContext {
+                    StatusRow(context.project == nil ? .off : .ready,
+                              Text(context.project.map { "Last dictation: \(context.application ?? "unknown app") · project \($0.name) (\(Self.describe($0.source)))." }
+                                   ?? "Last dictation: \(context.application ?? "unknown app") · I couldn't tell which project was open."))
+                } else {
+                    StatusRow(.waiting, Text("After your next dictation I'll show which project I detected."))
+                }
+            }
         } header: {
             HStack {
                 Text("Terms")
@@ -190,10 +237,11 @@ struct DictionarySettingsView: View {
         }
         .sheet(item: $editing) { entry in DictionaryEntryEditor(entry: entry, model: model) }
         .onChange(of: model.entries) {
-            // When the filtered app loses its last term, or no term is scoped any more, show every term.
+            // When the filtered app or project loses its last term, or no term is scoped any more, show every term.
             switch filter {
             case .app(let id) where !model.entries.contains(where: { $0.apps.contains(id) }): filter = .all
-            case .everyApp where !model.entries.contains(where: { !$0.apps.isEmpty }): filter = .all
+            case .project(let name) where !scopedProjects.contains(name): filter = .all
+            case .everywhere where !model.entries.contains(where: \.isScoped): filter = .all
             default: break
             }
         }
@@ -216,6 +264,8 @@ private struct DictionaryEntryEditor: View {
     @State private var spelling: String
     @State private var aliases: String
     @State private var apps: [String]
+    @State private var projects: [String]
+    @State private var suggestions: [String] = []
     @State private var error: String?
 
     init(entry: DictionaryEntry, model: DictionaryModel) {
@@ -224,6 +274,7 @@ private struct DictionaryEntryEditor: View {
         _spelling = State(initialValue: entry.spelling)
         _aliases = State(initialValue: entry.aliases.joined(separator: "\n"))
         _apps = State(initialValue: entry.apps)
+        _projects = State(initialValue: entry.projects)
     }
 
     var body: some View {
@@ -240,14 +291,17 @@ private struct DictionaryEntryEditor: View {
                     Text("For example, “day review” → “Dev review”. Aliases match whole words without crossing punctuation.")
                 }
                 DictionaryAppScopeEditor(apps: $apps)
+                DictionaryProjectScopeEditor(projects: $projects, suggestions: suggestions)
                 if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
             }
-            .formStyle(.grouped).frame(height: 470)
+            .formStyle(.grouped).frame(height: 560)
+            .task { suggestions = await model.knownProjects() }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
-                    if model.put(DictionaryEntry(id: entry.id, spelling: spelling, aliases: aliases.components(separatedBy: .newlines), apps: apps)) {
+                    if model.put(DictionaryEntry(id: entry.id, spelling: spelling, aliases: aliases.components(separatedBy: .newlines), apps: apps,
+                                                 projects: projects)) {
                         dismiss()
                     } else { error = model.error; model.error = nil }
                 }.keyboardShortcut(.defaultAction).disabled(spelling.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

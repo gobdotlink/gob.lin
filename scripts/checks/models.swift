@@ -738,6 +738,17 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         scopeHost.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(500))
         try snapshot(scopeHost, to: directory.appendingPathComponent("dictionary-entry-apps.png"))
+        try expect(model.put(DictionaryEntry(spelling: "GPT 6.1 Sol", aliases: ["GPT six point one soul"],
+                                             apps: ["com.apple.Terminal"], projects: ["gob.lin"])), "Could not create project-scoped fixture")
+        model.lastContext = ("Terminal", DetectedProject(name: "gob.lin", source: .repository))
+        for dark in [false, true] { try await shoot("dictionary-projects-\(dark ? "dark" : "light")", dark: dark, height: 1000) }
+        let projectHost = NSHostingView(rootView: Form { DictionaryProjectScopeEditor(projects: .constant(["gob.lin"]), suggestions: ["gob.lin", "harbor"]) }
+            .formStyle(.grouped).frame(width: 460, height: 220))
+        projectHost.frame = NSRect(x: 0, y: 0, width: 460, height: 220)
+        projectHost.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(500))
+        try snapshot(projectHost, to: directory.appendingPathComponent("dictionary-entry-projects.png"))
+        model.lastContext = nil
         var settings = RewriteSettings()
         settings.enabled = true
         settings.cleanup = .light

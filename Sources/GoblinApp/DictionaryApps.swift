@@ -1,4 +1,5 @@
 import AppKit
+import GoblinCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -80,6 +81,49 @@ struct DictionaryAppScopeEditor: View {
                 if !apps.contains(id) { apps.append(id) }
             case .failure(let failure): error = failure.localizedDescription
             }
+        }
+    }
+}
+
+/// Chooses the projects a term is used in; an empty selection means every project.
+struct DictionaryProjectScopeEditor: View {
+    @Binding var projects: [String]
+    let suggestions: [String]
+    @State private var name = ""
+
+    private func add(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !DictionaryScope.projectKey(trimmed).isEmpty,
+              !projects.contains(where: { DictionaryScope.projectKey($0) == DictionaryScope.projectKey(trimmed) }) else { return }
+        projects.append(trimmed)
+        name = ""
+    }
+
+    var body: some View {
+        Section {
+            if projects.isEmpty { Text("Every project").foregroundStyle(.secondary) }
+            ForEach(projects, id: \.self) { project in
+                LabeledContent(project) {
+                    Button("Remove", systemImage: "minus.circle", role: .destructive) { projects.removeAll { $0 == project } }
+                        .labelStyle(.iconOnly).buttonStyle(.borderless)
+                        .accessibilityLabel("Remove \(project)")
+                }
+            }
+            HStack {
+                TextField("Project name", text: $name).onSubmit { add(name) }
+                Button("Add") { add(name) }.disabled(DictionaryScope.projectKey(name).isEmpty)
+                let remaining = suggestions.filter { suggestion in
+                    !projects.contains { DictionaryScope.projectKey($0) == DictionaryScope.projectKey(suggestion) }
+                }
+                if !remaining.isEmpty {
+                    Menu("Known Projects") {
+                        ForEach(remaining, id: \.self) { project in Button(project) { add(project) } }
+                    }
+                    .fixedSize()
+                }
+            }
+        } header: { Text("Projects") } footer: {
+            Text("With no projects chosen, I use this term in any project. Otherwise I only use it when I can tell one of these projects is open: the repository of the open file, or the project of the T3 Code thread or Paseo workspace.")
         }
     }
 }

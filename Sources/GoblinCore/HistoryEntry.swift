@@ -33,6 +33,8 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
     /// The app frontmost when dictation started, whose dictionary scope applied; "" when none (gob.lin itself).
     /// It can differ from the target when text is delivered to the field focused at the end.
     public var dictionaryBundleIdentifier: String?
+    /// The project detected where dictation started, for project-scoped terms; nil when none was found.
+    public var dictionaryProject: String?
     public var createdAt: Date
     public var completedAt: Date
     public var audioDuration: Double
@@ -52,7 +54,7 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
 
     public init(id: UUID = UUID(), rawText: String, finalText: String, tone: String = "formal",
                 polished: Bool = false, targetBundleIdentifier: String? = nil,
-                targetApplicationName: String? = nil, dictionaryBundleIdentifier: String? = nil, createdAt: Date = Date(),
+                targetApplicationName: String? = nil, dictionaryBundleIdentifier: String? = nil, dictionaryProject: String? = nil, createdAt: Date = Date(),
                 completedAt: Date = Date(), audioDuration: Double = 0, model: String = "",
                 latencies: DictationTimings = DictationTimings(), starred: Bool = false, processingWarning: String? = nil) {
         self.id = id
@@ -63,6 +65,7 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
         self.targetBundleIdentifier = targetBundleIdentifier
         self.targetApplicationName = targetApplicationName
         self.dictionaryBundleIdentifier = dictionaryBundleIdentifier
+        self.dictionaryProject = dictionaryProject
         self.createdAt = createdAt
         self.completedAt = completedAt
         self.audioDuration = audioDuration
@@ -78,6 +81,9 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
 extension HistoryEntry {
     /// The app whose dictionary terms reprocessing should use. Entries saved before scopes fall back to the target.
     public var dictionaryScope: String? { dictionaryBundleIdentifier ?? targetBundleIdentifier }
+
+    /// The app and project whose dictionary terms reprocessing should use.
+    public var dictionaryContext: DictionaryScope { DictionaryScope(application: dictionaryScope, project: dictionaryProject) }
 }
 
 public struct HistoryRetention: Codable, Sendable, Equatable {

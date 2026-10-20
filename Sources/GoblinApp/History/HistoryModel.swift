@@ -256,6 +256,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                                        targetBundleIdentifier: entry.targetBundleIdentifier,
                                        targetApplicationName: entry.targetApplicationName,
                                        dictionaryBundleIdentifier: entry.dictionaryBundleIdentifier,
+                                       dictionaryProject: entry.dictionaryProject,
                                        audioDuration: entry.audioDuration, model: result.model,
                                        latencies: result.latencies, processingWarning: result.warning)
             let saved = await record(revised, untrimmedAudioURL: audioURL)

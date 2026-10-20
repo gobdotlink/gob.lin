@@ -1,4 +1,5 @@
 import AppKit
+import GoblinCore
 
 enum DictationDestination: String {
     case currentField, originalField
@@ -15,6 +16,25 @@ final class DictationSession {
     /// Selects app-scoped dictionary terms for the whole dictation, including later History reprocessing.
     /// "" matches no app, so dictating from gob.lin itself uses only terms for every app.
     var dictionaryScope: String { target?.bundleIdentifier ?? "" }
+    /// The project open where dictation started, once detection finishes; see `ProjectDetector`.
+    var dictionaryProject: DetectedProject?
+    var projectDetection: Task<DetectedProject?, Never>?
+    var dictionaryContext: DictionaryScope { DictionaryScope(application: dictionaryScope, project: dictionaryProject?.name) }
+
+    /// Waits briefly for project detection, which normally finished while the user was speaking.
+    func resolveProject(within timeout: Duration = .milliseconds(300)) async {
+        guard dictionaryProject == nil, let detection = projectDetection else { return }
+        // Unstructured racers: a task group would wait for slow detection even after the timeout won.
+        let race = AsyncStream<DetectedProject?> { continuation in
+            let result = Task { continuation.yield(await detection.value); continuation.finish() }
+            let timer = Task { try? await Task.sleep(for: timeout); continuation.yield(nil); continuation.finish() }
+            continuation.onTermination = { _ in result.cancel(); timer.cancel() }
+        }
+        for await first in race {
+            dictionaryProject = first
+            break
+        }
+    }
     var overlayID: UUID?
     var audioOwnedByHistory = false
     var historyOnly = false
@@ -28,7 +48,10 @@ final class DictationSession {
         originalText = focused?.pid == self.target?.processIdentifier ? focused : nil
     }
 
-    func cancel() { cancelled = true }
+    func cancel() {
+        cancelled = true
+        projectDetection?.cancel()
+    }
 
     func checkCancellation() throws {
         guard !cancelled else { throw CancellationError() }

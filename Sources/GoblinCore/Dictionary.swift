@@ -6,15 +6,18 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
     public var aliases: [String]
     /// Bundle identifiers of the apps this entry is used in. Empty means every app.
     public var apps: [String]
+    /// Project names this entry is used in, matched by `DictionaryScope.projectKey`. Empty means every project.
+    public var projects: [String]
 
-    public init(id: UUID = UUID(), spelling: String, aliases: [String] = [], apps: [String] = []) {
+    public init(id: UUID = UUID(), spelling: String, aliases: [String] = [], apps: [String] = [], projects: [String] = []) {
         self.id = id
         self.spelling = spelling
         self.aliases = aliases
         self.apps = apps
+        self.projects = projects
     }
 
-    private enum CodingKeys: String, CodingKey { case id, spelling, aliases, apps }
+    private enum CodingKeys: String, CodingKey { case id, spelling, aliases, apps, projects }
 
     // Entries saved before app scopes have no `apps` key and apply everywhere.
     public init(from decoder: Decoder) throws {
@@ -23,6 +26,7 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
         spelling = try container.decode(String.self, forKey: .spelling)
         aliases = try container.decode([String].self, forKey: .aliases)
         apps = try container.decodeIfPresent([String].self, forKey: .apps) ?? []
+        projects = try container.decodeIfPresent([String].self, forKey: .projects) ?? []
     }
 
     // Unscoped entries keep the original file shape.
@@ -32,26 +36,60 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
         try container.encode(spelling, forKey: .spelling)
         try container.encode(aliases, forKey: .aliases)
         if !apps.isEmpty { try container.encode(apps, forKey: .apps) }
+        if !projects.isEmpty { try container.encode(projects, forKey: .projects) }
     }
 
-    /// Whether dictation into `application` (a bundle identifier, nil when unknown) uses this entry.
-    public func applies(to application: String?) -> Bool {
-        apps.isEmpty || application.map(apps.contains) == true
+    /// Whether this entry is limited to particular apps or projects.
+    public var isScoped: Bool { !apps.isEmpty || !projects.isEmpty }
+
+    /// Whether dictation in `scope` uses this entry: its app must match (or none is set) and so must its project.
+    public func applies(in scope: DictionaryScope) -> Bool {
+        (apps.isEmpty || scope.application.map(apps.contains) == true)
+            && (projects.isEmpty || scope.project.map { project in
+                projects.contains { DictionaryScope.projectKey($0) == DictionaryScope.projectKey(project) } } == true)
+    }
+
+    /// Whether dictation into `application` (a bundle identifier, nil when unknown) uses this entry, with no known project.
+    public func applies(to application: String?) -> Bool { applies(in: DictionaryScope(application: application)) }
+}
+
+/// Where a dictation happens: the app it started in and, when gob.lin can tell, the project open there.
+public struct DictionaryScope: Codable, Equatable, Hashable, Sendable {
+    /// Bundle identifier. "" matches no app (gob.lin itself); nil is unknown.
+    public var application: String?
+    /// Project name as the app shows it, such as "gob.lin" or "akalikin/gob.lin".
+    public var project: String?
+
+    public init(application: String? = nil, project: String? = nil) {
+        self.application = application
+        self.project = project.flatMap { Self.projectKey($0).isEmpty ? nil : $0 }
+    }
+
+    /// Project names compare case-insensitively by their last path component, so "akalikin/gob.lin",
+    /// "/Users/me/Projects/gob.lin" and "gob.lin" are the same project.
+    public static func projectKey(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "/")))
+        return (trimmed.split(separator: "/").last.map(String.init) ?? trimmed)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
     }
 }
 
 extension Array where Element == DictionaryEntry {
-    /// Entries for every app, plus those scoped to `application`.
-    public func active(in application: String?) -> [DictionaryEntry] { filter { $0.applies(to: application) } }
+    /// Entries for every app and project, plus those scoped to `scope`.
+    public func active(in scope: DictionaryScope) -> [DictionaryEntry] { filter { $0.applies(in: scope) } }
+
+    /// Entries for every app, plus those scoped to `application`, with no known project.
+    public func active(in application: String?) -> [DictionaryEntry] { active(in: DictionaryScope(application: application)) }
 }
 
 public enum DictionaryError: LocalizedError {
-    case invalidTerm, invalidApp, duplicate(String), unsupportedVersion
+    case invalidTerm, invalidApp, invalidProject, duplicate(String), unsupportedVersion
 
     public var errorDescription: String? {
         switch self {
         case .invalidTerm: "Spellings and aliases must contain words on a single line."
         case .invalidApp: "An app scope must be an application bundle identifier."
+        case .invalidProject: "A project scope must be a project name on a single line."
         case .duplicate(let term): "“\(term)” already belongs to a dictionary entry."
         case .unsupportedVersion: "This dictionary was written by a newer version of gob.lin."
         }
@@ -76,7 +114,7 @@ public struct DictionaryRepository: Sendable {
     public func load() throws -> [DictionaryEntry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         let document = try JSONDecoder().decode(Document.self, from: Data(contentsOf: url))
-        guard [1, 2].contains(document.version) else { throw DictionaryError.unsupportedVersion }
+        guard [1, 2, 3].contains(document.version) else { throw DictionaryError.unsupportedVersion }
         return try Self.validated(document.entries)
     }
 
@@ -84,8 +122,9 @@ public struct DictionaryRepository: Sendable {
         let entries = try Self.validated(entries)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        // Version 2 marks app scopes: earlier versions refuse it and leave the file intact rather than drop the scopes.
-        let version = entries.contains { !$0.apps.isEmpty } ? 2 : 1
+        // Each scope kind raises the version (2: apps, 3: projects), so earlier versions refuse files whose scopes they
+        // would drop, and leave them intact, rather than widening the terms to every app or project.
+        let version = entries.contains { !$0.projects.isEmpty } ? 3 : entries.contains(where: \.isScoped) ? 2 : 1
         let data = try encoder.encode(Document(version: version, entries: entries))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
@@ -108,7 +147,13 @@ public struct DictionaryRepository: Sendable {
             }
             let apps = entry.apps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             guard apps.allSatisfy({ !$0.contains(where: \.isWhitespace) }) else { throw DictionaryError.invalidApp }
-            return DictionaryEntry(id: entry.id, spelling: spelling, aliases: Array(Set(aliases)).sorted(), apps: Array(Set(apps)).sorted())
+            var projects: [String] = []
+            for project in entry.projects.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !project.isEmpty {
+                guard !project.contains(where: \.isNewline), !DictionaryScope.projectKey(project).isEmpty else { throw DictionaryError.invalidProject }
+                if !projects.contains(where: { DictionaryScope.projectKey($0) == DictionaryScope.projectKey(project) }) { projects.append(project) }
+            }
+            return DictionaryEntry(id: entry.id, spelling: spelling, aliases: Array(Set(aliases)).sorted(), apps: Array(Set(apps)).sorted(),
+                                   projects: projects.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
         }
     }
 

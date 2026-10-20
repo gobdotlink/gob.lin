@@ -30,6 +30,26 @@ Why scope: in the [dictionary evaluation](evaluation/dictionary-biasing.md), Cle
 
 ![Scoped terms in Dictionary settings](evidence/gob-14/dictionary-scoped-light.png)
 
+## Project scopes
+
+Dictionaries layer: unscoped terms apply everywhere, app terms apply in their apps with no further setup, and an entry can also list `projects`. A project-scoped entry applies only when its app matches (or it has no apps) and the detected project matches one of its names. Names compare by their last path component, ignoring case and diacritics, so `gob.lin`, `akalikin/gob.lin` and a checkout path are the same project.
+
+Detection runs only when some entry lists projects, and in the background from the start of dictation, so it never delays recording. Within a 1.5 s budget and node limits it reads, in order:
+
+- the focused window's document (editors and some terminals): the name of the enclosing git repository;
+- T3 Code: the thread in the page address, looked up read-only in `~/.t3/userdata/statev2.sqlite`; threads from remote environments fall back to the "New thread in <project>" button;
+- Paseo: the workspace in the page address, looked up in `~/.paseo/projects`; workspaces on other hosts fall back to the one sidebar row styled differently from the rest. This fallback depends on Paseo's markup and gives no answer when the styling is ambiguous.
+
+T3 Code and Paseo are Electron apps, so gob.lin sets `AXManualAccessibility` on them to read their page. Results are cached by document or page address, except Paseo's sidebar fallback. Aliases and Cleanup wait at most 0.3 s after speech ends for a result; without one, project terms are left out, so a missed detection costs recall rather than introducing wrong terms. Native recognition (Whisper's prompt) uses app-scoped terms only, because the project is not known when decoding starts.
+
+History records the detected project with the app, and reprocessing reuses both. Settings add a Projects list to each term with suggestions from the last dictation, existing scopes and local T3 Code and Paseo projects, show the project under scoped terms, filter by project and report what the last dictation detected. CLI `transcribe` and `replay` accept `--project <name>` alongside `--app`. Files with project scopes are saved as version 3, because the app-scoped release reads version 2 but would ignore `projects` and widen those terms to every project; it reports a version 3 dictionary as unavailable and leaves the file intact.
+
+Measured on one Mac with WindowProbe running the shipped detector: Zed file → repository in 7 ms, T3 Code thread → database in 7 ms (1 ms cached), remote Paseo workspace → sidebar in about 95 ms. Ghostty exposes no document, so terminals without one give no project.
+
+![Project-scoped term in Dictionary settings](evidence/gob-14/dictionary-projects-light.png)
+
+![Project scope editor](evidence/gob-14/dictionary-entry-projects.png)
+
 CLI `transcribe` and audio `replay` use the default dictionary, or the JSON file selected with `--dictionary`. Supported models receive the same native prompt; `transcribe` reports included/excluded terms and token usage in `dictionaryUsage`. Recorded-transcript replay does not run recognition. Benchmarks retain their explicit diagnostic controls. `dictionary-eval` compares dictionary biasing across Parakeet CTC correction, Whisper prompting and a CLI-only Moonshine key-term diagnostic; see [Dictionary biasing evaluation](evaluation/dictionary-biasing.md).
 
-Validation: `swift test` covers dictionary safety/storage. `scripts/check-models.sh` checks capacity boundaries, alphabetical ordering, backend gating, immutable session options and alignment offsets. Its `--dictionary-real <model-directory> <audio-file> [--model <id>] [--long-file <audio-file>]` mode checks installed Whisper file/PCM inference, word timing, tokenizer preview agreement, automatic language detection, silence and request isolation using supplied recordings. `--capture-dictionary <output-directory> <turbo-model-directory>` renders the production settings views offscreen. These checks do not establish accuracy on a user's real dictations.
+Validation: `swift test` covers dictionary safety/storage. `scripts/check-models.sh` checks capacity boundaries, alphabetical ordering, backend gating, immutable session options and alignment offsets. Its `--dictionary-real <model-directory> <audio-file> [--model <id>] [--long-file <audio-file>]` mode checks installed Whisper file/PCM inference, word timing, tokenizer preview agreement, automatic language detection, silence and request isolation using supplied recordings. `--capture-dictionary <output-directory> <turbo-model-directory>` renders the production settings views offscreen, including app- and project-scoped terms. These checks do not establish accuracy on a user's real dictations.
