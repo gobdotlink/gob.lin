@@ -33,10 +33,15 @@ struct GoblinCLI {
             guard language == "auto" || model.capabilities.languageCodes.contains(where: {
                 SpeechModelCatalog.canonicalLanguage($0) == language
             }) else { throw CommandError.usage("\(model.name) does not support language \(language). Run goblin models.") }
-            if ["transcribe", "replay", "benchmark"].contains(arguments.first ?? ""),
+            if ["transcribe", "replay", "benchmark", "dictionary-eval"].contains(arguments.first ?? ""),
                !model.capabilities.automaticLanguage, model.capabilities.languageControl != .fixed,
                language == "auto", !arguments.contains("--recorded") {
                 throw CommandError.usage("\(model.name) requires --language <code>.")
+            }
+            if arguments.first == "rewrite-eval" {
+                // Text-only: runs the saved AI cleanup over existing results without loading a speech model.
+                try await RewriteEvaluation.run(Array(arguments.dropFirst()))
+                return
             }
             if arguments == ["models"] {
                 let models = SpeechModelCatalog.supported.map { model in
@@ -72,6 +77,8 @@ struct GoblinCLI {
                     throw CommandError.usage("--vocabulary-support is a Parakeet TDT v3 diagnostic.")
                 }
                 try await SpeechBenchmark.prepare(runtime, model: model, vocabularySupport: arguments.count == 2)
+            } else if arguments.first == "dictionary-eval" {
+                try await DictionaryEvaluation.run(Array(arguments.dropFirst()), model: model, runtime: runtime, options: options)
             } else if arguments.first == "benchmark" {
                 try await SpeechBenchmark.run(Array(arguments.dropFirst()), engine: runtime.engine, directory: runtime.store.directory, options: options)
             } else {
@@ -282,6 +289,14 @@ private struct GoblinCommands {
       goblin benchmark <file | directory>          Local batch timing JSONL
         [--repeat N] [--windows 1.5,3,6,12] [--cadence-ms 400]
         [--vocabulary <terms-file>]                Diagnostic CTC rescoring; local auxiliary model
+      goblin dictionary-eval <manifest.json> --glossary <terms>
+                                                   Paired unbiased/biased JSONL per clip [--split original|fresh]
+        [--moonshine tiny|small|medium]            Moonshine key-term biasing instead of --model
+        [--keyterm-boost 2] [--pad-ms 500] [--moonshine-dir <path>] [--download]
+        [--parakeet-correction ctc|none] [--guard spelling|confidence:<t>|spelling-or-confidence:<t>] [--text-join]
+      goblin rewrite-eval <dictionary-eval.jsonl> --glossary <terms> | --no-glossary
+                                                   Saved AI cleanup over those results; sends transcripts to the provider
+        [--source raw|text] [--text-join] [--concurrency 4]
       --model-dir <path> overrides the model cache for any command.
       --model <id> chooses a catalog model. --language auto|<code> sets recognition language.
 

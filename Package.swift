@@ -13,6 +13,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7", traits: []),
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1"),
+        // CLI-only dictionary-biasing diagnostic; the app does not link Moonshine.
+        .package(url: "https://github.com/moonshine-ai/moonshine-swift.git", exact: "0.1.5"),
     ],
     targets: [
         .plugin(name: "BuildIdentity", capability: .buildTool()),
@@ -21,7 +23,8 @@ let package = Package(
         .target(name: "GoblinEngines", dependencies: ["GoblinCore", .product(name: "FluidAudio", package: "FluidAudio"),
             .product(name: "WhisperKit", package: "argmax-oss-swift")], resources: [.process("Resources")]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
-        .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines", .product(name: "FluidAudio", package: "FluidAudio")]),
+        .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines", .product(name: "FluidAudio", package: "FluidAudio"),
+            .product(name: "MoonshineVoice", package: "moonshine-swift")]),
         .testTarget(name: "GoblinCoreTests", dependencies: ["GoblinCore"]),
         .executableTarget(name: "HistorySmoke", dependencies: ["GoblinCore", "CSQLite"], path: "Tests/HistorySmoke"),
         .executableTarget(name: "DiagnosticsSmoke", dependencies: ["GoblinCore"], path: "Tests/DiagnosticsSmoke"),
