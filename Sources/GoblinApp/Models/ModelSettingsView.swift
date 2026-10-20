@@ -132,6 +132,11 @@ struct ModelSettingsView: View {
     }
     private var catalogModels: [SpeechModelDescriptor] {
         var models = matchingModels.filter { showAllModels || $0.recommended }
+        // The current model leads either tab, so it's visible without scrolling or switching to All Models.
+        if let current = matchingModels.first(where: { $0.id == service.selectedModel.id }) {
+            models.removeAll { $0.id == current.id }
+            models.insert(current, at: 0)
+        }
         // A pending transfer must stay visible and cancellable even if filters change.
         if let pending = service.pendingModel, !models.contains(pending) { models.insert(pending, at: 0) }
         return models

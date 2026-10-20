@@ -104,7 +104,7 @@ struct SettingsView: View {
         case .history, .insights: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
-        case .about: AboutSettingsView(updates: model.updates, history: model.history, eyes: eyes)
+        case .about: AboutSettingsView(updates: model.updates, history: model.history, speechModels: model.speechModels, eyes: eyes)
         }
     }
 }
@@ -286,6 +286,7 @@ private struct GeneralSettingsView: View {
 private struct AboutSettingsView: View {
     @ObservedObject var updates: UpdateChecker
     @ObservedObject var history: HistoryModel
+    @ObservedObject var speechModels: SpeechModelService
     let eyes: GoblinEyes
     @State private var totalWords: Int?
     @State private var modelSize: String?
@@ -322,13 +323,13 @@ private struct AboutSettingsView: View {
                 }
                 Plate(padding: 0) {
                     VStack(spacing: 0) {
-                        spec("Recognition", "Parakeet TDT v3, on this Mac")
+                        spec("Recognition", "\(speechModels.selectedModel.name), on this Mac")
                         Hairline()
                         spec("Runs on", "Core ML")
                         Hairline()
                         spec("Model size", modelSize ?? "—")
                         Hairline()
-                        spec("Languages", "25 European languages")
+                        spec("Languages", languages)
                         Hairline()
                         spec("Network", "Not needed. Cleanup is opt-in.")
                     }
@@ -339,7 +340,10 @@ private struct AboutSettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 10)
             .task(id: history.revision) { totalWords = try? await history.store?.insights().totalWords }
-            .task { modelSize = await Self.modelSize() }
+            .task(id: speechModels.selectedModel.id) {
+                let directory = speechModels.directory
+                modelSize = await Task.detached(priority: .utility) { Self.measure(directory) }.value
+            }
         }
         .containerValue(\.plateless, true)
         Section {
@@ -388,11 +392,13 @@ private struct AboutSettingsView: View {
         .padding(.vertical, 8)
     }
 
-    /// The downloaded model's size on disk, measured rather than quoted.
-    private static func modelSize() async -> String? {
-        await Task.detached(priority: .utility) { measure(ParakeetSpeechEngine.defaultModelDirectory) }.value
+    private var languages: String {
+        let codes = speechModels.selectedModel.capabilities.languageCodes
+        guard codes.count == 1 else { return "\(codes.count) languages" }
+        return Locale.current.localizedString(forLanguageCode: codes[0]) ?? codes[0]
     }
 
+    /// The selected model's size on disk, measured rather than quoted.
     nonisolated private static func measure(_ directory: URL) -> String? {
         guard let files = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]) else { return nil }
         var bytes: Int64 = 0
