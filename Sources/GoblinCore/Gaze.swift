@@ -7,8 +7,9 @@ public enum Gaze: String, CaseIterable, Sendable {
     /// Clockwise from east, in screen coordinates where y grows downward.
     private static let compass: [Gaze] = [.e, .se, .s, .sw, .w, .nw, .n, .ne]
 
-    /// The gaze for a pointer `dx`, `dy` points from the eyes. Near a sector's edge or the rim of
-    /// the face the eyes keep `current`, so a resting pointer never makes them flicker.
+    /// The gaze for a pointer `dx`, `dy` art pixels from the eyes, so the face's rim grows with the
+    /// sprite. Near a sector's edge or that rim the eyes keep `current`, so a resting pointer never
+    /// makes them flicker.
     public static func toward(dx: Double, dy: Double, from current: Gaze) -> Gaze {
         if (dx * dx + dy * dy).squareRoot() < (current == .ahead ? 44 : 36) { return .ahead }
         let sector = atan2(dy, dx) / (.pi / 4)

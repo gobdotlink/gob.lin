@@ -63,6 +63,7 @@ Reuse these before writing new ones:
 
 - **`GoblinBrand`:** the colour tokens.
 - **`Sprite`, `PixelSprite`, `PeekingGoblin`:** frames, whole-number scaling, and the goblin gripping an edge.
+- **`GoblinEyes`, `GazingGoblin`:** the goblin whose eyes follow the pointer over a whole region.
 - **`StatusLight`, `StatusRow`:** status lights, and a light with its sentence.
 - **`PlateFormStyle`, `CapsHeader`, `Plate`, `RowDisclosureStyle`:** the case-and-plates pages, and disclosure rows that open from anywhere on the row.
 - **`KeyCap`, `KeyCombo`, `BigKeyCap`:** keys.
@@ -80,7 +81,7 @@ Reuse these before writing new ones:
 
 | Frame | File | When |
 |---|---|---|
-| shut | `goblin-shut.png` | Ready, arming, About, listening with the mouth closed |
+| shut | `goblin-shut.png` | Ready, arming, listening with the mouth closed |
 | yap | `goblin-yap.png` | Listening with the mouth open |
 | look down | `goblin-look.png` | Transcribing |
 | squint | `goblin-squint.png` | Cleaning up; no microphone |
@@ -88,7 +89,7 @@ Reuse these before writing new ones:
 | closed | `goblin-closed.png` | The inserted nod, idle blinks, asleep |
 | sheepish | `goblin-sheepish.png` | The goblin's own fault, like failed cleanup. The sweat drop is drawn in. |
 | cackle | `goblin-cackle.png` | The first take and milestones only |
-| eyes | `goblin-eyes-ahead.png`, `goblin-eyes-<n…nw>.png` | Popover header only: slit pupils looking ahead or toward the pointer |
+| eyes | `goblin-eyes-ahead.png`, `goblin-eyes-<n…nw>.png` | Popover header and About: slit pupils looking ahead or toward the pointer |
 | grip hands | `hand-grip.png` | Gripping the top edge of a card or field. Mirror it for the right hand. |
 | open palm | `hand-palm.png` | "Not touching that": no microphone, password field |
 | quill fist | `hand-quill.png` | Transcribing |
@@ -185,7 +186,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again, plus an amber row: "Slower than 4 s? I type what you said instead."
   - The provider sheet: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key, plus Refresh), Reasoning, API key (masked, "Saved in gob.lin preferences", Remove), the model-list status row, and Advanced request options. Cancel and Save.
 - **About:** centred.
-  - The goblin at 128 pt, the 48 pt wordmark, the version, and the tagline with a blinking block cursor.
+  - The goblin at 128 pt, whose eyes follow the pointer anywhere over the page, the 48 pt wordmark, the version, and the tagline with a blinking block cursor.
   - Two plates: four sentences of lore with three stats (words yapped, dictations, 0 s of audio uploaded), and spec rows (recognition, runs on, model size, languages, network).
   - Check for Updates…, Licences, Data Folder.
 

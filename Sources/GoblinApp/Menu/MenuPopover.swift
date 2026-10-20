@@ -8,14 +8,11 @@ import SwiftUI
 struct MenuPopover: View {
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
-    /// Changes only when the pointer crosses into another direction, not on every move.
-    @State private var gaze = Gaze.ahead
-    /// The goblin's eye line in window coordinates, reported by the header.
-    @State private var eyes = CGPoint.zero
+    @State private var eyes = GoblinEyes()
 
     var body: some View {
         VStack(spacing: 8) {
-            PopoverHeader(model: model, gaze: gaze, eyes: $eyes)
+            PopoverHeader(model: model, eyes: eyes)
             PopoverNotices(model: model)
             PopoverMicrophone(preview: model.audioPreview)
             HStack(spacing: 8) { PopoverCleanup(model: model); PopoverTone() }
@@ -26,16 +23,11 @@ struct MenuPopover: View {
         .frame(width: 360)
         // The gaps between modules count too, so the eyes don't snap back between rows.
         .contentShape(.rect)
-        .onContinuousHover(coordinateSpace: .global) { phase in
-            switch phase {
-            case .active(let pointer): gaze = .toward(dx: pointer.x - eyes.x, dy: pointer.y - eyes.y, from: gaze)
-            case .ended: gaze = .ahead
-            }
-        }
+        .onContinuousHover(coordinateSpace: .global, perform: eyes.follow)
         .onAppear { model.closePopover = { dismiss() } }
         .onDisappear {
             model.closePopover = nil
-            gaze = .ahead
+            eyes.gaze = .ahead
         }
     }
 }
@@ -52,8 +44,7 @@ private extension DismissAction {
 
 private struct PopoverHeader: View {
     @ObservedObject var model: AppModel
-    let gaze: Gaze
-    @Binding var eyes: CGPoint
+    let eyes: GoblinEyes
     @ObservedObject private var diagnostics: DiagnosticsModel
     @ObservedObject private var speechModels: SpeechModelService
     @ObservedObject private var hotkeys: HotkeyService
@@ -62,10 +53,9 @@ private struct PopoverHeader: View {
     @ObservedObject private var updates: UpdateChecker
     @Environment(\.dismiss) private var dismiss
 
-    init(model: AppModel, gaze: Gaze, eyes: Binding<CGPoint>) {
+    init(model: AppModel, eyes: GoblinEyes) {
         self.model = model
-        self.gaze = gaze
-        _eyes = eyes
+        self.eyes = eyes
         _diagnostics = ObservedObject(wrappedValue: model.diagnostics)
         _speechModels = ObservedObject(wrappedValue: model.speechModels)
         _hotkeys = ObservedObject(wrappedValue: model.hotkeys)
@@ -76,12 +66,7 @@ private struct PopoverHeader: View {
     var body: some View {
         let status = model.status
         return HStack(spacing: 10) {
-            PixelSprite(sprite: diagnostics.hasWarning ? .side : Sprite(rawValue: "goblin-eyes-" + gaze.rawValue)!, scale: 1)
-                // The eyes sit on art row 31 of 64.
-                .onGeometryChange(for: CGPoint.self) { proxy in
-                    let frame = proxy.frame(in: .global)
-                    return CGPoint(x: frame.midX, y: frame.minY + frame.height * 31 / 64)
-                } action: { eyes = $0 }
+            if diagnostics.hasWarning { PixelSprite(sprite: .side, scale: 1) } else { GazingGoblin(eyes: eyes) }
             VStack(alignment: .leading, spacing: 5) {
                 GoblinWordmark(size: 24)
                 HStack(spacing: 6) {

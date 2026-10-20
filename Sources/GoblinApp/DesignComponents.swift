@@ -413,3 +413,36 @@ extension View {
         return .handled
     }
 }
+
+/// Where a `GazingGoblin` looks. Feed it the pointer from the whole region it should watch:
+/// `.onContinuousHover(coordinateSpace: .global, perform: eyes.follow)`.
+@MainActor @Observable final class GoblinEyes {
+    /// Changes only when the pointer crosses into another direction, not on every move.
+    var gaze = Gaze.ahead
+    /// The goblin's eye line in global coordinates and its points per art pixel, reported by the goblin.
+    @ObservationIgnored fileprivate var center = CGPoint.zero
+    @ObservationIgnored fileprivate var scale: CGFloat = 1
+
+    func follow(_ phase: HoverPhase) {
+        var next = Gaze.ahead
+        if case .active(let pointer) = phase {
+            next = .toward(dx: (pointer.x - center.x) / scale, dy: (pointer.y - center.y) / scale, from: gaze)
+        }
+        if next != gaze { gaze = next }
+    }
+}
+
+/// The goblin with slit pupils looking where `eyes` says.
+struct GazingGoblin: View {
+    let eyes: GoblinEyes
+    var scale: CGFloat = 1
+
+    var body: some View {
+        PixelSprite(sprite: Sprite(rawValue: "goblin-eyes-" + eyes.gaze.rawValue)!, scale: scale)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                // The eyes sit on art row 31 of 64.
+                eyes.center = CGPoint(x: frame.midX, y: frame.minY + frame.height * 31 / 64)
+                eyes.scale = frame.width / 64
+            }
+    }
+}

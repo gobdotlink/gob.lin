@@ -29,6 +29,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     var speechModels: SpeechModelService? = nil
+    /// The About goblin's; it watches the pointer anywhere in the detail pane.
+    @State private var eyes = GoblinEyes()
 
     private var section: SettingsSection { model.settingsSelection ?? .general }
 
@@ -71,6 +73,8 @@ struct SettingsView: View {
             }
                 .id(section)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .contentShape(.rect)
+                .onContinuousHover(coordinateSpace: .global, perform: eyes.follow)
                 .caseBackground()
                 .navigationTitle(section.rawValue)
                 .toolbar(removing: .title)
@@ -100,7 +104,7 @@ struct SettingsView: View {
         case .history, .insights: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
-        case .about: AboutSettingsView(updates: model.updates, history: model.history)
+        case .about: AboutSettingsView(updates: model.updates, history: model.history, eyes: eyes)
         }
     }
 }
@@ -282,13 +286,14 @@ private struct GeneralSettingsView: View {
 private struct AboutSettingsView: View {
     @ObservedObject var updates: UpdateChecker
     @ObservedObject var history: HistoryModel
+    let eyes: GoblinEyes
     @State private var totalWords: Int?
     @State private var modelSize: String?
 
     var body: some View {
         Section {
             VStack(spacing: 0) {
-                PixelSprite(sprite: .shut, scale: 2)
+                GazingGoblin(eyes: eyes, scale: 2)
                 GoblinWordmark(size: 48).padding(.top, 10)
                 Text(versionLine).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
                     .textSelection(.enabled).padding(.top, 8)
