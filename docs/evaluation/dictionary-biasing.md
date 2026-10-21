@@ -145,6 +145,67 @@ OpenRouter and “Type save” → “TypeSafe Watcher” (from hints).
   prototype prompt field that is not part of this repository.
 - Two requests failed after three retries with HTTP 429 (rate limit). The app would paste the uncleaned text.
 
+## Other Parakeet models
+
+**Run:** 21 October 2026, same Mac, frozen clips and glossaries, one process per arm. Parakeet Ultra, Redux and Phonon-2
+ship v3's exact `parakeet_vocab.json` (same SHA-256 in `speech-model-assets.json`), so the CTC 110M correction sees the
+same token pieces. TDT-CTC 110M uses its own 1,024-token vocabulary and was not evaluated. Each arm is
+`dictionary-eval --guard spelling --text-join` with FluidAudio defaults, then `rewrite-eval` with the same Cleanup
+settings as above, once from the recognizer's own text (Cleanup only, today's app before this change) and once from
+the corrected text. v3 was rerun as a control and reproduced 83/96 and 80/96 for guard + join, and 92/96 and 85/96 for
+guard + join → Qwen, exactly.
+
+**Rule, fixed before scoring:** a model qualifies only with zero ordinary-word damage and more names than its
+Cleanup-only baseline, on both glossaries.
+
+Unseen clips (fresh + holdout 2): 96 name clips, 96 ordinary clips. Cells are names · ordinary sentences worsened ·
+words damaged · wrong term.
+
+| Model | Pipeline | 16 terms | 120 terms | Median ms (16 / 120) |
+| --- | --- | --- | --- | ---: |
+| Parakeet TDT v3 | no dictionary | 51/96 · 0 · 0 · 0 | 51/96 · 0 · 0 · 0 | 42 / 43 |
+| | + guard + join | 83/96 · 0 · 0 · 1 | 80/96 · 0 · 0 · 0 | 154 / 198 |
+| | → Qwen + terms (Cleanup only) | 89/96 · 0 · 0 · 0 † | 74/96 · 0 · 0 · 1 | 215 / 328 |
+| | **+ guard + join → Qwen + terms** | **92/96 · 0 · 0 · 1** | **85/96 · 0 · 0 · 0** | 226 / 325 |
+| Parakeet Ultra | no dictionary | 53/96 · 0 · 0 · 0 | 53/96 · 0 · 0 · 0 | 43 / 43 |
+| | + guard + join | 80/96 · 0 · 0 · 1 | 79/96 · 0 · 0 · 0 | 155 / 200 |
+| | → Qwen + terms (Cleanup only) | 87/96 · 0 · 0 · 0 | 74/96 · 0 · 0 · 0 | 205 / 327 |
+| | **+ guard + join → Qwen + terms** | **90/96 · 0 · 0 · 1** | **86/96 · 0 · 0 · 0** | 205 / 310 |
+| Parakeet Redux | no dictionary | 35/96 · 0 · 0 · 0 | 35/96 · 0 · 0 · 0 | 69 / 68 ‡ |
+| | + guard + join | 76/96 · 0 · 0 · 0 | 73/96 · 0 · 0 · 1 | 184 / 225 |
+| | → Qwen + terms (Cleanup only) | 77/96 · 0 · 0 · 0 | 65/96 · 0 · 0 · 2 | 208 / 332 |
+| | **+ guard + join → Qwen + terms** | **84/96 · 0 · 0 · 0** | **78/96 · 0 · 0 · 1** | 221 / 331 |
+| Phonon-2 | no dictionary | 38/96 · 0 · 0 · 0 | 38/96 · 0 · 0 · 0 | 39 / 40 |
+| | + guard + join | 76/96 · 0 · 0 · 1 | 76/96 · 0 · 0 · 0 | 150 / 199 |
+| | → Qwen + terms (Cleanup only) | 86/96 · 0 · 0 · 0 (repeat 85) | 67/96 · 0 · 0 · 2 | 202 / 336 |
+| | **+ guard + join → Qwen + terms** | **87/96 · 0 · 0 · 1 (repeat 87)** | **84/96 · 0 · 0 · 0** | 195 / 320 |
+
+Recognition-only rows time recognition (with correction where applied); Qwen rows time Cleanup.
+† The same Cleanup over the same text gave 86/96 in the earlier run: Qwen at temperature 0 still varies by a few clips.
+‡ Redux printed a Core ML ANE compile error (`E5RT … ANECCompile() FAILED`) and ran slower than v3 unbiased; the noise
+line was removed from its JSONL, and all 128 clip records were present.
+
+On the original split (32 name clips, used to tune the guard), guard + join → Qwen scored 32/32 on every model with 16
+terms, and 30–32/32 with 120 terms, again with no damage.
+
+- **All four qualify.** None damaged an ordinary word, in any arm. Every model gained most from correction with the
+  long list: Cleanup alone lost 12–19 names going from 16 to 120 terms, the combination 3–7.
+- **Phonon-2's 16-term margin is narrow:** 87 against 86, and 87 against 85 when both Cleanup arms were repeated. It
+  clears the rule, but by about the run-to-run variance of Cleanup. With 120 terms it gains 17.
+- **Ultra** recognizes slightly more names than v3 unbiased (53 against 51) but its correction recovers a few fewer, so
+  the combined pipeline lands close to v3's (90 and 86 against 92 and 85).
+- **Redux** starts lowest (35/96) and gains the most from correction (+41 names).
+- Correction costs about 110–160 ms per short clip on every model; Cleanup times are unchanged.
+
+### The app's correction path
+
+`dictionary-eval --parakeet-correction app` runs the shipped path inside `ParakeetSpeechEngine`: recognition, CTC
+rescoring, the spelling guard with one main-thread spell-check pass, text join, and the English gate. Its first English
+gate (unconstrained Natural Language) read "Kalikan approved the design yesterday afternoon." as Indonesian and skipped
+correction on that clip. Detection is now constrained to the model's languages, which reads it as English (0.99). With
+that fix, the app path produced exactly the research arm's text on all 2,048 clip–glossary pairs (4 models × 256 clips ×
+2 glossaries), so the table above describes the app.
+
 ## What this does and does not establish
 
 - On this set, Moonshine's decoder-time key terms recovered names without the false replacements that Parakeet's
@@ -156,6 +217,8 @@ OpenRouter and “Type save” → “TypeSafe Watcher” (from hints).
 - Moonshine still missed acoustically distant names (“Kalikin” heard as “Halakin”/“Callahan”) and split “TypeSafe” into
   “Type save”. Its base WER is similar to Parakeet's here, but nothing here measures natural speech, accents, long
   dictation or live streaming.
+- Parakeet v3, Ultra, Redux and Phonon-2 now ship this correction in the app, for English dictation only. CTC 110M and
+  the spell checker are English; correction in Parakeet's other 24 languages is unmeasured and disabled.
 - Moonshine is a CLI diagnostic only. Adopting it in the app needs a catalog entry, pinned model hashes, live-preview
   integration and natural-speech validation.
 
@@ -167,6 +230,8 @@ scripts/score-dictionary-eval.py --split original <output-dir>/*.jsonl
 scripts/score-dictionary-eval.py --split fresh <output-dir>/*.jsonl
 scripts/score-dictionary-eval.py --json <arm>.jsonl           # per-case damage details
 goblin rewrite-eval <arm>.jsonl --glossary <terms> [--text-join]  # sends transcripts to the saved cleanup provider
+goblin dictionary-eval <manifest.json> --model parakeet-ultra --glossary <terms> --guard spelling --text-join
+goblin dictionary-eval <manifest.json> --model parakeet-ultra --glossary <terms> --parakeet-correction app
 ```
 
 `goblin dictionary-eval <manifest.json> --glossary <terms>` writes one configuration record and one paired

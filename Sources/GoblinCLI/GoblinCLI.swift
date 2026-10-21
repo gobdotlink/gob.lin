@@ -49,6 +49,7 @@ struct GoblinCLI {
                      "runtime": model.runtime, "downloadBytes": model.downloadBytes, "languages": model.capabilities.languageCodes,
                      "automaticLanguage": model.capabilities.automaticLanguage, "livePreview": model.capabilities.livePreview,
                      "customVocabulary": model.capabilities.customVocabulary,
+                     "dictionaryCorrection": model.capabilities.dictionaryCorrection,
                      "recommended": model.recommended,
                      "default": model.id == SpeechModelCatalog.defaultModel.id] as [String: Any]
                 }
@@ -57,7 +58,7 @@ struct GoblinCLI {
             }
             let runtime = SpeechRuntimeFactory.make(model, directory: modelDirectory)
             var options = model.capabilities.options(for: language)
-            if model.capabilities.customVocabulary, ["transcribe", "replay"].contains(arguments.first ?? ""),
+            if model.capabilities.recognitionDictionary, ["transcribe", "replay"].contains(arguments.first ?? ""),
                !arguments.contains("--recorded") {
                 var dictionary = DictionaryRepository.applicationDefault
                 if let index = arguments.firstIndex(of: "--dictionary") {
@@ -74,14 +75,15 @@ struct GoblinCLI {
                     arguments.firstIndex(of: option).flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
                 }
                 let scope = DictionaryScope(application: value("--app"), project: value("--project"))
-                options = RecognitionOptions(language: options.language, vocabulary: try dictionary.load().active(in: scope).map(\.spelling))
+                options = RecognitionOptions(language: options.language, vocabulary: try dictionary.load().active(in: scope).map(\.spelling),
+                                             dictionaryCorrection: model.capabilities.dictionaryCorrection)
             }
             if arguments.first == "prepare-model" {
                 guard arguments.count == 1 || arguments == ["prepare-model", "--vocabulary-support"] else {
                     throw CommandError.usage("Usage: goblin prepare-model [--vocabulary-support] [--model-dir <path>]")
                 }
-                guard arguments.count == 1 || model.id == SpeechModelCatalog.parakeet.id else {
-                    throw CommandError.usage("--vocabulary-support is a Parakeet TDT v3 diagnostic.")
+                guard arguments.count == 1 || model.sharesParakeetV3Vocabulary else {
+                    throw CommandError.usage("--vocabulary-support needs a Parakeet model with v3's vocabulary.")
                 }
                 try await SpeechBenchmark.prepare(runtime, model: model, vocabularySupport: arguments.count == 2)
             } else if arguments.first == "dictionary-eval" {
@@ -89,7 +91,8 @@ struct GoblinCLI {
             } else if arguments.first == "benchmark" {
                 try await SpeechBenchmark.run(Array(arguments.dropFirst()), engine: runtime.engine, directory: runtime.store.directory, options: options)
             } else {
-                try await GoblinCommands(pipeline: RecordedAudioPipeline(engine: runtime.engine, options: options)).run(arguments)
+                try await GoblinCommands(pipeline: RecordedAudioPipeline(engine: runtime.engine, options: options),
+                                         correcting: options.dictionaryCorrection && !options.vocabulary.isEmpty).run(arguments)
             }
             await runtime.engine.unload()
         } catch {
@@ -116,6 +119,16 @@ enum CommandError: Error, LocalizedError {
 
 private struct GoblinCommands {
     let pipeline: RecordedAudioPipeline?
+    /// Dictionary correction loads after the model, only when there are terms and its pinned files are installed.
+    var correcting = false
+
+    private func prepare() async throws {
+        guard let engine = pipeline?.engine as? any PCMSpeechEngine else { return }
+        try await engine.prepare()
+        if correcting, let parakeet = engine as? ParakeetSpeechEngine, parakeet.dictionaryCorrection?.isDownloaded == true {
+            try await parakeet.prepareDictionaryCorrection()
+        }
+    }
     private let processor = TranscriptPostprocessor()
 
     func run(_ arguments: [String]) async throws {
@@ -134,7 +147,7 @@ private struct GoblinCommands {
             guard FileManager.default.isReadableFile(atPath: file.path),
                   try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { throw RecordedAudioError.invalidFile }
             guard let pipeline else { throw RecordedAudioError.engineNotConfigured }
-            try await (pipeline.engine as? any PCMSpeechEngine)?.prepare()
+            try await prepare()
             var result = try await pipeline.transcribe(file)
             if options.enabled {
                 let configuration = try CLIProcessingConfiguration(options: options)
@@ -177,7 +190,7 @@ private struct GoblinCommands {
         if !recorded, pipeline == nil { throw RecordedAudioError.engineNotConfigured }
         if !recorded {
             options.enabled = true
-            try await (pipeline?.engine as? any PCMSpeechEngine)?.prepare()
+            try await prepare()
         }
         let configuration = try options.enabled ? CLIProcessingConfiguration(options: options) : nil
         if source == "history" {
@@ -292,7 +305,8 @@ private struct GoblinCommands {
       goblin --version | --self-check | --help
       goblin models                               Catalog IDs, sizes, languages and capabilities
 
-      goblin prepare-model [--vocabulary-support]  Explicit download; JSON load/cache metrics
+      goblin prepare-model [--vocabulary-support]  Explicit download; JSON load/cache metrics; --vocabulary-support adds
+                                                   the pinned CTC 110M model for Parakeet dictionary correction
       goblin benchmark <file | directory>          Local batch timing JSONL
         [--repeat N] [--windows 1.5,3,6,12] [--cadence-ms 400]
         [--vocabulary <terms-file>]                Diagnostic CTC rescoring; local auxiliary model
@@ -300,7 +314,7 @@ private struct GoblinCommands {
                                                    Paired unbiased/biased JSONL per clip [--split original|fresh]
         [--moonshine tiny|small|medium]            Moonshine key-term biasing instead of --model
         [--keyterm-boost 2] [--pad-ms 500] [--moonshine-dir <path>] [--download]
-        [--parakeet-correction ctc|none] [--guard spelling|confidence:<t>|spelling-or-confidence:<t>] [--text-join]
+        [--parakeet-correction ctc|none|app] [--guard spelling|confidence:<t>|spelling-or-confidence:<t>] [--text-join]
       goblin rewrite-eval <dictionary-eval.jsonl> --glossary <terms> | --no-glossary
                                                    Saved AI cleanup over those results; sends transcripts to the provider
         [--source raw|text] [--text-join] [--concurrency 4]
@@ -312,8 +326,9 @@ private struct GoblinCommands {
     Transcribe/replay/benchmark load local models only.
     Run prepare-model once before recognition. Recognition and benchmarks run locally.
     Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>, --app <bundle-id>, --project <name>.
-    Transcribe/replay also send preferred spellings to models with customVocabulary support.
-    Whole terms fit alphabetically within the native token budget; transcribe reports dictionaryUsage.
+    Transcribe/replay also send preferred spellings to models with customVocabulary support (Whisper's prompt;
+    whole terms fit alphabetically within the token budget; transcribe reports dictionaryUsage) or dictionaryCorrection
+    (Parakeet v3, Ultra, Redux and Phonon-2; English only, after prepare-model --vocabulary-support).
     --rewrite additionally opts into your enabled provider and reads its saved key.
     Ground truth, jargon, and ordinary-word annotations are needed for accuracy metrics.
     """

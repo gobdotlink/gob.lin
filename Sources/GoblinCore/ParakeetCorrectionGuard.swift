@@ -1,61 +1,46 @@
-import AppKit
 import Foundation
-import GoblinEngines
 
-/// Benchmark-only filters for Parakeet's post-recognition CTC corrections.
+/// Filters Parakeet's post-recognition CTC corrections, then rejoins dictionary terms split across words.
 /// A correction that only re-spaces a dictionary term ("post hog" -> "PostHog") is always kept; any other
 /// replacement must pass the policy, otherwise the recognizer's original words are restored.
-enum ParakeetCorrectionGuard {
-    enum Policy: Equatable {
+/// The app uses `.spelling` with the system's English spell checker; the confidence policies are evaluation-only.
+public enum ParakeetCorrectionGuard {
+    public enum Policy: Equatable, Sendable {
         case none
-        /// Replace only spans containing a word the system spell checker does not know.
+        /// Replace only spans containing a word the spell checker does not know.
         case spelling
         /// Replace only spans whose least-confident recognized token is below the threshold.
         case confidence(Float)
         /// Either condition suffices.
         case spellingOrConfidence(Float)
-
-        init(_ value: String) throws {
-            let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
-            let threshold = parts.count == 2 ? Float(parts[1]) : nil
-            switch (parts[0], threshold) {
-            case ("none", nil): self = .none
-            case ("spelling", nil): self = .spelling
-            case ("confidence", let t?) where (0...1).contains(t): self = .confidence(t)
-            case ("spelling-or-confidence", let t?) where (0...1).contains(t): self = .spellingOrConfidence(t)
-            default: throw CommandError.usage("--guard must be none, spelling, confidence:<0...1> or spelling-or-confidence:<0...1>")
-            }
-        }
-
-        var description: String {
-            switch self {
-            case .none: "none"
-            case .spelling: "spelling"
-            case .confidence(let t): "confidence:\(t)"
-            case .spellingOrConfidence(let t): "spelling-or-confidence:\(t)"
-            }
-        }
     }
 
-    struct Word {
-        let surface: String
-        let key: String
+    public struct Word: Equatable, Sendable {
+        public let surface: String
+        public let key: String
         /// Least-confident recognizer token in the word, when token timings were available.
-        var confidence: Float?
+        public var confidence: Float?
+
+        public init(surface: String, confidence: Float? = nil) {
+            self.surface = surface
+            key = ParakeetCorrectionGuard.key(surface)
+            self.confidence = confidence
+        }
     }
 
-    static func key(_ text: String) -> String {
+    public static func key(_ text: String) -> String {
         String(text.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))
     }
 
     /// Whitespace-separated words. Punctuation-only tokens ("—") have an empty key and are kept for reconstruction.
-    static func words(_ text: String) -> [Word] {
-        text.split(whereSeparator: \.isWhitespace).map { Word(surface: String($0), key: key(String($0))) }
+    public static func words(_ text: String) -> [Word] {
+        text.split(whereSeparator: \.isWhitespace).map { Word(surface: String($0)) }
     }
 
     /// Joins two or three adjacent words whose letters and digits equal a term's, keeping outer punctuation.
     /// A single word is only recased, and only to a term without punctuation, so "C" never becomes "C++".
-    static func textJoin(_ text: String, terms: [String]) -> String {
+    /// Words with inner punctuation are never joined or recased, so "I'd" never becomes "ID" nor "It's" "ITS".
+    public static func textJoin(_ text: String, terms: [String]) -> String {
         let keys = Dictionary(terms.compactMap { term in key(term).isEmpty ? nil : (key(term), term) },
                               uniquingKeysWith: { first, _ in first })
         let tokens = text.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -66,7 +51,9 @@ enum ParakeetCorrectionGuard {
             var matched = false
             for length in stride(from: min(3, tokens.count - index), through: 1, by: -1) {
                 let span = Array(tokens[index..<(index + length)])
-                guard let term = keys[key(span.joined())] else { continue }
+                guard let term = keys[key(span.joined())],
+                      span.allSatisfy({ $0.drop { !isWordCharacter($0) }.reversed().drop { !isWordCharacter($0) }.allSatisfy(isWordCharacter) })
+                else { continue }
                 if length == 1 {
                     guard term.allSatisfy({ isWordCharacter($0) || $0 == " " }) else { continue }
                 } else {
@@ -91,40 +78,17 @@ enum ParakeetCorrectionGuard {
         return output.joined(separator: " ")
     }
 
-    /// Recognized words with token confidences, aligned to the whitespace words of the transcript.
-    static func recognizedWords(_ recognition: TranscriptionResult) -> [Word] {
-        var spoken: [(key: String, confidence: Float)] = []
-        var boundary = true
-        for token in recognition.tokens {
-            // A standalone boundary piece (" " or "▁") starts the next word even though it has no letters.
-            if token.text.hasPrefix(" ") || token.text.hasPrefix("\u{2581}") { boundary = true }
-            let piece = key(token.text)
-            guard !piece.isEmpty else { continue }
-            if boundary || spoken.isEmpty { spoken.append((piece, token.confidence)) }
-            else { spoken[spoken.count - 1].key += piece; spoken[spoken.count - 1].confidence = min(spoken[spoken.count - 1].confidence, token.confidence) }
-            boundary = false
-        }
-        var result = words(recognition.text)
-        var cursor = 0
-        for index in result.indices where !result[index].key.isEmpty {
-            // Token words and transcript words normally match one-to-one; skip any that drift.
-            if cursor < spoken.count, let match = spoken[cursor...].firstIndex(where: { $0.key == result[index].key }), match - cursor <= 2 {
-                result[index].confidence = spoken[match].confidence
-                cursor = match + 1
-            }
-        }
-        return result
+    public struct Outcome: Equatable, Sendable {
+        public let text: String
+        public let accepted: Int
+        public let rejected: Int
     }
 
-    struct Outcome {
-        let text: String
-        let accepted: Int
-        let rejected: Int
-    }
-
-    static func apply(_ policy: Policy, recognition: TranscriptionResult, corrected: String, terms: [String]) -> Outcome {
+    /// `original` is the recognizer's own words, with confidences for the confidence policies.
+    /// `isKnownWord` receives a recognized word with its punctuation; the app passes the system spell checker.
+    public static func apply(_ policy: Policy, original: [Word], corrected: String, terms: [String],
+                             isKnownWord: (String) -> Bool) -> Outcome {
         guard policy != .none else { return Outcome(text: corrected, accepted: 0, rejected: 0) }
-        let original = recognizedWords(recognition)
         let changed = words(corrected)
         let termKeys = Set(terms.map(key)).subtracting([""])
         var output: [String] = []
@@ -203,20 +167,6 @@ enum ParakeetCorrectionGuard {
             i += a; j += b
         }
         return pieces
-    }
-
-    // NSSpellChecker knows inflections ("manages", "windows") that plain word lists lack.
-    // Proper nouns are accepted in their capitalized form ("Monday").
-    private static func isKnownWord(_ surface: String) -> Bool {
-        let word = surface.trimmingCharacters(in: .punctuationCharacters)
-        guard word.contains(where: \.isLetter) else { return true }
-        let checker = NSSpellChecker.shared
-        func known(_ value: String) -> Bool {
-            checker.checkSpelling(of: value, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil)
-                .location == NSNotFound
-        }
-        let lower = word.lowercased()
-        return known(lower) || known(lower.prefix(1).uppercased() + lower.dropFirst())
     }
 
     struct Block {

@@ -98,6 +98,7 @@ struct ModelSettingsView: View {
                     LabeledContent("Runtime", value: service.selectedModel.runtime)
                     LabeledContent("Download Size", value: modelSize(service.selectedModel))
                     LabeledContent("Supported Languages", value: "\(service.selectedModel.capabilities.languageCodes.count)")
+                    LabeledContent("Dictionary", value: dictionarySupport(service.selectedModel))
                     if let timing = service.lastLoadTiming {
                         LabeledContent("Model Load") { Text(String(format: "%.0f ms", timing.runtimeLoadMilliseconds)).monospacedDigit() }
                         LabeledContent("Total Preparation") { Text(String(format: "%.0f ms", timing.preparationMilliseconds)).monospacedDigit() }
@@ -201,27 +202,10 @@ struct SpeechModelRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.name).fontWeight(.semibold)
                 Text(model.selectionSummary).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                HStack(spacing: 5) {
-                    Text(modelSize(model)).monospacedDigit()
-                    Text("·")
-                    Button {
-                        showLanguages = true
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text(model.capabilities.languageCodes.count == 1 ? "\(languageName(model.capabilities.languageCodes[0])) only"
-                                 : "\(model.capabilities.languageCodes.count) languages").monospacedDigit()
-                                .underline(color: GoblinBrand.mossText.opacity(0.4))
-                            Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-                        }.contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).foregroundStyle(GoblinBrand.mossText)
-                    .accessibilityLabel("Show languages supported by \(model.name)")
-                    .popover(isPresented: $showLanguages) { ModelLanguagesPopover(model: model) }
-                    Text("·")
-                    Text(model.capabilities.livePreview ? "Text while speaking" : "Text after recording")
-                    Text("·")
-                    Text(model.released, format: .dateTime.month(.abbreviated).year())
-                        .accessibilityLabel("Released \(model.released.formatted(.dateTime.month(.wide).year()))")
+                // The dictionary marker is the first thing to go when the row is narrow.
+                ViewThatFits(in: .horizontal) {
+                    if model.capabilities.recognitionDictionary { details(dictionary: true) }
+                    details(dictionary: false)
                 }.font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(spacing: 7) { action }
@@ -231,6 +215,35 @@ struct SpeechModelRow: View {
         .background(current ? GoblinBrand.moss.opacity(contrast == .increased ? 0.18 : 0.10) : Color.clear)
         .overlay(alignment: .leading) { if current { GoblinBrand.moss.frame(width: 3) } }
         .accessibilityElement(children: .contain)
+    }
+
+    private func details(dictionary: Bool) -> some View {
+        HStack(spacing: 5) {
+            Text(modelSize(model)).monospacedDigit()
+            Text("·")
+            Button {
+                showLanguages = true
+            } label: {
+                HStack(spacing: 3) {
+                    Text(model.capabilities.languageCodes.count == 1 ? "\(languageName(model.capabilities.languageCodes[0])) only"
+                         : "\(model.capabilities.languageCodes.count) languages").monospacedDigit()
+                        .underline(color: GoblinBrand.mossText.opacity(0.4))
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(GoblinBrand.mossText)
+            .accessibilityLabel("Show languages supported by \(model.name)")
+            .popover(isPresented: $showLanguages) { ModelLanguagesPopover(model: model) }
+            Text("·")
+            Text(model.capabilities.livePreview ? "Text while speaking" : "Text after recording")
+            if dictionary {
+                Text("·")
+                Text("Dictionary").accessibilityLabel("Uses your dictionary during recognition")
+            }
+            Text("·")
+            Text(model.released, format: .dateTime.month(.abbreviated).year())
+                .accessibilityLabel("Released \(model.released.formatted(.dateTime.month(.wide).year()))")
+        }
     }
 
     @ViewBuilder private var action: some View {
@@ -405,4 +418,11 @@ private func sortedLanguages(_ codes: [String]) -> [String] {
 }
 private func modelSize(_ model: SpeechModelDescriptor) -> String {
     ByteCountFormatter.string(fromByteCount: model.downloadBytes, countStyle: .decimal)
+}
+
+private func dictionarySupport(_ model: SpeechModelDescriptor) -> String {
+    if model.capabilities.customVocabulary { return "Spelling hints while recognizing" }
+    guard model.capabilities.dictionaryCorrection else { return "Aliases and Cleanup only" }
+    let size = ByteCountFormatter.string(fromByteCount: ParakeetDictionaryCorrection.downloadBytes, countStyle: .decimal)
+    return "Correction after recognition, English · \(size) extra"
 }

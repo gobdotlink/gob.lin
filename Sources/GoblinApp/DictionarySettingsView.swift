@@ -114,6 +114,30 @@ struct DictionarySettingsView: View {
         return entries.sorted { $0.spelling.localizedStandardCompare($1.spelling) == .orderedAscending }
     }
 
+    /// Parakeet's correction: a CTC model rescores each finished English dictation; the spelling guard keeps a change only
+    /// when it rejoins a split term or replaces a word the spell checker doesn't know.
+    @ViewBuilder private func correctionStatus(terms: Int) -> some View {
+        let name = service.selectedModel.name
+        let size = ByteCountFormatter.string(fromByteCount: ParakeetDictionaryCorrection.downloadBytes, countStyle: .decimal)
+        switch service.dictionaryCorrection {
+        case .unsupported, .noTerms:
+            StatusRow(.ready, Text("\(name) corrects your terms after recognizing English dictation. When you add a term, I'll download a \(size) correction model."))
+        case .preparing(let progress):
+            StatusRow(.waiting, Text("I'm preparing the dictionary correction model. Until it's ready, I use your terms in aliases and Cleanup only.")) {
+                if let fraction = progress.fractionCompleted { Text(fraction, format: .percent.precision(.fractionLength(0))).monospacedDigit() }
+            }
+        case .ready:
+            StatusRow(.ready, Text("I correct \(terms) \(terms == 1 ? "term" : "terms")\(model.entries.contains(where: \.isScoped) ? " used in every app" : "") after \(name) recognizes English dictation. I only replace words the spell checker doesn't know, or rejoin a term split into words.").monospacedDigit())
+        case .failed(let message):
+            StatusRow(.problem, Text("I couldn't prepare dictionary correction: \(message)")) {
+                Button("Retry") { service.retryDictionaryCorrection() }
+            }
+        }
+        if service.selectedModel.capabilities.languageCodes.count > 1 {
+            StatusRow(.off, Text("Other languages aren't corrected during recognition; their terms still reach aliases and Cleanup."))
+        }
+    }
+
     private static func describe(_ source: DetectedProject.Source) -> String {
         switch source {
         case .repository: "from the open file's repository"
@@ -133,9 +157,12 @@ struct DictionarySettingsView: View {
             } label: {
                 Text("Speech Model")
                 if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms in alphabetical order") }
+                if service.selectedModel.capabilities.dictionaryCorrection { Text("Correction after recognition · English dictation") }
             }
             if !model.available {
                 StatusRow(.problem, Text("I couldn't load your dictionary."))
+            } else if service.selectedModel.capabilities.dictionaryCorrection {
+                correctionStatus(terms: current.terms.count)
             } else if !service.selectedModel.capabilities.customVocabulary {
                 StatusRow(.off, Text("\(service.selectedModel.name) doesn't support a native dictionary. I don't send terms during recognition."))
             } else if current.terms.isEmpty {
@@ -155,6 +182,9 @@ struct DictionarySettingsView: View {
             }
             if model.available, service.selectedModel.capabilities.customVocabulary, scoped {
                 StatusRow(.ready, Text("App-specific terms join these when you dictate into their apps and share the same limit. Project terms apply after recognition, once I know the project."))
+            }
+            if model.available, service.selectedModel.capabilities.dictionaryCorrection, scoped {
+                StatusRow(.ready, Text("App-specific terms join these when you dictate into their apps. Project terms apply in aliases and Cleanup, once I know the project, and when you retranscribe from History."))
             }
         } header: { Text("Native Recognition") }
         .task(id: current) {

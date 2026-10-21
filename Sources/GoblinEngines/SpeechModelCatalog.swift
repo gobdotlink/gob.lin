@@ -8,11 +8,18 @@ public struct SpeechModelCapabilities: Sendable, Equatable {
     public let fileTranscription = true
     public let pcmTranscription = true
     public let nativeStreaming = false
+    /// Whisper's decoder prompt: preferred spellings guide decoding within a token budget.
     public let customVocabulary: Bool
+    /// Parakeet's dictionary correction after recognition: CTC 110M rescoring, the spelling guard and text join.
+    /// English dictation only; it needs a separately downloaded model.
+    public let dictionaryCorrection: Bool
     public let livePreview: Bool
     public let automaticLanguage: Bool
     public let languageControl: SpeechLanguageControl
     public let languageCodes: [String]
+
+    /// Whether recognition uses dictionary terms at all, by either mechanism.
+    public var recognitionDictionary: Bool { customVocabulary || dictionaryCorrection }
 
     public func options(for intent: String) -> RecognitionOptions {
         let preferred = SpeechModelCatalog.canonicalLanguage(intent)
@@ -93,6 +100,9 @@ public enum SpeechModelCatalog {
     public static let supported = [parakeet, whisperTiny, whisperTurbo, whisperLarge,
         parakeetRedux, parakeetUltra, phonon, parakeetCompact, senseVoice, nemotron,
         whisperTinyEnglish, whisperBase, whisperBaseEnglish, whisperSmall, whisperSmallEnglish, whisperMedium, whisperMediumEnglish]
+    /// Models whose dictionary correction recovered more names than Cleanup alone with no ordinary-word damage on the
+    /// unseen evaluation clips. Each must share v3's vocabulary; see docs/evaluation/dictionary-biasing.md.
+    static let dictionaryCorrectionModels: Set<String> = ["parakeet-tdt-v3", "parakeet-ultra", "parakeet-redux", "phonon-2"]
     public static var recommended: [SpeechModelDescriptor] { supported.filter(\.recommended) }
     public static let defaultModel = parakeet
 
@@ -130,9 +140,21 @@ public enum SpeechModelCatalog {
                               folder: String? = nil, automatic: Bool = true, preview: Bool = true,
                               control: SpeechLanguageControl = .explicit) -> SpeechModelDescriptor {
         SpeechModelDescriptor(id: id, name: name, purpose: purpose, detail: detail, recommended: recommended, kind: kind, cacheFolder: folder ?? id,
-            capabilities: SpeechModelCapabilities(customVocabulary: kind == .whisper, livePreview: preview, automaticLanguage: automatic, languageControl: control,
+            capabilities: SpeechModelCapabilities(customVocabulary: kind == .whisper,
+                                                 dictionaryCorrection: dictionaryCorrectionModels.contains(id), livePreview: preview, automaticLanguage: automatic, languageControl: control,
                                                  languageCodes: SpeechModelAssets.manifest(for: id).languages),
             released: Calendar(identifier: .gregorian).date(from: DateComponents(year: released.year, month: released.month, day: 15))!)
+    }
+}
+
+public extension SpeechModelDescriptor {
+    /// Parakeet models that ship v3's exact `parakeet_vocab.json` (v3, Redux, Ultra, Phonon-2), so CTC 110M dictionary
+    /// correction sees the same token pieces it was evaluated against. TDT-CTC 110M uses a different, smaller vocabulary.
+    var sharesParakeetV3Vocabulary: Bool {
+        func vocabulary(_ id: String) -> String? {
+            SpeechModelAssets.manifest(for: id).files.first { $0.destination == "parakeet_vocab.json" }?.sha256
+        }
+        return kind == .parakeet && vocabulary(id) != nil && vocabulary(id) == vocabulary(SpeechModelCatalog.parakeet.id)
     }
 }
 

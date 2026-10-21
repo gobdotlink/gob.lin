@@ -20,13 +20,15 @@ enum DictionaryEvaluation {
         case ctcRescoring(any PCMSpeechEngine, VocabularyDiagnostic.Loaded, ParakeetCorrectionGuard.Policy)
         case recognitionOnly(any PCMSpeechEngine)
         case nativeVocabulary(any PCMSpeechEngine)
+        /// The app's own path: the engine's integrated rescore, spelling guard and text join.
+        case appCorrection(any PCMSpeechEngine)
         case keyterms(MoonshineDiagnostic)
     }
 
     static let usage = """
         Usage: goblin dictionary-eval <manifest.json> --glossary <terms.txt | terms.json> [--split original|fresh]
           [--moonshine tiny|small|medium [--keyterm-boost 0...4] [--pad-ms 500] [--moonshine-dir <path>] [--download]]
-          [--parakeet-correction ctc|none] [--guard none|spelling|confidence:<t>|spelling-or-confidence:<t>] [--text-join]
+          [--parakeet-correction ctc|none|app] [--guard none|spelling|confidence:<t>|spelling-or-confidence:<t>] [--text-join]
         """
 
     static func run(_ arguments: [String], model: SpeechModelDescriptor, runtime: SpeechModelRuntime, options: RecognitionOptions) async throws {
@@ -59,11 +61,17 @@ enum DictionaryEvaluation {
         let terms = try glossaryTerms(glossaryData, json: glossaryURL.pathExtension.lowercased() == "json")
         guard !terms.isEmpty else { throw CommandError.usage("The glossary contains no terms") }
         let correctionGuard = try ParakeetCorrectionGuard.Policy(values["--guard"] ?? "none")
-        guard [nil, "ctc", "none"].contains(values["--parakeet-correction"]) else { throw CommandError.usage("--parakeet-correction must be ctc or none") }
+        guard [nil, "ctc", "none", "app"].contains(values["--parakeet-correction"]) else {
+            throw CommandError.usage("--parakeet-correction must be ctc, none or app")
+        }
         let usesCTC = values["--parakeet-correction"] != "none"
+        let appCorrection = values["--parakeet-correction"] == "app"
+        guard !appCorrection || (model.capabilities.dictionaryCorrection && values["--guard"] == nil && !textJoin) else {
+            throw CommandError.usage("--parakeet-correction app needs a model with dictionary correction and already applies the spelling guard and text join")
+        }
         guard (values["--guard"] == nil && values["--parakeet-correction"] == nil)
-                || (values["--moonshine"] == nil && model.id == SpeechModelCatalog.parakeet.id) else {
-            throw CommandError.usage("--guard and --parakeet-correction are Parakeet TDT v3 options")
+                || (values["--moonshine"] == nil && model.sharesParakeetV3Vocabulary) else {
+            throw CommandError.usage("--guard and --parakeet-correction need a Parakeet model with v3's vocabulary")
         }
         guard usesCTC || correctionGuard == .none else { throw CommandError.usage("--guard filters CTC corrections; omit it with --parakeet-correction none") }
 
@@ -91,10 +99,18 @@ enum DictionaryEvaluation {
             if model.capabilities.customVocabulary {
                 arm = .nativeVocabulary(runtime.engine)
                 configuration.merge(["engine": model.id, "method": "native-prompt"]) { $1 }
-            } else if model.id == SpeechModelCatalog.parakeet.id, !usesCTC {
+            } else if appCorrection {
+                guard let parakeet = runtime.engine as? ParakeetSpeechEngine, let correction = parakeet.dictionaryCorrection else {
+                    throw CommandError.usage("\(model.name) has no dictionary correction to evaluate.")
+                }
+                try await parakeet.prepareDictionaryCorrection()
+                guard await correction.isLoaded else { throw CommandError.usage("Run prepare-model --vocabulary-support first.") }
+                arm = .appCorrection(runtime.engine)
+                configuration.merge(["engine": model.id, "method": "app-correction", "guard": "spelling", "textJoin": true]) { $1 }
+            } else if model.sharesParakeetV3Vocabulary, !usesCTC {
                 arm = .recognitionOnly(runtime.engine)
                 configuration.merge(["engine": model.id, "method": "none"]) { $1 }
-            } else if model.id == SpeechModelCatalog.parakeet.id {
+            } else if model.sharesParakeetV3Vocabulary {
                 let vocabulary = try await VocabularyDiagnostic(termsURL: glossaryURL, modelDirectory: runtime.store.directory).load()
                 arm = .ctcRescoring(runtime.engine, vocabulary, correctionGuard)
                 // FLUID_* overrides change the SDK's rescoring policy; record them so arms stay reproducible.
@@ -128,7 +144,10 @@ enum DictionaryEvaluation {
             case .ctcRescoring(_, let vocabulary, let policy):
                 // Rescoring corrects the unbiased recognition, so its full cost includes that pass.
                 let corrected = try await vocabulary.rescore(raw.recognition, samples: samples).text
-                guardCounts = ParakeetCorrectionGuard.apply(policy, recognition: raw.recognition, corrected: corrected, terms: terms)
+                let original = ParakeetCorrectionGuard.recognizedWords(raw.recognition)
+                let unknown = await MainActor.run { Set(original.map(\.surface).filter { !ParakeetCorrectionGuard.isKnownEnglishWord($0) }) }
+                guardCounts = ParakeetCorrectionGuard.apply(policy, original: original, corrected: corrected, terms: terms,
+                                                            isKnownWord: { !unknown.contains($0) })
                 biased = (guardCounts!.text, nil)
             case .recognitionOnly:
                 biased = (raw.output.text, nil)
@@ -139,6 +158,7 @@ enum DictionaryEvaluation {
             var biasedMilliseconds = milliseconds(since: start)
             switch arm {
             case .ctcRescoring, .recognitionOnly: biasedMilliseconds += rawMilliseconds
+            case .appCorrection: break  // Its biased pass recognizes again, so it already includes recognition.
             default: break
             }
             var record: [String: Any] = ["recordType": "clip", "id": clip.id, "split": clip.split, "group": clip.group,
@@ -166,9 +186,11 @@ enum DictionaryEvaluation {
         case .keyterms(let moonshine):
             let text = try moonshine.transcribe(samples, keyterms: terms)
             return ((text, nil), TranscriptionResult(text: text))
-        case .nativeVocabulary(let engine), .ctcRescoring(let engine, _, _), .recognitionOnly(let engine):
+        case .nativeVocabulary(let engine), .ctcRescoring(let engine, _, _), .recognitionOnly(let engine), .appCorrection(let engine):
+            let correcting: Bool
+            if case .appCorrection = arm { correcting = true } else { correcting = false }
             let result = try await engine.transcribe(.init(audioFileURL: file,
-                options: RecognitionOptions(language: options.language, vocabulary: terms)))
+                options: RecognitionOptions(language: options.language, vocabulary: terms, dictionaryCorrection: correcting)))
             return ((result.text, result.dictionaryUsage), result)
         }
     }
@@ -192,5 +214,28 @@ enum DictionaryEvaluation {
     private static func write(_ value: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes])
         try FileHandle.standardOutput.write(contentsOf: data + Data([10]))
+    }
+}
+
+extension ParakeetCorrectionGuard.Policy {
+    init(_ value: String) throws {
+        let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        let threshold = parts.count == 2 ? Float(parts[1]) : nil
+        switch (parts[0], threshold) {
+        case ("none", nil): self = .none
+        case ("spelling", nil): self = .spelling
+        case ("confidence", let t?) where (0...1).contains(t): self = .confidence(t)
+        case ("spelling-or-confidence", let t?) where (0...1).contains(t): self = .spellingOrConfidence(t)
+        default: throw CommandError.usage("--guard must be none, spelling, confidence:<0...1> or spelling-or-confidence:<0...1>")
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .none: "none"
+        case .spelling: "spelling"
+        case .confidence(let t): "confidence:\(t)"
+        case .spellingOrConfidence(let t): "spelling-or-confidence:\(t)"
+        }
     }
 }

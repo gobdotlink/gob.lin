@@ -95,6 +95,9 @@ public actor LiveTranscriber {
             return nil
         }
         guard !samples.isEmpty else { return TranscriptionResult(text: committedText) }
+        // Dictionary correction rescores a whole utterance. Once part of it has been committed and its audio
+        // discarded, the original recording is recognized and corrected instead.
+        if options.dictionaryCorrection, !committed.isEmpty || !settled.isEmpty { return nil }
         let runtime = try await engine.value
         try checkCancellation()
         let start = ContinuousClock.now
@@ -153,7 +156,7 @@ public actor LiveTranscriber {
         let snapshotGeneration = generation
         lastScheduled = received
         let engine = engine
-        let options = options
+        let options = options.preview
         inference = Task { [weak self] in
             do {
                 let runtime = try await engine.value

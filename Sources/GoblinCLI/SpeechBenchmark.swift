@@ -16,7 +16,7 @@ enum SpeechBenchmark {
         let acquisition = milliseconds(since: start)
         let auxiliaryStart = ContinuousClock.now
         if vocabularySupport {
-            try await ModelHub.download(.parakeetCtc110m, to: directory.deletingLastPathComponent())
+            _ = try await SpeechRuntimeFactory.dictionaryCorrectionStore(root: directory.deletingLastPathComponent()).ensureAvailable(progress: { _ in })
         }
         let auxiliaryAcquisition = vocabularySupport ? milliseconds(since: auxiliaryStart) : 0
         let loadStart = ContinuousClock.now
@@ -32,7 +32,7 @@ enum SpeechBenchmark {
         try write(["recordType": "preparation", "model": engine.identifier, "cacheExistedBefore": existed,
                    "prepareMilliseconds": preparation, "acquisitionMilliseconds": acquisition, "loadMilliseconds": load,
                    "auxiliaryAcquisitionMilliseconds": auxiliaryAcquisition, "vocabularySupport": vocabularySupport,
-                   "auxiliaryCacheBytes": vocabularySupport ? try directoryBytes(directory.deletingLastPathComponent().appendingPathComponent(Repo.parakeetCtc110m.folderName)) : 0,
+                   "auxiliaryCacheBytes": vocabularySupport ? try directoryBytes(directory.deletingLastPathComponent().appendingPathComponent(ParakeetDictionaryCorrection.cacheFolder)) : 0,
                    "cachedReloadMilliseconds": cachedReload,
                    "residentBytesBefore": before.map { $0 as Any } ?? NSNull(), "residentBytesLoaded": loaded.map { $0 as Any } ?? NSNull(),
                    "residentBytesUnloaded": unloaded.map { $0 as Any } ?? NSNull(), "cacheBytes": try directoryBytes(directory)])
@@ -84,8 +84,8 @@ enum SpeechBenchmark {
                 .sorted { $0.lastPathComponent < $1.lastPathComponent }
             : [url]
         guard !files.isEmpty else { throw CommandError.usage("No audio files found") }
-        guard vocabularyURL == nil || engine.identifier == SpeechModelCatalog.parakeet.id else {
-            throw CommandError.usage("--vocabulary is a Parakeet diagnostic.")
+        guard vocabularyURL == nil || SpeechModelCatalog.model(id: engine.identifier)?.sharesParakeetV3Vocabulary == true else {
+            throw CommandError.usage("--vocabulary needs a Parakeet model with v3's vocabulary.")
         }
         let loadStart = ContinuousClock.now
         try await engine.prepare()

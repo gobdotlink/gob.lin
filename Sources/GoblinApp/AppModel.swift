@@ -150,6 +150,12 @@ final class AppModel: ObservableObject {
         speechModels.$selectedModel.sink { [weak self] model in
             self?.overlay.model.modelName = model.name
         }.store(in: &subscriptions)
+        // Dictionary correction downloads its model only once there is a term to correct.
+        if servicesEnabled {
+            dictionary.$entries.map { !$0.isEmpty }.removeDuplicates().sink { [weak self] hasTerms in
+                Task { @MainActor in self?.speechModels.setDictionaryHasTerms(hasTerms) }
+            }.store(in: &subscriptions)
+        }
         overlay.model.perform = { [weak self] action in
             guard let self else { return }
             switch action {

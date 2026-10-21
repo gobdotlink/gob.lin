@@ -12,15 +12,22 @@ public struct RecognitionOptions: Sendable, Hashable, Codable {
     /// Nil requests automatic language detection where the model supports it.
     public let language: String?
     public let vocabulary: [String]
-    public init(language: String? = nil, vocabulary: [String] = []) {
-        self.language = language; self.vocabulary = vocabulary
+    /// Corrects `vocabulary` terms after recognizing a whole utterance (Parakeet's dictionary correction).
+    /// Live preview windows never request it; they are partial and their word timings must match their text.
+    public let dictionaryCorrection: Bool
+    public init(language: String? = nil, vocabulary: [String] = [], dictionaryCorrection: Bool = false) {
+        self.language = language; self.vocabulary = vocabulary; self.dictionaryCorrection = dictionaryCorrection
     }
 
-    private enum CodingKeys: CodingKey { case language, vocabulary }
+    /// The same options for a live preview window.
+    public var preview: RecognitionOptions { RecognitionOptions(language: language, vocabulary: vocabulary) }
+
+    private enum CodingKeys: CodingKey { case language, vocabulary, dictionaryCorrection }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         language = try values.decodeIfPresent(String.self, forKey: .language)
         vocabulary = try values.decodeIfPresent([String].self, forKey: .vocabulary) ?? []
+        dictionaryCorrection = try values.decodeIfPresent(Bool.self, forKey: .dictionaryCorrection) ?? false
     }
 }
 

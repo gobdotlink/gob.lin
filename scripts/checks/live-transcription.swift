@@ -166,6 +166,27 @@ struct LiveTranscriptionCheck {
         _ = try await languageLive.finish()
         let used = await languageRuntime.optionsUsed
         verify(!used.isEmpty && used.allSatisfy { $0 == preferred }, "Preview and final window did not preserve language and dictionary")
+
+        // Dictionary correction runs once, on a final pass that covers the whole utterance.
+        let correcting = RecognitionOptions(language: "en", vocabulary: ["Kalikin"], dictionaryCorrection: true)
+        let shortRuntime = SignalPCM()
+        let shortLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { shortRuntime }, options: correcting)
+        var shortPosition: Int64 = 0
+        try await feed(0.1, seconds: 1.2, live: shortLive, position: &shortPosition)
+        let shortFinal = try await shortLive.finish()
+        let shortUsed = await shortRuntime.optionsUsed
+        verify(shortFinal?.text == "hello world.", "A short corrected dictation required recovery or lost its text")
+        verify(shortUsed.last == correcting && shortUsed.dropLast().allSatisfy { $0 == correcting.preview && !$0.dictionaryCorrection },
+               "Live previews requested dictionary correction, or the final pass did not")
+        let settledRuntime = SignalPCM()
+        let settledLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { settledRuntime }, options: correcting)
+        var settledPosition: Int64 = 0
+        try await feed(0.1, seconds: 1.2, live: settledLive, position: &settledPosition)
+        try await feed(0, seconds: 9, live: settledLive, position: &settledPosition)
+        try await feed(0.2, seconds: 1.2, live: settledLive, position: &settledPosition)
+        let settledFinal = try await settledLive.finish()
+        verify(settledFinal == nil, "Correction ran on a partial tail instead of recovering the whole recording")
+        verify(await settledRuntime.optionsUsed.allSatisfy { !$0.dictionaryCorrection }, "A partial window was corrected")
         let batchRuntime = SignalPCM()
         let batchOnly = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { batchRuntime }, options: preferred, previewAvailable: false)
         await batchOnly.append([Float](repeating: 0.1, count: 480_000), at: 0)

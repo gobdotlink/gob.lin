@@ -96,7 +96,10 @@ and Apple diagnostic comparisons were not run; neither is another shipping model
 The CLI can explicitly acquire an auxiliary CTC 110M model and evaluate the
 SDK's acoustic rescoring path. It uses one TDT runtime and one distinct CTC
 model, with both caches under the same model-storage root. Recognition itself
-never downloads models. The app does not enable this diagnostic.
+never downloads models. The app now ships this rescoring only behind the
+spelling guard and text join, for English dictation with the models that
+qualified on labelled synthetic clips; see [Dictionary](dictionary.md#parakeet-dictionary-correction).
+The unguarded measurement below is why the guard exists.
 
 With **120 available local terms** over the same 250 recordings, CTC/rescoring
 added **96.628 seconds** of work: p50 **223.0 ms**, p95 **1,159.8 ms**, maximum

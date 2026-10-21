@@ -24,11 +24,20 @@ public enum SpeechRuntimeError: Error, LocalizedError {
     }
 }
 
+/// Engines whose dictionary correction loads a separately downloaded model, only while the dictionary has terms.
+public protocol DictionaryCorrectingEngine: PCMSpeechEngine {
+    /// Returns whether correction is loaded into the prepared engine; an unprepared engine is skipped.
+    @discardableResult func prepareDictionaryCorrection() async throws -> Bool
+    func unloadDictionaryCorrection() async
+}
+
 /// One model and one serialized inference owner, shared by file and bounded-tail recognition.
-public actor ParakeetSpeechEngine: PCMSpeechEngine {
+public actor ParakeetSpeechEngine: DictionaryCorrectingEngine {
     public nonisolated let identifier: String
     public nonisolated let maximumWindowSamples = 240_000
     public nonisolated let modelDirectory: URL
+    /// Present for models with dictionary correction. It loads on demand, after the model, while there are terms.
+    public nonisolated let dictionaryCorrection: ParakeetDictionaryCorrection?
     private let model: SpeechModelDescriptor
     let version: AsrModelVersion
     private var manager: AsrManager?
@@ -42,12 +51,15 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
     }
 
     public init(model: SpeechModelDescriptor = SpeechModelCatalog.parakeet,
-                modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory) {
+                modelDirectory: URL = ParakeetSpeechEngine.defaultModelDirectory,
+                dictionaryCorrection: ParakeetDictionaryCorrection? = nil) {
         precondition(model.kind == .parakeet)
+        precondition(dictionaryCorrection == nil || model.capabilities.dictionaryCorrection)
         self.model = model
         identifier = model.id
         version = Self.version(for: model)
         self.modelDirectory = modelDirectory
+        self.dictionaryCorrection = dictionaryCorrection
     }
 
     static func version(for model: SpeechModelDescriptor) -> AsrModelVersion {
@@ -82,12 +94,27 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
         speechDetector = detector
     }
 
+    /// Loads correction into a prepared engine. An unprepared engine is skipped; its owner calls this again after
+    /// `prepare`, so an empty dictionary never loads the correction model. Loading doesn't hold the inference gate:
+    /// recognition continues meanwhile and corrects once the model is loaded. An unload during the load discards it.
+    @discardableResult public func prepareDictionaryCorrection() async throws -> Bool {
+        guard manager != nil, let dictionaryCorrection else { return false }
+        return try await dictionaryCorrection.load()
+    }
+
+    public func unloadDictionaryCorrection() async {
+        await dictionaryCorrection?.unload()
+    }
+
     public func unload() async {
         await acquire()
         defer { release() }
-        await manager?.cleanup()
+        // Cleared before awaiting, so no correction load starts for a recognizer that is going away.
+        let unloading = manager
         manager = nil
         speechDetector = nil
+        await dictionaryCorrection?.unload()
+        await unloading?.cleanup()
     }
 
     public func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
@@ -116,7 +143,8 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
 
     private func recognize(_ samples: [Float], manager: AsrManager, options: RecognitionOptions) async throws -> TranscriptionResult {
         guard let speechDetector else { throw SpeechRuntimeError.speechDetectorNotInstalled }
-        let language = try options.validatedLanguage(for: model).flatMap(Language.init(rawValue:))
+        let code = try options.validatedLanguage(for: model)
+        let language = code.flatMap(Language.init(rawValue:))
         let presence = try await speechDetector.presence(in: samples)
         try Task.checkCancellation()
         guard presence != .notDetected else {
@@ -127,7 +155,20 @@ public actor ParakeetSpeechEngine: PCMSpeechEngine {
         var state = TdtDecoderState.make(decoderLayers: version.decoderLayers)
         let result = try await manager.transcribe(padded, decoderState: &state, language: language)
         try Task.checkCancellation()
-        return Self.result(result, speechPresence: presence)
+        let recognition = Self.result(result, speechPresence: presence)
+        // An empty dictionary, a live preview or a correction model that isn't loaded yet means no extra pass.
+        guard options.dictionaryCorrection, !options.vocabulary.isEmpty, let dictionaryCorrection,
+              await dictionaryCorrection.isLoaded else { return recognition }
+        let text: String
+        do {
+            text = try await dictionaryCorrection.correct(recognition, samples: samples, terms: options.vocabulary, language: code,
+                                                          candidates: model.capabilities.languageCodes)
+        }
+        catch is CancellationError { throw CancellationError() }
+        catch { return recognition }  // Correction failure keeps the recognized text.
+        try Task.checkCancellation()
+        // Token timings still describe the recognized words, before correction.
+        return TranscriptionResult(text: text, tokens: recognition.tokens, speechPresence: recognition.speechPresence)
     }
 
     private static func result(_ result: ASRResult, speechPresence: SpeechPresence) -> TranscriptionResult {
