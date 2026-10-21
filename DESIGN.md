@@ -30,7 +30,7 @@ The values live in `GoblinBrand`. This table is what it must contain.
 | Token | Light | Dark | Job |
 |---|---|---|---|
 | moss | `#2B7D4F` | `#34965F` fill, `#62C78A` text | Every interactive job: primary buttons, switches, links, selection, chart bars |
-| neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the menu-bar icon's edge on a dark menu bar, the overlay meter and caret, the tagline, the top word of the Insights cloud on dark |
+| neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline, the top word of the Insights cloud on dark |
 | candle | `#B26B0F` | `#F2A93B` | Stars and milestones |
 | case | `#EDECE9` | `#1E1F21` | Settings and History window background |
 | plate | `#FBFAF8` | `#2A2B2E` | A grouped section, with a 0.5 pt hairline |
@@ -97,7 +97,7 @@ Reuse these before writing new ones:
 
 The first two frames already ship in `Sources/GoblinApp/Assets/`. The rest are in `docs/design/sprites/`. Copy one into Assets when a surface needs it, and run `xcodegen generate` afterwards. The old 7 × 7 fists in `hands.png` are retired once the grip hands land.
 
-The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar they're neon. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
+The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar they're the goblin's deepest green (`#153C23`), so the edge reads as shading rather than a glow. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
 
 The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a three-pixel slit pupil in each eye and the glow redrawn around it, one frame per compass point. Looking down starts from `goblin-look`, so the lid drops too. To move a slit, edit its table and rerun the script.
 

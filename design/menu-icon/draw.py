@@ -3,14 +3,13 @@
 
 One character is one pixel; dots are transparent. Writes four PNGs into
 Sources/GoblinApp/Assets: the 22 px map, the same map doubled for Retina, and both
-again with the outer edge in neon for dark menu bars. Requires Pillow.
+again with the outer edge in deepest green for dark menu bars. Requires Pillow.
 """
 from pathlib import Path
 
 from PIL import Image
 
 ASSETS = Path(__file__).resolve().parents[2] / "Sources/GoblinApp/Assets"
-NEON = (87, 230, 143, 255)  # GoblinBrand.neon
 
 # Sampled from goblin-shut.png.
 PALETTE = {
@@ -50,7 +49,7 @@ PIXELS = """
 """
 
 
-def draw(rows: list[str], neon_edge: bool) -> Image.Image:
+def draw(rows: list[str], green_edge: bool) -> Image.Image:
     def solid(x: int, y: int) -> bool:
         return 0 <= y < len(rows) and 0 <= x < len(rows[y]) and rows[y][x] != "."
 
@@ -60,14 +59,14 @@ def draw(rows: list[str], neon_edge: bool) -> Image.Image:
             if ch == ".":
                 continue
             edge = not all(solid(x + dx, y + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
-            image.putpixel((x, y), NEON if neon_edge and ch == "K" and edge else PALETTE[ch])
+            image.putpixel((x, y), PALETTE["D"] if green_edge and ch == "K" and edge else PALETTE[ch])
     return image
 
 
 if __name__ == "__main__":
     rows = PIXELS.strip("\n").split("\n")
     assert len(rows) == 22 and all(len(r) == 22 for r in rows), "The map must be 22 × 22"
-    for suffix, neon_edge in (("", False), ("-dark", True)):
-        image = draw(rows, neon_edge)
+    for suffix, green_edge in (("", False), ("-dark", True)):
+        image = draw(rows, green_edge)
         image.save(ASSETS / f"goblin-menu{suffix}.png")
         image.resize((44, 44), Image.NEAREST).save(ASSETS / f"goblin-menu{suffix}@2x.png")

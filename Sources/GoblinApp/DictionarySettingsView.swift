@@ -121,20 +121,17 @@ struct DictionarySettingsView: View {
         let size = ByteCountFormatter.string(fromByteCount: ParakeetDictionaryCorrection.downloadBytes, countStyle: .decimal)
         switch service.dictionaryCorrection {
         case .unsupported, .noTerms:
-            StatusRow(.ready, Text("\(name) corrects your terms after recognizing English dictation. When you add a term, I'll download a \(size) correction model."))
+            StatusRow(.ready, Text("When you add a term, I'll download a \(size) correction model for \(name)."))
         case .preparing(let progress):
             StatusRow(.waiting, Text("I'm preparing the dictionary correction model. Until it's ready, I use your terms in aliases and Cleanup only.")) {
                 if let fraction = progress.fractionCompleted { Text(fraction, format: .percent.precision(.fractionLength(0))).monospacedDigit() }
             }
         case .ready:
-            StatusRow(.ready, Text("I correct \(terms) \(terms == 1 ? "term" : "terms")\(model.entries.contains(where: \.isScoped) ? " used in every app" : "") after \(name) recognizes English dictation. I only replace words the spell checker doesn't know, or rejoin a term split into words.").monospacedDigit())
+            StatusRow(.ready, Text("I correct \(terms) \(terms == 1 ? "term" : "terms")\(model.entries.contains(where: \.isScoped) ? " used in every app" : "") after recognition. I only replace words the spell checker doesn't know, or rejoin a term split into words.").monospacedDigit())
         case .failed(let message):
             StatusRow(.problem, Text("I couldn't prepare dictionary correction: \(message)")) {
                 Button("Retry") { service.retryDictionaryCorrection() }
             }
-        }
-        if service.selectedModel.capabilities.languageCodes.count > 1 {
-            StatusRow(.off, Text("Other languages aren't corrected during recognition; their terms still reach aliases and Cleanup."))
         }
     }
 
@@ -152,12 +149,87 @@ struct DictionarySettingsView: View {
         let usage = preview?.request == current ? preview?.usage : nil
         let scoped = model.entries.contains(where: \.isScoped)
         Section {
+            if model.entries.isEmpty {
+                ContentUnavailableView("Add your vocabulary", systemImage: "character.book.closed",
+                    description: Text("Add a preferred spelling and optional “sounds like” aliases. Import a text file with one term per line."))
+                    .frame(maxWidth: .infinity)
+            } else {
+                if scoped {
+                    Picker("Show", selection: $filter) {
+                        Text("All terms").tag(TermFilter.all)
+                        Text("Used everywhere").tag(TermFilter.everywhere)
+                        Divider()
+                        ForEach(scopedApps, id: \.self) { id in Text(DictionaryApps.name(id)).tag(TermFilter.app(id)) }
+                        if !scopedProjects.isEmpty {
+                            Divider()
+                            ForEach(scopedProjects, id: \.self) { name in Text("Project: \(name)").tag(TermFilter.project(name)) }
+                        }
+                    }
+                }
+                ForEach(shownEntries) { entry in
+                    if usage?.excluded.first == entry.spelling {
+                        StatusRow(.waiting, Text("The terms below don't fit, so I don't send them to recognition. Aliases and Cleanup still use them."))
+                    }
+                    LabeledContent {
+                        HStack {
+                            Button("Edit") { editing = entry }
+                            Button("Delete", systemImage: "trash", role: .destructive) { model.delete(entry) }.labelStyle(.iconOnly)
+                                .accessibilityLabel("Delete \(entry.spelling)")
+                        }
+                    } label: {
+                        Text(entry.spelling).font(.body.monospaced())
+                        if !entry.aliases.isEmpty { Text("sounds like: " + entry.aliases.joined(separator: ", ")) }
+                        if entry.isScoped {
+                            Text("Only in " + [entry.apps.isEmpty ? nil : DictionaryApps.summary(entry.apps),
+                                               entry.projects.isEmpty ? nil : "project " + entry.projects.joined(separator: ", ")]
+                                .compactMap { $0 }.joined(separator: " · "))
+                        }
+                        if usage?.excluded.contains(entry.spelling) == true { Text("Not sent to recognition").foregroundStyle(.secondary) }
+                    }
+                }
+            }
+            if model.entries.contains(where: { !$0.projects.isEmpty }) {
+                if let context = model.lastContext {
+                    StatusRow(context.project == nil ? .off : .ready,
+                              Text(context.project.map { "Last dictation: \(context.application ?? "unknown app") · project \($0.name) (\(Self.describe($0.source)))." }
+                                   ?? "Last dictation: \(context.application ?? "unknown app") · I couldn't tell which project was open."))
+                } else {
+                    StatusRow(.waiting, Text("After your next dictation I'll show which project I detected."))
+                }
+            }
+        } header: {
+            HStack {
+                Text("Terms")
+                Spacer()
+                Group {
+                    Button("Import Words…") { importing = true }.disabled(!model.available)
+                    Button("Add Term", systemImage: "plus") { editing = DictionaryEntry(spelling: "") }.disabled(!model.available)
+                        .prominent()
+                }
+                // The plate header's small caps and letter spacing are for the label, not the buttons.
+                .textCase(nil).tracking(0).font(.callout).controlSize(.small)
+            }
+        }
+        Section {
             LabeledContent {
                 Text(service.selectedModel.name)
             } label: {
                 Text("Speech Model")
                 if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms in alphabetical order") }
-                if service.selectedModel.capabilities.dictionaryCorrection { Text("Correction after recognition · English dictation") }
+                if service.selectedModel.capabilities.dictionaryCorrection { Text("Correction after recognition · English only") }
+            }
+            LabeledContent {
+                Text("Every model")
+            } label: {
+                Text("Aliases")
+                Text("I replace exact “sounds like” matches after recognition.")
+            }
+            LabeledContent {
+                Text(cleanupEnabled ? "On" : "Off")
+            } label: {
+                Text("Cleanup")
+                Text(cleanupEnabled ? "I add the preferred spellings for the app and project you're dictating into to the prompt."
+                                    : "I don't send your dictionary to a rewrite model.")
             }
             if !model.available {
                 StatusRow(.problem, Text("I couldn't load your dictionary."))
@@ -180,13 +252,13 @@ struct DictionarySettingsView: View {
             } else {
                 StatusRow(.waiting, Text("I'm checking which terms fit…"))
             }
-            if model.available, service.selectedModel.capabilities.customVocabulary, scoped {
-                StatusRow(.ready, Text("App-specific terms join these when you dictate into their apps and share the same limit. Project terms apply after recognition, once I know the project."))
+        } header: { Text("How I Use Them") } footer: {
+            if model.available, scoped, service.selectedModel.capabilities.customVocabulary {
+                Text("App-specific terms join these when you dictate into their apps and share the same limit. Project terms apply after recognition, once I know the project.")
+            } else if model.available, scoped, service.selectedModel.capabilities.dictionaryCorrection {
+                Text("App-specific terms join these when you dictate into their apps. Project terms apply in aliases and Cleanup, once I know the project, and when you retranscribe from History.")
             }
-            if model.available, service.selectedModel.capabilities.dictionaryCorrection, scoped {
-                StatusRow(.ready, Text("App-specific terms join these when you dictate into their apps. Project terms apply in aliases and Cleanup, once I know the project, and when you retranscribe from History."))
-            }
-        } header: { Text("Native Recognition") }
+        }
         .task(id: current) {
             guard model.available, service.selectedModel.capabilities.customVocabulary, current.installed, !current.terms.isEmpty else { return }
             do {
@@ -196,73 +268,6 @@ struct DictionarySettingsView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 previewError = (current, error.localizedDescription)
-            }
-        }
-        Section {
-            StatusRow(cleanupEnabled ? .ready : .off,
-                      Text(cleanupEnabled ? "I include the preferred spellings for the app and project you're dictating into in the Cleanup prompt, including terms beyond the native limit."
-                                         : "Cleanup is off. I don't send your dictionary to a rewrite model."))
-        } header: { Text("Cleanup") }
-        Section {
-            if model.entries.isEmpty {
-                ContentUnavailableView("Add your vocabulary", systemImage: "character.book.closed",
-                    description: Text("Add a preferred spelling and optional “sounds like” aliases. Import a text file with one term per line."))
-            } else {
-                if scoped {
-                    Picker("Show", selection: $filter) {
-                        Text("All terms").tag(TermFilter.all)
-                        Text("Used everywhere").tag(TermFilter.everywhere)
-                        Divider()
-                        ForEach(scopedApps, id: \.self) { id in Text(DictionaryApps.name(id)).tag(TermFilter.app(id)) }
-                        if !scopedProjects.isEmpty {
-                            Divider()
-                            ForEach(scopedProjects, id: \.self) { name in Text("Project: \(name)").tag(TermFilter.project(name)) }
-                        }
-                    }
-                }
-                ForEach(shownEntries) { entry in
-                    if usage?.excluded.first == entry.spelling {
-                        StatusRow(.waiting, Text("The terms below don't fit. I don't send them to recognition."))
-                    }
-                    LabeledContent {
-                        HStack {
-                            Button("Edit") { editing = entry }
-                            Button("Delete", systemImage: "trash", role: .destructive) { model.delete(entry) }.labelStyle(.iconOnly)
-                                .accessibilityLabel("Delete \(entry.spelling)")
-                        }
-                    } label: {
-                        Text(entry.spelling).font(.body.monospaced())
-                        if !entry.aliases.isEmpty { Text("sounds like: " + entry.aliases.joined(separator: ", ")) }
-                        if entry.isScoped {
-                            Text("Only in " + [entry.apps.isEmpty ? nil : DictionaryApps.summary(entry.apps),
-                                               entry.projects.isEmpty ? nil : "project " + entry.projects.joined(separator: ", ")]
-                                .compactMap { $0 }.joined(separator: " · "))
-                        }
-                        if usage?.excluded.contains(entry.spelling) == true { Text("Not sent to recognition").foregroundStyle(.secondary) }
-                    }
-                }
-            }
-            StatusRow(model.entries.isEmpty ? .off : .ready,
-                      Text("I apply exact “sounds like” aliases after recognition with every model, including terms beyond the native limit."))
-            if model.entries.contains(where: { !$0.projects.isEmpty }) {
-                if let context = model.lastContext {
-                    StatusRow(context.project == nil ? .off : .ready,
-                              Text(context.project.map { "Last dictation: \(context.application ?? "unknown app") · project \($0.name) (\(Self.describe($0.source)))." }
-                                   ?? "Last dictation: \(context.application ?? "unknown app") · I couldn't tell which project was open."))
-                } else {
-                    StatusRow(.waiting, Text("After your next dictation I'll show which project I detected."))
-                }
-            }
-        } header: {
-            HStack {
-                Text("Terms")
-                Spacer()
-                Group {
-                    Button("Import Words…") { importing = true }.disabled(!model.available)
-                    Button("Add Term", systemImage: "plus") { editing = DictionaryEntry(spelling: "") }.disabled(!model.available)
-                        .prominent()
-                }
-                .textCase(nil).font(.callout).controlSize(.small)
             }
         }
         .sheet(item: $editing) { entry in DictionaryEntryEditor(entry: entry, model: model) }

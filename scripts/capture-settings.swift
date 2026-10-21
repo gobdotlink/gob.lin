@@ -81,10 +81,12 @@ struct SettingsCapture {
                         if page == .diagnostics { model.diagnostics.report(.modelUnavailable) }
                         try await shoot("settings-\(page.rawValue.lowercased())", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080))
                     }
-                    for page in [SettingsSection.general, .cleanup, .about] {
+                    for page in [SettingsSection.general, .dictionary, .cleanup, .about] {
                         model.settingsSelection = page
                         try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     }
+                    empty.settingsSelection = .dictionary
+                    try await shoot("settings-dictionary-empty-dark", SettingsView(model: empty, speechModels: empty.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     model.diagnostics.resolve(.model)
                     let provider = CleanupProviderSheet(settings: RewriteSettingsStore.load(defaults: defaults), defaults: defaults,
                                                         inspectCredentials: false, turnOn: false, onSave: { _ in }, onFailure: { _ in })

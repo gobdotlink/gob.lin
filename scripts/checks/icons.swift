@@ -54,7 +54,20 @@ struct IconCheck {
         var light = Data(), dark = Data()
         NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance { light = pixels(idle, size: 44) }
         NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance { dark = pixels(idle, size: 44) }
-        precondition(light != dark, "A dark menu bar must redraw the cached icon with its neon edge")
+        precondition(light != dark, "A dark menu bar must redraw the cached icon with its deep green edge")
+        // At 44 px: an ear-tip edge pixel of the map, and a pixel inside the state dot's ring, rows from the top.
+        var recording = (light: Data(), dark: Data())
+        NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance { recording.light = pixels(GoblinBrand.menuImage(.recording), size: 44) }
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance { recording.dark = pixels(GoblinBrand.menuImage(.recording), size: 44) }
+        for (bytes, x, y, expected, what) in [(light, 6, 2, 0x08110F, "light edge"), (dark, 6, 2, 0x153C23, "dark edge"),
+                                              (recording.light, 36, 42, 0x000000, "light dot ring"),
+                                              (recording.dark, 36, 42, 0x153C23, "dark dot ring")] {
+            let index = (y * 44 + x) * 4
+            let channels = [Int(bytes[index]), Int(bytes[index + 1]), Int(bytes[index + 2])]
+            let target = [expected >> 16 & 0xFF, expected >> 8 & 0xFF, expected & 0xFF]
+            precondition(bytes[index + 3] == 255 && zip(channels, target).allSatisfy { abs($0 - $1) <= 8 },
+                "The \(what) must be #\(String(expected, radix: 16)), found \(channels)")
+        }
     }
 
     static func writePreview(to path: String) throws {
