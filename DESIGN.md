@@ -97,7 +97,7 @@ Reuse these before writing new ones:
 
 The first two frames already ship in `Sources/GoblinApp/Assets/`. The rest are in `docs/design/sprites/`. Copy one into Assets when a surface needs it, and run `xcodegen generate` afterwards. The old 7 × 7 fists in `hands.png` are retired once the grip hands land.
 
-The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar they're the goblin's deepest green (`#153C23`), so the edge reads as shading rather than a glow. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
+The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar the edge and the ring are dropped, and each green is drawn one step lighter, so the bar itself outlines the goblin and the shading doesn't sink into it. Any outline on a dark bar reads as a glow. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
 
 The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a three-pixel slit pupil in each eye and the glow redrawn around it, one frame per compass point. Looking down starts from `goblin-look`, so the lid drops too. To move a slit, edit its table and rerun the script.
 

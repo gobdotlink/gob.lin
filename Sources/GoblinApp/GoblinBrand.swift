@@ -65,7 +65,7 @@ enum GoblinBrand {
         return image
     }
 
-    /// The dark artwork has a deep green edge instead of black, for dark menu bars.
+    /// The dark artwork drops the black edge and lifts each green a step, for dark menu bars.
     static func menuArtwork(dark: Bool = false) -> NSImage {
         let name = dark ? "goblin-menu-dark" : "goblin-menu"
         guard let assets = assetDirectory,
@@ -101,8 +101,10 @@ enum GoblinBrand {
                 case .warning: .systemYellow
                 case .idle: .clear
                 }
-                (isDark ? NSColor(hex: 0x153C23) : .black).setFill()
-                NSBezierPath(ovalIn: NSRect(x: 14, y: 0, width: 8, height: 8)).fill()
+                if !isDark {
+                    NSColor.black.setFill()
+                    NSBezierPath(ovalIn: NSRect(x: 14, y: 0, width: 8, height: 8)).fill()
+                }
                 color.setFill()
                 NSBezierPath(ovalIn: NSRect(x: 15, y: 1, width: 6, height: 6)).fill()
             }

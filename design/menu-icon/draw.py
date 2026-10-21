@@ -3,7 +3,7 @@
 
 One character is one pixel; dots are transparent. Writes four PNGs into
 Sources/GoblinApp/Assets: the 22 px map, the same map doubled for Retina, and both
-again with the outer edge in deepest green for dark menu bars. Requires Pillow.
+again for dark menu bars: no outer edge, and each green one step lighter. Requires Pillow.
 """
 from pathlib import Path
 
@@ -49,7 +49,11 @@ PIXELS = """
 """
 
 
-def draw(rows: list[str], green_edge: bool) -> Image.Image:
+# Dark menu bars: the bar itself is the outline, and shadows lift so they don't sink into it.
+LIFT = {"D": PALETTE["S"], "S": PALETTE["G"], "G": PALETTE["L"]}
+
+
+def draw(rows: list[str], dark: bool) -> Image.Image:
     def solid(x: int, y: int) -> bool:
         return 0 <= y < len(rows) and 0 <= x < len(rows[y]) and rows[y][x] != "."
 
@@ -59,14 +63,17 @@ def draw(rows: list[str], green_edge: bool) -> Image.Image:
             if ch == ".":
                 continue
             edge = not all(solid(x + dx, y + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
-            image.putpixel((x, y), PALETTE["D"] if green_edge and ch == "K" and edge else PALETTE[ch])
+            if not dark:
+                image.putpixel((x, y), PALETTE[ch])
+            elif not (ch == "K" and edge):
+                image.putpixel((x, y), LIFT.get(ch, PALETTE[ch]))
     return image
 
 
 if __name__ == "__main__":
     rows = PIXELS.strip("\n").split("\n")
     assert len(rows) == 22 and all(len(r) == 22 for r in rows), "The map must be 22 × 22"
-    for suffix, green_edge in (("", False), ("-dark", True)):
-        image = draw(rows, green_edge)
+    for suffix, dark in (("", False), ("-dark", True)):
+        image = draw(rows, dark)
         image.save(ASSETS / f"goblin-menu{suffix}.png")
         image.resize((44, 44), Image.NEAREST).save(ASSETS / f"goblin-menu{suffix}@2x.png")
