@@ -59,7 +59,8 @@ final class AppModel: ObservableObject {
         speechModels = SpeechModelService(defaults: defaults)
         diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
-        dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault)
+        dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault,
+                                     defaults: defaults)
         permissions = PermissionModel(snapshot: servicesEnabled ? nil : .init(microphone: .notDetermined, accessibility: false, inputMonitoring: false), monitorSystem: servicesEnabled, diagnostics: diagnostics)
         hotkeys = HotkeyService(permissions: permissions, defaults: defaults, monitorSystem: servicesEnabled, diagnostics: diagnostics)
         insertion = TextInsertionService(pasteboard: servicesEnabled ? .general : .withUniqueName(), defaults: defaults, registerShortcuts: servicesEnabled)
@@ -236,7 +237,7 @@ final class AppModel: ObservableObject {
         history.retranscribeAction = servicesEnabled ? { [weak self] entry, audioURL in
             guard let self, !self.shuttingDown, let audioURL else { throw RecordedAudioError.invalidFile }
             let lease = try self.speechModels.beginSession(
-                vocabulary: self.dictionary.entries.active(in: entry.dictionaryContext).map(\.spelling))
+                vocabulary: self.dictionary.entries.vocabulary(in: entry.dictionaryContext))
             defer { self.speechModels.endSession(lease) }
             let engine = try await self.speechModels.readyEngine(for: lease)
             let run = try await RecordedAudioPipeline(engine: engine, options: lease.options).transcribe(audioURL)
@@ -354,13 +355,13 @@ final class AppModel: ObservableObject {
         guard activeCapture == nil else { return }
         finishEditObservation()
         let session = DictationSession(destination: insertion.destination)
-        if let target = session.target, dictionary.entries.contains(where: { !$0.projects.isEmpty }) {
+        if let target = session.target, dictionary.suggestsTerms || dictionary.entries.contains(where: { !$0.projects.isEmpty }) {
             // Runs while the user speaks; recognition starts with app-scoped terms and never waits for it.
             let pid = target.processIdentifier, bundle = target.bundleIdentifier
             session.projectDetection = Task { [projectDetector] in await projectDetector.detect(pid: pid, bundleIdentifier: bundle) }
         }
         let lease: SpeechModelLease
-        do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.active(in: session.dictionaryScope).map(\.spelling)) }
+        do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.vocabulary(in: DictionaryScope(application: session.dictionaryScope))) }
         catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
         let readiness = Task<any PCMSpeechEngine, Error> { [speechModels] in
             try await speechModels.readyEngine(for: lease)
@@ -694,8 +695,22 @@ final class AppModel: ObservableObject {
             overlay.model.cleanupLabel = "\(cleanup.cleanup.title) · \(cleanup.provider.title)"
             overlay.update(.polishing, committed: raw, tentative: "", session: overlayID)
         }
-        await session.resolveProject()
-        dictionary.lastContext = (session.target?.localizedName, session.dictionaryProject)
+        // Without project terms only suggestions need the project, and they can wait for slow detection in the background.
+        let needsProject = dictionary.entries.contains { !$0.projects.isEmpty }
+        await session.resolveProject(within: .milliseconds(needsProject ? 300 : 20))
+        dictionary.lastContext = (session.target?.localizedName, session.dictionaryScope, session.dictionaryProject)
+        if let project = session.dictionaryProject { dictionary.offerTerms(from: project) }
+        else if !needsProject, session.projectDetection != nil {
+            Task { [weak self] in
+                await session.resolveProject(within: .milliseconds(1500))
+                guard let self, let project = session.dictionaryProject else { return }
+                // A later dictation may have finished first; its context stays.
+                if dictionary.lastContext?.bundleIdentifier == session.dictionaryScope, dictionary.lastContext?.project == nil {
+                    dictionary.lastContext = (session.target?.localizedName, session.dictionaryScope, project)
+                }
+                dictionary.offerTerms(from: project)
+            }
+        }
         let result = await processTranscript(raw, scope: session.dictionaryContext)
         try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
     }
@@ -795,8 +810,14 @@ final class AppModel: ObservableObject {
         let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
         if saved, pendingEditObservationID == session.id, insertion.watchEdits, !shuttingDown,
            let anchor = insertionAnchor {
-            editWatcher.start(entryID: entry.id, anchor: anchor) { [weak self] result in
-                Task { @MainActor in await self?.history.applyEditObservation(result) }
+            let dictated = result.finalText, scope = session.dictionaryContext
+            editWatcher.start(entryID: entry.id, anchor: anchor) { [weak self] observation in
+                Task { @MainActor in
+                    await self?.history.applyEditObservation(observation)
+                    if observation.outcome == .edited, let edited = observation.editedText {
+                        self?.dictionary.offerCorrection(dictated: dictated, edited: edited, scope: scope)
+                    }
+                }
             }
         }
         if pendingEditObservationID == session.id { pendingEditObservationID = nil }

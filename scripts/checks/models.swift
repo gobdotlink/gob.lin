@@ -556,16 +556,21 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         let empty = try WhisperDictionary.prompt(terms: [], encode: encode)
         try expect(empty.tokens.isEmpty && empty.usage.excluded.isEmpty, "Empty dictionary generated a prompt")
         let first = "A" + String(repeating: "x", count: WhisperDictionary.tokenLimit - 2)
-        let boundary = try WhisperDictionary.prompt(terms: ["Z", first], encode: encode)
+        let boundary = try WhisperDictionary.prompt(terms: [first, "Z"], encode: encode)
         try expect(boundary.tokens.count == WhisperDictionary.tokenLimit && boundary.usage.included == [first]
                    && boundary.usage.excluded == ["Z"], "Exact-fit entry or separator boundary was truncated")
         let oversized = "A" + String(repeating: "x", count: WhisperDictionary.tokenLimit)
-        let rejected = try WhisperDictionary.prompt(terms: ["Z", oversized], encode: encode)
+        let rejected = try WhisperDictionary.prompt(terms: [oversized, "Z"], encode: encode)
         try expect(rejected.tokens.isEmpty && rejected.usage.excluded == [oversized, "Z"],
                    "Oversized first entry was split or later terms silently jumped the cutoff")
         let ordered = try WhisperDictionary.prompt(terms: ["Zoo", "Beta", "alpha"], encode: encode)
-        try expect(ordered.usage.included == ["alpha", "Beta", "Zoo"] && ordered.tokens == encode(" alpha, Beta, Zoo"),
-                   "Dictionary prompt order differs from the visible alphabetical list")
+        try expect(ordered.usage.included == ["Zoo", "Beta", "alpha"] && ordered.tokens == encode(" Zoo, Beta, alpha"),
+                   "Dictionary prompt reordered the priority order it was given")
+        // One-character terms fit the token limit, so only the active limit cuts the last one.
+        let many = Array("abcdefghijklmnopqrstuvwxyz0123456789".prefix(DictionaryScope.activeLimit + 1)).map(String.init)
+        let capped = try WhisperDictionary.prompt(terms: many, encode: encode)
+        try expect(capped.usage.included == Array(many.dropLast()) && capped.usage.excluded == [many.last!],
+                   "Dictionary prompt sent more terms than the active limit")
         let legacy = try JSONDecoder().decode(RecognitionOptions.self, from: Data("{\"language\":\"en\"}".utf8))
         try expect(legacy == .init(language: "en") && !legacy.dictionaryCorrection, "Old recognition options no longer decode")
         let correcting = RecognitionOptions(language: "en", vocabulary: ["Kalikin"], dictionaryCorrection: true)
@@ -877,7 +882,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         let repository = DictionaryRepository(url: scratch.appendingPathComponent("dictionary.json"))
         try repository.save([DictionaryEntry(spelling: "CodeRabbit", aliases: ["code rabbit"]),
                              DictionaryEntry(spelling: "Postgres"), DictionaryEntry(spelling: "Kalikin")])
-        let model = DictionaryModel(repository: repository)
+        let model = DictionaryModel(repository: repository, defaults: defaults)
         @MainActor func shoot(_ name: String, dark: Bool, accessible: Bool = false, height: CGFloat = 700) async throws {
             app.appearance = NSAppearance(named: accessible
                 ? (dark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua)
@@ -917,7 +922,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try snapshot(scopeHost, to: directory.appendingPathComponent("dictionary-entry-apps.png"))
         try expect(model.put(DictionaryEntry(spelling: "GPT 6.1 Sol", aliases: ["GPT six point one soul"],
                                              apps: ["com.apple.Terminal"], projects: ["gob.lin"])), "Could not create project-scoped fixture")
-        model.lastContext = ("Terminal", DetectedProject(name: "gob.lin", source: .repository))
+        model.lastContext = ("Terminal", "com.apple.Terminal", DetectedProject(name: "gob.lin", source: .repository))
         for dark in [false, true] { try await shoot("dictionary-projects-\(dark ? "dark" : "light")", dark: dark, height: 1000) }
         let projectHost = NSHostingView(rootView: Form { DictionaryProjectScopeEditor(projects: .constant(["gob.lin"]), suggestions: ["gob.lin", "harbor"]) }
             .formStyle(.grouped).frame(width: 460, height: 220))
@@ -925,6 +930,21 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         projectHost.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(500))
         try snapshot(projectHost, to: directory.appendingPathComponent("dictionary-entry-projects.png"))
+        let fixtureRepository = scratch.appendingPathComponent("gob.lin")
+        try FileManager.default.createDirectory(at: fixtureRepository.appendingPathComponent("GoblinCore"), withIntermediateDirectories: true)
+        try #"let package = Package(name: "Goblin")"#.write(to: fixtureRepository.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
+        model.offerTerms(from: DetectedProject(name: "gob.lin", source: .repository, root: fixtureRepository))
+        model.offerCorrection(dictated: "ship the go blin build", edited: "ship the gob.lin build", scope: DictionaryScope(application: "com.apple.Terminal", project: "gob.lin"))
+        for _ in 0..<50 where model.suggestions.count < 3 { try await Task.sleep(for: .milliseconds(100)) }
+        try expect(model.suggestions.map(\.spelling) == ["gob.lin", "PostHog", "GoblinCore"], "Unexpected suggestions: \(model.suggestions.map(\.spelling))")
+        for dark in [false, true] { try await shoot("dictionary-suggestions-\(dark ? "dark" : "light")", dark: dark, height: 1300) }
+        model.dismiss(model.suggestions[2])
+        try expect(model.suggestions.count == 2 && defaults.stringArray(forKey: DictionaryModel.dismissedSuggestionsKey)?.count == 1, "Dismissal didn't stick")
+        model.accept(model.suggestions[0])
+        try expect(model.entries.last.map { ($0.spelling, $0.aliases, $0.projects) } ?? ("", [], []) == ("gob.lin", ["go blin"], ["gob.lin"]),
+                   "Accepting didn't add the project term")
+        model.suggestsTerms = false
+        try expect(model.suggestions.isEmpty, "Turning suggestions off left the card")
         model.lastContext = nil
         var settings = RewriteSettings()
         settings.enabled = true

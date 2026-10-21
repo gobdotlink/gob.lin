@@ -154,7 +154,7 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 
 `GoblinApp.swift`. Use `MenuBarExtra` in window style: a 360 pt glass panel. Top to bottom:
 
-1. **Header:** the goblin at 64 pt, whose eyes follow the pointer anywhere over the popover and look ahead when it leaves (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button.
+1. **Header:** the goblin at 64 pt, whose eyes follow the pointer anywhere over the popover and look ahead when it leaves (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button. While the goblin has dictionary suggestions, one moss line under the status ("3 new words for gob.lin") opens the Dictionary page.
 2. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
 3. **Update:** only when an update is available, with a Restart button.
 4. **Microphone:** a picker plus press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved.
@@ -185,6 +185,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Style: Level (None, Light, Medium, Coding agent) as a popup, with the level's description under the label.
   - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again, plus an amber row: "Slower than 4 s? I type what you said instead."
   - The provider sheet: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key, plus Refresh), Reasoning, API key (masked, "Saved in gob.lin preferences", Remove), the model-list status row, and Advanced request options. Cancel and Save.
+- **Dictionary:** while there are suggestions, a card above Terms with the look-down goblin at 64 pt gripping its top edge. A title in the goblin's voice ("I found some words in gob.lin"), the budget ("22 of 32 words for gob.lin"), and one row per word with a reason caption ("you fixed “go blin”", "from Package.swift"), Not Now and Add, plus Add All. Nothing is added without a click.
 - **About:** centred.
   - The goblin at 128 pt, whose eyes follow the pointer anywhere over the page, the 48 pt wordmark, the version, and the tagline with a blinking block cursor.
   - Two plates: four sentences of lore with three stats (words yapped, dictations, 0 s of audio uploaded), and spec rows (recognition, runs on, model size, languages, network).

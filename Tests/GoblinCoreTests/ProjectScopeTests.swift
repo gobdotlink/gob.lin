@@ -9,13 +9,24 @@ import Testing
     let both = DictionaryEntry(spelling: "PostHog", apps: ["com.t3tools.t3code"], projects: ["akalikin/gob.lin"])
     let entries = [everywhere, t3, project, both]
     let spellings = { (scope: DictionaryScope) in entries.active(in: scope).map(\.spelling) }
-    #expect(spellings(DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin")) == ["Postgres", "Kalikin", "Luna", "PostHog"])
-    #expect(spellings(DictionaryScope(application: "dev.zed.Zed", project: "/Users/me/Projects/GOB.LIN")) == ["Postgres", "Luna"])
-    #expect(spellings(DictionaryScope(application: "com.t3tools.t3code", project: "harbor")) == ["Postgres", "Kalikin"])
+    // Most specific first: project and app, project, app, then everywhere.
+    #expect(spellings(DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin")) == ["PostHog", "Luna", "Kalikin", "Postgres"])
+    #expect(spellings(DictionaryScope(application: "dev.zed.Zed", project: "/Users/me/Projects/GOB.LIN")) == ["Luna", "Postgres"])
+    #expect(spellings(DictionaryScope(application: "com.t3tools.t3code", project: "harbor")) == ["Kalikin", "Postgres"])
     // Without a detected project, project terms stay out: a missed detection costs recall, never a wrong term.
-    #expect(spellings(DictionaryScope(application: "com.t3tools.t3code")) == ["Postgres", "Kalikin"])
+    #expect(spellings(DictionaryScope(application: "com.t3tools.t3code")) == ["Kalikin", "Postgres"])
     #expect(spellings(DictionaryScope(application: "", project: "")) == ["Postgres"])
     #expect(DictionaryScope.projectKey(" akalikin/Gob.lin/ ") == "gob.lin")
+}
+
+@Test func vocabularyKeepsTheMostSpecificAndNewestTermsWithinTheLimit() {
+    let everywhere = (0..<DictionaryScope.activeLimit).map { DictionaryEntry(spelling: "Term\($0)") }
+    let entries = [DictionaryEntry(spelling: "Luna", projects: ["gob.lin"])] + everywhere
+    let vocabulary = entries.vocabulary(in: DictionaryScope(application: "dev.zed.Zed", project: "gob.lin"))
+    #expect(vocabulary.count == DictionaryScope.activeLimit)
+    // The project term comes first; among terms used everywhere the oldest falls past the limit.
+    #expect(vocabulary.first == "Luna" && vocabulary[1] == "Term\(DictionaryScope.activeLimit - 1)" && !vocabulary.contains("Term0"))
+    #expect(entries.active(in: DictionaryScope(application: "dev.zed.Zed", project: "gob.lin")).count == DictionaryScope.activeLimit + 1)
 }
 
 @Test func projectScopesPersistAndValidate() throws {
@@ -48,6 +59,7 @@ import Testing
     let file = repo.appendingPathComponent("Sources/App/Main.swift")
     try Data().write(to: file)
     #expect(ProjectResolution.repositoryName(containing: file) == "gob.lin")
+    #expect(ProjectResolution.repositoryRoot(containing: file)?.standardizedFileURL == repo.standardizedFileURL)
     #expect(ProjectResolution.repositoryName(containing: repo.appendingPathComponent("Sources")) == "gob.lin")
     #expect(ProjectResolution.repositoryName(containing: root) == nil)
     #expect(ProjectResolution.repositoryName(containing: URL(string: "https://example.com/gob.lin")!) == nil)
@@ -78,6 +90,8 @@ import Testing
     #expect(ProjectResolution.t3ProjectTitle(threadID: "t3", database: database) == nil)
     #expect(ProjectResolution.t3ProjectTitle(threadID: "remote", database: database) == nil)
     #expect(ProjectResolution.t3ProjectTitles(database: database) == ["gob.lin"])
+    #expect(ProjectResolution.t3ProjectRoot(threadID: "c36b56f9-d964-495b-9259-066fbcfab418", database: database)?.path == "/Users/me/gob.lin")
+    #expect(ProjectResolution.t3ProjectRoot(threadID: "t2", database: database) == nil)
     #expect(ProjectResolution.t3ProjectTitle(threadID: "x", database: database.appendingPathExtension("missing")) == nil)
 
     // Remote threads: the main panel's "New thread in <project>" button.
@@ -102,6 +116,8 @@ import Testing
     #expect(ProjectResolution.paseoProjectName(workspaceID: "wks_2", directory: directory) == "fallback")
     #expect(ProjectResolution.paseoProjectName(workspaceID: "wks_remote", directory: directory) == nil)
     #expect(ProjectResolution.paseoProjectNames(directory: directory) == ["HARBOR"])
+    #expect(ProjectResolution.paseoProject(workspaceID: "wks_1", directory: directory)?.root?.path == "/Users/me/dash")
+    #expect(ProjectResolution.paseoProject(workspaceID: "wks_2", directory: directory)?.root?.path == "/Users/me/fallback")
 
     // Remote workspaces: the only workspace row styled differently from the others is the open one.
     func header(_ name: String) -> ProjectResolution.InterfaceNode {

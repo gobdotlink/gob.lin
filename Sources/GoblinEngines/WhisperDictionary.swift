@@ -12,12 +12,12 @@ enum WhisperDictionary {
         let usage: SpeechDictionaryUsage
     }
 
+    /// Fits whole terms in the order given, most important first (see `active(in:)`), up to `DictionaryScope.activeLimit`.
     static func prompt(terms: [String], encode: (String) -> [Int]) throws -> Prompt {
-        let ordered = try DictionaryRepository.validated(terms.map { DictionaryEntry(spelling: $0) })
-            .map(\.spelling).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let ordered = try DictionaryRepository.validated(terms.map { DictionaryEntry(spelling: $0) }).map(\.spelling)
         var included: [String] = []
         var tokens: [Int] = []
-        for term in ordered {
+        for term in ordered.prefix(DictionaryScope.activeLimit) {
             let candidate = included + [term]
             let encoded = encode(" " + candidate.joined(separator: ", "))
             guard encoded.count <= tokenLimit else { break }

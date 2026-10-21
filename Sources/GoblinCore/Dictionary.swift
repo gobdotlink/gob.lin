@@ -51,6 +51,9 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
 
     /// Whether dictation into `application` (a bundle identifier, nil when unknown) uses this entry, with no known project.
     public func applies(to application: String?) -> Bool { applies(in: DictionaryScope(application: application)) }
+
+    /// Project and app (3), project (2), app (1), everywhere (0): the more specific, the more it matters where it applies.
+    var specificity: Int { (projects.isEmpty ? 0 : 2) + (apps.isEmpty ? 0 : 1) }
 }
 
 /// Where a dictation happens: the app it started in and, when gob.lin can tell, the project open there.
@@ -59,6 +62,11 @@ public struct DictionaryScope: Codable, Equatable, Hashable, Sendable {
     public var application: String?
     /// Project name as the app shows it, such as "gob.lin" or "akalikin/gob.lin".
     public var project: String?
+
+    /// Most terms one dictation sends to recognition and Cleanup. Longer lists cost names in the dictionary evaluation:
+    /// Cleanup recovered 86/96 with the 16 relevant terms and 74/96 with all 120. Aliases still use every active term.
+    // ponytail: measured only at 16 and 120 terms; rerun `dictionary-eval` at 16–64 to tune.
+    public static let activeLimit = 32
 
     public init(application: String? = nil, project: String? = nil) {
         self.application = application
@@ -75,8 +83,18 @@ public struct DictionaryScope: Codable, Equatable, Hashable, Sendable {
 }
 
 extension Array where Element == DictionaryEntry {
-    /// Entries for every app and project, plus those scoped to `scope`.
-    public func active(in scope: DictionaryScope) -> [DictionaryEntry] { filter { $0.applies(in: scope) } }
+    /// Entries for every app and project, plus those scoped to `scope`: most specific first, then newest first, so a
+    /// limit keeps the terms this app and project need.
+    public func active(in scope: DictionaryScope) -> [DictionaryEntry] {
+        enumerated().filter { $0.element.applies(in: scope) }
+            .sorted { ($0.element.specificity, $0.offset) > ($1.element.specificity, $1.offset) }
+            .map(\.element)
+    }
+
+    /// The preferred spellings recognition and Cleanup receive in `scope`, at most `DictionaryScope.activeLimit`.
+    public func vocabulary(in scope: DictionaryScope) -> [String] {
+        active(in: scope).prefix(DictionaryScope.activeLimit).map(\.spelling)
+    }
 
     /// Entries for every app, plus those scoped to `application`, with no known project.
     public func active(in application: String?) -> [DictionaryEntry] { active(in: DictionaryScope(application: application)) }
@@ -169,7 +187,8 @@ public struct DictionaryRepository: Sendable {
     }
 }
 
-private func dictionaryKey(_ text: String) -> String {
+/// Case- and spacing-insensitive identity of a spelling or alias.
+func dictionaryKey(_ text: String) -> String {
     text.precomposedStringWithCanonicalMapping.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))
         .split(whereSeparator: \.isWhitespace).joined(separator: " ")
 }

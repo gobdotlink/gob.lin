@@ -37,8 +37,9 @@ public actor TranscriptPostprocessor {
         let corrected = DictionaryCorrector.correct(rawText, entries: entries, allowFuzzy: false).text
         let preferred = entries.map(\.spelling)
         if rewriteSettings.enabled && rewriteSettings.cleanup != .none {
-            let rewritten = await rewriteClient.rewrite(corrected, settings: rewriteSettings, apiKey: apiKey,
-                                                        tone: tone, preferredSpellings: preferred)
+            // Callers pass the active terms most important first; the prompt gets the same limit as recognition.
+            let rewritten = await rewriteClient.rewrite(corrected, settings: rewriteSettings, apiKey: apiKey, tone: tone,
+                                                        preferredSpellings: Array(preferred.prefix(DictionaryScope.activeLimit)))
             if let failure = rewritten.failure {
                 // A failed rewrite must recover the original ASR output, before dictionary or tone edits.
                 return result(rawText, final: rawText, tone: tone, polished: false, warning: .rewrite(failure), start: start)

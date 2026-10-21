@@ -48,6 +48,7 @@ private struct PopoverHeader: View {
     @ObservedObject private var diagnostics: DiagnosticsModel
     @ObservedObject private var speechModels: SpeechModelService
     @ObservedObject private var hotkeys: HotkeyService
+    @ObservedObject private var dictionary: DictionaryModel
     // The ⋯ menu's titles and enabled states come from these two.
     @ObservedObject private var permissions: PermissionModel
     @ObservedObject private var updates: UpdateChecker
@@ -59,6 +60,7 @@ private struct PopoverHeader: View {
         _diagnostics = ObservedObject(wrappedValue: model.diagnostics)
         _speechModels = ObservedObject(wrappedValue: model.speechModels)
         _hotkeys = ObservedObject(wrappedValue: model.hotkeys)
+        _dictionary = ObservedObject(wrappedValue: model.dictionary)
         _permissions = ObservedObject(wrappedValue: model.permissions)
         _updates = ObservedObject(wrappedValue: model.updates)
     }
@@ -82,6 +84,13 @@ private struct PopoverHeader: View {
                 }
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
+                if dictionary.suggestsTerms, !dictionary.suggestions.isEmpty {
+                    let count = dictionary.suggestions.count
+                    Button("\(count) new \(count == 1 ? "word" : "words")\(dictionary.suggestionPlace.map { " for \($0.name)" } ?? "")") {
+                        dismiss.then { model.openSettings(.dictionary) }
+                    }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(GoblinBrand.mossText).contentShape(.rect)
+                }
             }
             Spacer(minLength: 6)
             Menu {

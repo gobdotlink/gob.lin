@@ -5,11 +5,27 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class DictionaryModel: ObservableObject {
-    @Published private(set) var entries: [DictionaryEntry] = []
+    static let suggestsTermsKey = "dictionary.suggestsTerms"
+    static let dismissedSuggestionsKey = "dictionary.dismissedSuggestions"
+
+    @Published private(set) var entries: [DictionaryEntry] = [] { didSet { reviewSuggestions() } }
     @Published var error: String?
     @Published private(set) var lastFailure: DiagnosticFailure?
-    /// The app and detected project of the most recent dictation, shown so users can check project detection.
-    @Published var lastContext: (application: String?, project: DetectedProject?)?
+    /// The app and detected project of the most recent dictation, shown so users can check project detection. `bundleIdentifier`
+    /// is the app's dictionary scope: "" is gob.lin itself.
+    @Published var lastContext: (application: String?, bundleIdentifier: String?, project: DetectedProject?)?
+    /// Terms worth adding for the places you dictate into, best first. Nothing is added until the user accepts one.
+    @Published private(set) var suggestions: [TermSuggestion] = []
+    /// Whether gob.lin reads the project you dictate into and your fixes for suggestions; on by default.
+    @Published var suggestsTerms: Bool {
+        didSet { defaults.set(suggestsTerms, forKey: Self.suggestsTermsKey); reviewSuggestions() }
+    }
+    private let defaults: UserDefaults
+    private var dismissed: Set<String>
+    private var correctionCandidates: [TermSuggestion] = []
+    private var repositoryCandidates: [TermSuggestion] = []
+    private var repositoryCache: [String: (read: Date, candidates: [TermSuggestion])] = [:]
+    private var repositoryTask: Task<Void, Never>?
 
     /// Project names to suggest: T3 Code and Paseo projects on this Mac, the last detected project and existing scopes.
     func knownProjects() async -> [String] {
@@ -24,10 +40,76 @@ final class DictionaryModel: ObservableObject {
     private let repository: DictionaryRepository
     private(set) var available = false
 
-    init(repository: DictionaryRepository = .applicationDefault) {
+    init(repository: DictionaryRepository = .applicationDefault, defaults: UserDefaults = .standard) {
         self.repository = repository
+        self.defaults = defaults
+        suggestsTerms = defaults.object(forKey: Self.suggestsTermsKey) as? Bool ?? true
+        dismissed = Set(defaults.stringArray(forKey: Self.dismissedSuggestionsKey) ?? [])
         do { entries = try repository.load(); available = true }
         catch { lastFailure = .dictionaryUnavailable; self.error = "Could not load your dictionary: \(error.localizedDescription)" }
+    }
+
+    /// A new term for the last dictation's place: its project if one was detected, otherwise its app.
+    func newEntry() -> DictionaryEntry {
+        if let project = lastContext?.project?.name { return DictionaryEntry(spelling: "", projects: [project]) }
+        if let app = lastContext?.bundleIdentifier, !app.isEmpty { return DictionaryEntry(spelling: "", apps: [app]) }
+        return DictionaryEntry(spelling: "")
+    }
+
+    // MARK: Suggestions
+
+    /// Reads the project's folder in the background, at most every 10 minutes per folder, for names to suggest.
+    func offerTerms(from project: DetectedProject) {
+        guard suggestsTerms, let root = project.root else { return }
+        let key = project.name + "\n" + root.standardizedFileURL.path
+        if let cached = repositoryCache[key], cached.read.timeIntervalSinceNow > -600 {
+            repositoryCandidates = cached.candidates
+            reviewSuggestions()
+            return
+        }
+        repositoryTask?.cancel()
+        repositoryTask = Task { [weak self] in
+            let name = project.name
+            let found = await Task.detached(priority: .utility) { TermSuggestions.fromRepository(root: root, project: name) }.value
+            guard let self, !Task.isCancelled else { return }
+            repositoryCache[key] = (Date(), found)
+            repositoryCandidates = found
+            reviewSuggestions()
+        }
+    }
+
+    /// Offers the terms the user fixed after a dictation into `scope`.
+    func offerCorrection(dictated: String, edited: String, scope: DictionaryScope) {
+        guard suggestsTerms else { return }
+        let found = TermSuggestions.fromCorrection(dictated: dictated, edited: edited, scope: scope)
+        guard !found.isEmpty else { return }
+        correctionCandidates = Array((found + correctionCandidates).prefix(24))
+        reviewSuggestions()
+    }
+
+    func accept(_ suggestion: TermSuggestion) { _ = persist(entries.accepting(suggestion)) }
+
+    func acceptAll() { _ = persist(suggestions.reduce(entries) { $0.accepting($1) }) }
+
+    func dismiss(_ suggestion: TermSuggestion) {
+        dismissed.insert(suggestion.id)
+        defaults.set(dismissed.sorted(), forKey: Self.dismissedSuggestionsKey)
+        reviewSuggestions()
+    }
+
+    /// The project or app every suggestion is for, when they share one: "gob.lin" or "Slack".
+    var suggestionPlace: (name: String, isProject: Bool, scope: DictionaryScope)? {
+        guard let first = suggestions.first, !first.isEverywhere, suggestions.allSatisfy({ $0.place == first.place }) else { return nil }
+        if let project = first.projects.first { return (project.split(separator: "/").last.map(String.init) ?? project, true, first.place) }
+        return first.apps.first.map { (DictionaryApps.name($0), false, first.place) }
+    }
+
+    private func reviewSuggestions() {
+        // Before init finishes loading, and while the file can't be read, there is nothing to compare against.
+        guard suggestsTerms, available else { if !suggestions.isEmpty { suggestions = [] }; return }
+        let next = TermSuggestions.review(correctionCandidates + repositoryCandidates, entries: entries, dismissed: dismissed,
+                                          isKnownWord: ParakeetCorrectionGuard.isKnownEnglishWord)
+        if next != suggestions { suggestions = next }
     }
 
     func put(_ entry: DictionaryEntry) -> Bool {
@@ -148,6 +230,9 @@ struct DictionarySettingsView: View {
         let current = request
         let usage = preview?.request == current ? preview?.usage : nil
         let scoped = model.entries.contains(where: \.isScoped)
+        if model.suggestsTerms, !model.suggestions.isEmpty {
+            Section { DictionarySuggestionsCard(model: model) }.containerValue(\.plateless, true)
+        }
         Section {
             if model.entries.isEmpty {
                 ContentUnavailableView("Add your vocabulary", systemImage: "character.book.closed",
@@ -167,9 +252,6 @@ struct DictionarySettingsView: View {
                     }
                 }
                 ForEach(shownEntries) { entry in
-                    if usage?.excluded.first == entry.spelling {
-                        StatusRow(.waiting, Text("The terms below don't fit, so I don't send them to recognition. Aliases and Cleanup still use them."))
-                    }
                     LabeledContent {
                         HStack {
                             Button("Edit") { editing = entry }
@@ -203,7 +285,7 @@ struct DictionarySettingsView: View {
                 Spacer()
                 Group {
                     Button("Import Words…") { importing = true }.disabled(!model.available)
-                    Button("Add Term", systemImage: "plus") { editing = DictionaryEntry(spelling: "") }.disabled(!model.available)
+                    Button("Add Term", systemImage: "plus") { editing = model.newEntry() }.disabled(!model.available)
                         .prominent()
                 }
                 // The plate header's small caps and letter spacing are for the label, not the buttons.
@@ -215,7 +297,7 @@ struct DictionarySettingsView: View {
                 Text(service.selectedModel.name)
             } label: {
                 Text("Speech Model")
-                if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms in alphabetical order") }
+                if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms, project and app terms first, then newest") }
                 if service.selectedModel.capabilities.dictionaryCorrection { Text("Correction after recognition · English only") }
             }
             LabeledContent {
@@ -230,6 +312,10 @@ struct DictionarySettingsView: View {
                 Text("Cleanup")
                 Text(cleanupEnabled ? "I add the preferred spellings for the app and project you're dictating into to the prompt."
                                     : "I don't send your dictionary to a rewrite model.")
+            }
+            Toggle(isOn: $model.suggestsTerms) {
+                Text("Suggest words")
+                Text("I look for names in the project you're dictating into and in words you fix afterwards. I only add one when you click Add.")
             }
             if !model.available {
                 StatusRow(.problem, Text("I couldn't load your dictionary."))
@@ -289,6 +375,79 @@ struct DictionarySettingsView: View {
         .alert("Dictionary", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
+    }
+}
+
+/// The goblin's finds for the places you dictate into, above the term list.
+private struct DictionarySuggestionsCard: View {
+    @ObservedObject var model: DictionaryModel
+
+    private var title: String {
+        guard let place = model.suggestionPlace else { return "I found some words for your dictionary" }
+        return place.isProject ? "I found some words in \(place.name)" : "I found some words for \(place.name)"
+    }
+
+    var body: some View {
+        Plate {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.system(size: 13, weight: .semibold))
+                        if let place = model.suggestionPlace {
+                            let used = model.entries.active(in: place.scope).count
+                            Text("\(used) of \(DictionaryScope.activeLimit) words for \(place.name)").font(.system(size: 11.5))
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    Spacer(minLength: 12)
+                    if model.suggestions.count > 1 { Button("Add All") { model.acceptAll() }.controlSize(.small) }
+                }
+                .padding(.bottom, 6)
+                ForEach(model.suggestions) { suggestion in
+                    Hairline()
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(suggestion.spelling).font(.body.monospaced())
+                            Text(caption(suggestion)).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        Spacer(minLength: 12)
+                        Button("Not Now") { model.dismiss(suggestion) }.accessibilityLabel("Not now, \(suggestion.spelling)")
+                        Button("Add") { model.accept(suggestion) }.prominent().accessibilityLabel("Add \(suggestion.spelling)")
+                    }
+                    .controlSize(.small).padding(.vertical, 8)
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            PeekingGoblin(sprite: .look, scale: 1).alignmentGuide(.top) { $0[.bottom] }.padding(.trailing, 40)
+        }
+        .padding(.top, 60)
+    }
+
+    private func caption(_ suggestion: TermSuggestion) -> String {
+        let existing = model.entries.first { $0.spelling.caseInsensitiveCompare(suggestion.spelling) == .orderedSame }
+        let reason: String
+        switch suggestion.reason {
+        case .correction(let heard): reason = "you fixed “\(heard)”"
+        case .projectName: reason = "the project's name"
+        case .manifest(let file): reason = "from \(file)"
+        case .author: reason = "a contributor"
+        case .folder: reason = "a folder in the project"
+        case .everywhere:
+            if let existing, existing.projects.count >= 2, existing.apps.isEmpty { return "you use it in \(existing.projects.count) projects — use it everywhere?" }
+            if let existing, existing.apps.count >= 2, existing.projects.isEmpty { return "you use it in \(existing.apps.count) apps — use it everywhere?" }
+            return "you use it in more than one place — use it everywhere?"
+        }
+        var parts = [reason]
+        if model.suggestionPlace == nil {
+            parts.append(suggestion.projects.first.map { "project \($0)" } ?? DictionaryApps.summary(suggestion.apps))
+        }
+        if let existing, existing.isScoped {
+            let places = existing.projects + existing.apps.map(DictionaryApps.name)
+            parts.append("already in " + places.joined(separator: ", "))
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

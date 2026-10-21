@@ -32,9 +32,10 @@ public enum TextDiff {
         return text
     }
 
-    /// Runs of kept, removed and added text, in reading order.
-    public static func changes(from old: String, to new: String) -> [Change] {
-        let a = tokens(old), b = tokens(new)
+    /// Runs of kept, removed and added text, in reading order. `split` tokenizes both texts; the default separates
+    /// punctuation, which splits terms such as "gob.lin".
+    public static func changes(from old: String, to new: String, split: (String) -> [String] = tokens) -> [Change] {
+        let a = split(old), b = split(new)
         // ponytail: O(n·m) LCS table, fine for dictation-sized text; past a million cells it shows a plain replacement.
         guard a.count * b.count <= 1_000_000 else {
             return [a.isEmpty ? nil : .removed(joined(a)), b.isEmpty ? nil : .added(joined(b))].compactMap { $0 }

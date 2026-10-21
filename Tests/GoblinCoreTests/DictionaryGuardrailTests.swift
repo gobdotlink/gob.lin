@@ -57,8 +57,8 @@ import Testing
     let coding = DictionaryEntry(spelling: "PostHog", apps: ["com.t3tools.t3code", "sh.paseo.app"])
     let writing = DictionaryEntry(spelling: "Lisa", apps: ["com.microsoft.Word"])
     let entries = [everywhere, coding, writing]
-    #expect(entries.active(in: "com.t3tools.t3code").map(\.spelling) == ["Postgres", "PostHog"])
-    #expect(entries.active(in: "com.microsoft.Word").map(\.spelling) == ["Postgres", "Lisa"])
+    #expect(entries.active(in: "com.t3tools.t3code").map(\.spelling) == ["PostHog", "Postgres"])
+    #expect(entries.active(in: "com.microsoft.Word").map(\.spelling) == ["Lisa", "Postgres"])
     #expect(entries.active(in: "com.apple.Notes").map(\.spelling) == ["Postgres"])
     #expect(entries.active(in: nil).map(\.spelling) == ["Postgres"])
 

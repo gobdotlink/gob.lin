@@ -9,8 +9,10 @@ public struct DetectedProject: Equatable, Sendable {
 
     public let name: String
     public let source: Source
+    /// The project's folder on this Mac, when known, for term suggestions. Projects read from the interface have none.
+    public let root: URL?
 
-    public init(name: String, source: Source) { self.name = name; self.source = source }
+    public init(name: String, source: Source, root: URL? = nil) { self.name = name; self.source = source; self.root = root }
 }
 
 /// Turns what other apps expose (file paths, page addresses, sidebar text) into project names.
@@ -31,6 +33,11 @@ public enum ProjectResolution {
 
     /// The name of the git repository containing `url` (a file or folder), if any.
     public static func repositoryName(containing url: URL, fileManager: FileManager = .default) -> String? {
+        repositoryRoot(containing: url, fileManager: fileManager)?.lastPathComponent
+    }
+
+    /// The folder of the git repository containing `url` (a file or folder), if any.
+    public static func repositoryRoot(containing url: URL, fileManager: FileManager = .default) -> URL? {
         guard url.isFileURL else { return nil }
         var directory = url.standardizedFileURL
         var isDirectory: ObjCBool = false
@@ -38,9 +45,7 @@ public enum ProjectResolution {
             directory.deleteLastPathComponent()
         }
         for _ in 0..<40 {
-            if fileManager.fileExists(atPath: directory.appendingPathComponent(".git").path) {
-                return directory.lastPathComponent
-            }
+            if fileManager.fileExists(atPath: directory.appendingPathComponent(".git").path) { return directory }
             let parent = directory.deletingLastPathComponent()
             guard parent.path != directory.path else { return nil }
             directory = parent
@@ -65,6 +70,15 @@ public enum ProjectResolution {
             JOIN projection_projects p ON p.project_id = t.project_id
             WHERE t.thread_id = ? AND p.deleted_at IS NULL AND p.title != 'No project' LIMIT 1
             """, binding: threadID).first
+    }
+
+    /// The folder of a thread's project in T3 Code's local database.
+    public static func t3ProjectRoot(threadID: String, database: URL = t3Database) -> URL? {
+        query(database, """
+            SELECT p.workspace_root FROM orchestration_v2_projection_threads t
+            JOIN projection_projects p ON p.project_id = t.project_id
+            WHERE t.thread_id = ? AND p.deleted_at IS NULL AND p.title != 'No project' LIMIT 1
+            """, binding: threadID).first.map { URL(fileURLWithPath: $0) }
     }
 
     /// Local T3 Code project titles, for suggestions.
@@ -100,11 +114,18 @@ public enum ProjectResolution {
 
     /// A local Paseo workspace's project name. Workspaces on other hosts are not stored on this Mac.
     public static func paseoProjectName(workspaceID: String, directory: URL = paseoProjects) -> String? {
+        paseoProject(workspaceID: workspaceID, directory: directory)?.name
+    }
+
+    /// A local Paseo workspace's project name and folder.
+    public static func paseoProject(workspaceID: String, directory: URL = paseoProjects) -> (name: String, root: URL?)? {
         guard let workspaces: [PaseoWorkspace] = decodeList(directory.appendingPathComponent("workspaces.json")),
               let workspace = workspaces.first(where: { $0.workspaceId == workspaceID }) else { return nil }
         let projects: [PaseoProject] = decodeList(directory.appendingPathComponent("projects.json")) ?? []
-        return projects.first { $0.projectId == workspace.projectId }?.name
-            ?? workspace.mainRepoRoot.map { URL(fileURLWithPath: $0).lastPathComponent }
+        let project = projects.first { $0.projectId == workspace.projectId }
+        let root = (project?.rootPath ?? workspace.mainRepoRoot).map { URL(fileURLWithPath: $0) }
+        guard let name = project?.name ?? root?.lastPathComponent else { return nil }
+        return (name, root)
     }
 
     /// Local Paseo project names, for suggestions.

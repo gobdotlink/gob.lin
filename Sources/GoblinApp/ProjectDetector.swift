@@ -29,19 +29,19 @@ actor ProjectDetector {
         if let document = Self.string(window, kAXDocumentAttribute),
            let url = document.hasPrefix("/") ? URL(fileURLWithPath: document) : URL(string: document), url.isFileURL {
             if let cached = cached(bundle + "|" + url.path) { return cached }
-            if let name = ProjectResolution.repositoryName(containing: url) {
-                return remember(DetectedProject(name: name, source: .repository), key: bundle + "|" + url.path)
+            if let root = ProjectResolution.repositoryRoot(containing: url) {
+                return remember(DetectedProject(name: root.lastPathComponent, source: .repository, root: root), key: bundle + "|" + url.path)
             }
         }
         guard isT3 || isPaseo, let web = Self.webArea(in: window, deadline: deadline),
               let address = Self.string(web, "AXURL") else { return nil }
         if isT3, let thread = ProjectResolution.t3ThreadID(fromAddress: address),
            let title = ProjectResolution.t3ProjectTitle(threadID: thread) {
-            return DetectedProject(name: title, source: .t3Database)
+            return DetectedProject(name: title, source: .t3Database, root: ProjectResolution.t3ProjectRoot(threadID: thread))
         }
         if isPaseo, let workspace = ProjectResolution.paseoWorkspaceID(fromAddress: address),
-           let name = ProjectResolution.paseoProjectName(workspaceID: workspace) {
-            return DetectedProject(name: name, source: .paseoWorkspaces)
+           let project = ProjectResolution.paseoProject(workspaceID: workspace) {
+            return DetectedProject(name: project.name, source: .paseoWorkspaces, root: project.root)
         }
         let key = bundle + "|" + address
         if let cached = cached(key) { return cached }

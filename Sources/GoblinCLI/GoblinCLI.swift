@@ -75,7 +75,7 @@ struct GoblinCLI {
                     arguments.firstIndex(of: option).flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
                 }
                 let scope = DictionaryScope(application: value("--app"), project: value("--project"))
-                options = RecognitionOptions(language: options.language, vocabulary: try dictionary.load().active(in: scope).map(\.spelling),
+                options = RecognitionOptions(language: options.language, vocabulary: try dictionary.load().vocabulary(in: scope),
                                              dictionaryCorrection: model.capabilities.dictionaryCorrection)
             }
             if arguments.first == "prepare-model" {
@@ -327,7 +327,7 @@ private struct GoblinCommands {
     Run prepare-model once before recognition. Recognition and benchmarks run locally.
     Processing options: --process, --tone formal|casual|veryCasual, --dictionary <JSON>, --app <bundle-id>, --project <name>.
     Transcribe/replay also send preferred spellings to models with customVocabulary support (Whisper's prompt;
-    whole terms fit alphabetically within the token budget; transcribe reports dictionaryUsage) or dictionaryCorrection
+    whole terms fit most specific first, up to 32, within the token budget; transcribe reports dictionaryUsage) or dictionaryCorrection
     (Parakeet v3, Ultra, Redux and Phonon-2; English only, after prepare-model --vocabulary-support).
     --rewrite additionally opts into your enabled provider and reads its saved key.
     Ground truth, jargon, and ordinary-word annotations are needed for accuracy metrics.
