@@ -32,4 +32,4 @@ Shortcut recording uses `NSEvent.addLocalMonitorForEvents` within gob.lin. Apple
 
 Accessibility preflight remains a prerequisite, and actual tap creation remains the runtime check. A failed tap reports a shortcut failure and presents existing recovery guidance; it does not infer missing Input Monitoring. Secure Input still pauses modifier-only shortcuts and rejects protected insertion. Accessibility/microphone revocation still cancels active shortcut state, stops capture through its owner, and presents onboarding. No grant resets or protection bypasses are performed by this change.
 
-See [GOB-35 verification](evidence/gob-35/verification.md) for observed checks and uncovered hardware/permission states. Run `scripts/check-permissions.sh` for readiness combinations and diagnostic recovery assertions; these supplied snapshots do not demonstrate system grants or physical keyboard behavior.
+Run `scripts/check-permissions.sh` for readiness combinations and diagnostic recovery assertions; these supplied snapshots do not demonstrate system grants or physical keyboard behavior.

@@ -32,7 +32,7 @@ Live dictation, original-file recovery and History retranscription all correct. 
 
 Measured on unseen synthetic clips, Parakeet + guard + join → Cleanup recovered more names than Cleanup alone on every qualifying model, with no ordinary words damaged; see the [evaluation](evaluation/dictionary-biasing.md#other-parakeet-models). Phonon-2 qualified by a narrow margin with 16 terms (1–2 names over Cleanup alone across two Cleanup runs) and a wide one with 120. TDT-CTC 110M uses a different vocabulary and was not evaluated. These are text-to-speech clips, not natural dictation.
 
-![Dictionary correction in Dictionary settings](evidence/gob-14/dictionary-correction-light.png)
+![Dictionary correction in Dictionary settings](screenshots/dictionary-correction-light.png)
 
 Exact aliases continue to work for every model and every active entry. When Cleanup is enabled at a non-None level, its prompt receives the active preferred spellings, including those excluded from native recognition. Adding dictionary terms never enables Cleanup.
 
@@ -46,7 +46,7 @@ Settings choose apps from the open apps or any application bundle, show “Only 
 
 Why scope: in the [dictionary evaluation](evaluation/dictionary-biasing.md), Cleanup given the 16 relevant terms recovered 86/96 names on unseen clips against 74/96 with all 120 terms, and Parakeet's guarded correction lost names with the longer list too. Neither list changed ordinary sentences, so a wrong or missing scope costs recall rather than introducing errors.
 
-![Scoped terms in Dictionary settings](evidence/gob-14/dictionary-scoped-light.png)
+![Scoped terms in Dictionary settings](screenshots/dictionary-scoped-light.png)
 
 ## Project scopes
 
@@ -64,9 +64,9 @@ History records the detected project with the app, and reprocessing reuses both.
 
 Measured on one Mac with WindowProbe running the shipped detector: Zed file → repository in 7 ms, T3 Code thread → database in 7 ms (1 ms cached), remote Paseo workspace → sidebar in about 95 ms. Ghostty exposes no document, so terminals without one give no project.
 
-![Project-scoped term in Dictionary settings](evidence/gob-14/dictionary-projects-light.png)
+![Project-scoped term in Dictionary settings](screenshots/dictionary-projects-light.png)
 
-![Project scope editor](evidence/gob-14/dictionary-entry-projects.png)
+![Project scope editor](screenshots/dictionary-entry-projects.png)
 
 ## Suggestions
 
@@ -81,7 +81,7 @@ A suggestion must look like a term: at least three letters and a word the macOS 
 
 Scoping starts narrow and widens on evidence. Repository terms, and fixes made while a project was detected, apply to that project only; fixes with no project apply to that app. The same spelling in a second project (or app) is offered there too; once it is in two or more, or in a project and an app, the suggestion becomes "use it everywhere?". Apps and projects combine with AND, so an app is never merged into a project term, which would narrow it. A place that already has `DictionaryScope.activeLimit` active terms gets no new ones, only "everywhere" suggestions. Add Term starts scoped the same way: the last dictation's project, otherwise its app.
 
-![Suggested terms on the Dictionary page](evidence/gob-14/dictionary-suggestions-light.png)
+![Suggested terms on the Dictionary page](screenshots/dictionary-suggestions-light.png)
 
 CLI `transcribe` and audio `replay` use the default dictionary, or the JSON file selected with `--dictionary`. Whisper models receive the same native prompt; `transcribe` reports included/excluded terms and token usage in `dictionaryUsage`. Parakeet v3, Ultra, Redux and Phonon-2 apply the same correction as the app once `prepare-model --vocabulary-support` has installed the pinned CTC model. Recorded-transcript replay does not run recognition. Benchmarks retain their explicit diagnostic controls. `dictionary-eval` compares dictionary biasing across Parakeet CTC correction, Whisper prompting and a CLI-only Moonshine key-term diagnostic; `--parakeet-correction app` runs the app's own correction path. See [Dictionary biasing evaluation](evaluation/dictionary-biasing.md).
 
