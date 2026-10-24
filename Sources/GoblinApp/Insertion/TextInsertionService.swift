@@ -117,8 +117,8 @@ final class TextInsertionService: ObservableObject {
         } else {
             setStatus("No accessible focused text target; nothing was inserted", outcome: .failure(.insertionFailed)); return
         }
-        let bundle = NSRunningApplication(processIdentifier: target.pid)?.bundleIdentifier ?? ""
-        let quirks = AppInsertionQuirks.forBundle(bundle)
+        let application = NSRunningApplication(processIdentifier: target.pid)
+        let quirks = AppInsertionQuirks.forBundle(application?.bundleIdentifier ?? "", at: application?.bundleURL)
         let background = !target.isStillFocused()
         // Empty web editors may accept a value write while selected-text writes are a no-op.
         let valueInsertion = background && target.selection == NSRange(location: 0, length: 0)
@@ -427,17 +427,18 @@ struct AppInsertionQuirks {
     /// Never watch edits in credential managers, even outside their secure fields.
     var editWatchBlocked = false
 
-    static func forBundle(_ bundle: String) -> Self {
-        let pasteOnly: Set<String> = ["com.apple.Terminal", "com.mitchellh.ghostty", "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders",
-                                      "com.todesktop.230313mzl4w4u92", "com.tinyspeck.slackmacgap", "com.google.Chrome",
+    static func forBundle(_ bundle: String, at url: URL? = nil) -> Self {
+        let pasteOnly: Set<String> = ["com.apple.Terminal", "com.mitchellh.ghostty", "com.google.Chrome",
                                       "company.thebrowser.Browser", "company.thebrowser.dia", "com.t3tools.t3code"]
+        // Electron editors report Accessibility text writes as applied without changing the text.
+        let electron = url.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path) } ?? false
         let remote: Set<String> = ["com.microsoft.rdc.macos", "com.realvnc.vncviewer", "com.teamviewer.TeamViewer", "com.anydesk.AnyDesk"]
         let credentialManagers: Set<String> = ["com.1password.1password", "com.agilebits.onepassword7",
                                                "com.bitwarden.desktop", "com.dashlane.Dashlane",
                                                "org.keepassxc.KeePassXC", "com.lastpass.LastPass"]
-        return Self(preferPaste: pasteOnly.contains(bundle) || remote.contains(bundle) || bundle.lowercased().contains("paseo"),
+        return Self(preferPaste: electron || pasteOnly.contains(bundle) || remote.contains(bundle),
                     remoteDesktop: remote.contains(bundle),
-                    emptyEditorLineBreak: bundle == "com.t3tools.t3code",
+                    emptyEditorLineBreak: electron || bundle == "com.t3tools.t3code",
                     editWatchBlocked: credentialManagers.contains(bundle))
     }
 }
