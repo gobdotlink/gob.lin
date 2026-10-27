@@ -12,7 +12,7 @@ let assets = URL(fileURLWithPath: #filePath).absoluteURL.deletingLastPathCompone
 /// eye mirrors the opposite direction, so both slits travel the same way across the face.
 let SLITS: [String: (x: Int, y: Int)] = [
     "ahead": (22, 30), "n": (21, 29), "ne": (23, 30), "e": (24, 32), "se": (23, 32),
-    "s": (22, 31), "sw": (21, 31), "w": (20, 29), "nw": (19, 28),
+    "s": (22, 31), "sw": (21, 31), "w": (20, 29), "nw": (21, 29),
 ]
 let MIRROR = ["ahead": "ahead", "n": "n", "ne": "nw", "e": "w", "se": "sw", "s": "s", "sw": "se", "w": "e", "nw": "ne"]
 
