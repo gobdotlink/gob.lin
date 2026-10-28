@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     private let editWatcher = PostPasteWatcher()
     private var pendingEditObservationID: UUID?
     let audioPreview: AudioPreviewModel
+    let microphones: MicrophonesModel
     let speechModels: SpeechModelService
     let updates = UpdateChecker()
     @Published var mascotState: MascotState = .idle
@@ -49,6 +50,11 @@ final class AppModel: ObservableObject {
     private var shuttingDown = false
     private var appliedConfiguration: Configuration?
     private var warmTask: Task<Void, Never>?
+    /// The microphone the last take opened, kept across launches so the next take can say when it changes.
+    private var lastMicrophoneUID: String? {
+        get { defaults.string(forKey: "audio.lastMicrophoneUID") }
+        set { defaults.set(newValue, forKey: "audio.lastMicrophoneUID") }
+    }
 
     init(dataDirectory: URL? = nil, defaults: UserDefaults = .standard, servicesEnabled: Bool = true,
          diagnosticEnvironment: DiagnosticEnvironment? = nil) {
@@ -64,7 +70,11 @@ final class AppModel: ObservableObject {
         permissions = PermissionModel(snapshot: servicesEnabled ? nil : .init(microphone: .notDetermined, accessibility: false, inputMonitoring: false), monitorSystem: servicesEnabled, diagnostics: diagnostics)
         hotkeys = HotkeyService(permissions: permissions, defaults: defaults, monitorSystem: servicesEnabled, diagnostics: diagnostics)
         insertion = TextInsertionService(pasteboard: servicesEnabled ? .general : .withUniqueName(), defaults: defaults, registerShortcuts: servicesEnabled)
-        audioPreview = AudioPreviewModel(devices: servicesEnabled ? nil : [InputDevice(id: 0, uid: "preview-input", name: "Preview microphone")], diagnostics: diagnostics)
+        audioPreview = AudioPreviewModel(monitorSystem: servicesEnabled, diagnostics: diagnostics)
+        microphones = servicesEnabled ? MicrophonesModel(defaults: defaults, diagnostics: diagnostics)
+            : MicrophonesModel(devices: [InputDevice(id: 0, uid: "preview-input", name: "MacBook Pro Microphone", kind: .builtIn),
+                                         InputDevice(id: 1, uid: "preview-webcam", name: "Desk Webcam", kind: .usb)],
+                               defaultUID: "preview-webcam", defaults: defaults)
         // Views observe the child models they show. Forwarding every child change here re-rendered
         // each open window whole, many times a second.
         diagnostics.$activeFailures.sink { [weak self] _ in
@@ -77,6 +87,7 @@ final class AppModel: ObservableObject {
         // diagnostics and how the warm microphone follows a new default device.
         permissions.onRefresh = { [weak self] in
             guard let self, !self.shuttingDown else { return }
+            self.microphones.checkLid()
             self.refreshDiagnostics()
             self.applyWarmMicrophone()
         }
@@ -157,12 +168,25 @@ final class AppModel: ObservableObject {
                 Task { @MainActor in self?.speechModels.setDictionaryHasTerms(hasTerms) }
             }.store(in: &subscriptions)
         }
+        if servicesEnabled {
+            microphones.onNewMicrophone = { [weak self] device in
+                self?.overlay.showCompletion(.newMicrophone(name: device.name, uid: device.uid), session: UUID())
+            }
+            // A microphone arriving, leaving or becoming the default moves the warm one at once, not at the next poll.
+            microphones.$devices.combineLatest(microphones.$defaultUID).dropFirst().sink { [weak self] _ in
+                Task { @MainActor in self?.applyWarmMicrophone() }
+            }.store(in: &subscriptions)
+        }
         overlay.model.perform = { [weak self] action in
             guard let self else { return }
             switch action {
             case .setup: self.permissions.showOnboarding()
             case .audioSettings: self.openSettings(.audio)
             case .cleanupSettings: self.openSettings(.cleanup)
+            case .useMicrophone(let uid):
+                self.microphones.pick(uid)
+                self.overlay.hide()
+            case .dismiss: self.overlay.hide()
             }
         }
         permissions.onboardingContent = { [weak self] in self.map { AnyView(OnboardingView(model: $0)) } ?? AnyView(EmptyView()) }
@@ -266,14 +290,14 @@ final class AppModel: ObservableObject {
         var rewriteSettings: Data?
         var rewriteKeys: [String: String]?
         var keepMicrophoneWarm: Bool
-        var inputDeviceUID: String?
+        var microphoneRanking: Data?
 
         init(_ defaults: UserDefaults) {
             overlayPosition = defaults.string(forKey: "overlayPosition")
             rewriteSettings = defaults.data(forKey: RewriteSettingsStore.preferenceKey)
             rewriteKeys = defaults.dictionary(forKey: RewriteKeyStore.preferenceKey) as? [String: String]
             keepMicrophoneWarm = defaults.bool(forKey: "audio.keepMicrophoneWarm")
-            inputDeviceUID = defaults.string(forKey: "audio.inputDeviceUID")
+            microphoneRanking = defaults.data(forKey: MicrophoneRanking.preferenceKey)
         }
     }
 
@@ -421,7 +445,7 @@ final class AppModel: ObservableObject {
                         do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
                     }
                 }
-                active.captureID = try await self.capture.start(uid: self.defaults.string(forKey: "audio.inputDeviceUID") ?? "",
+                active.captureID = try await self.capture.start(ranking: self.microphones.ranking,
                     directory: self.captureDirectory, feedback: self.feedback, feedbackSessionID: session.id, onEvent: active.onEvent)
                 active.eventTask = Task { @MainActor [weak self] in
                     for await event in active.events { await self?.consume(event, for: active) }
@@ -440,8 +464,13 @@ final class AppModel: ObservableObject {
         let session = active.session
         guard !session.cancelled else { return }
         switch event {
-        case .ready(let id, _):
+        case .ready(let id, let input):
             guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
+            // A switch is never silent: the first take on a different microphone names it.
+            if let previous = lastMicrophoneUID, previous != input.device.uid {
+                overlay.setMicrophoneLine("Using \(input.device.name)", session: overlayID)
+            }
+            lastMicrophoneUID = input.device.uid
             if active.audioReduction == nil {
                 active.audioReduction = AudioReductionSession(
                     pauseMedia: defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
@@ -450,6 +479,15 @@ final class AppModel: ObservableObject {
             diagnostics.resolve(.microphone)
             diagnostics.developmentLog.record(.firstBuffer, area: .microphone, operation: session.id)
             overlay.update(.listening, session: overlayID)
+        case .switched(let id, let from, let to):
+            guard id == active.captureID else { return }
+            lastMicrophoneUID = to.device.uid
+            var details = DevelopmentDetails(reason: .configurationChanged)
+            details.resolvedDevice = diagnostics.developmentLog.deviceID(to.device.uid)
+            diagnostics.developmentLog.record(.deviceResolved, area: .microphone, operation: session.id, details: details)
+            // A reopened device needs no words; a different one does.
+            guard from.uid != to.device.uid, !active.stopping, let overlayID = session.overlayID else { return }
+            overlay.setMicrophoneLine("\(from.name) dropped out · now \(to.device.name)", session: overlayID)
         case .silence(let id, let cause):
             guard id == active.captureID, !active.stopping, let overlayID = session.overlayID else { return }
             overlay.setMicrophoneNotice(cause?.message, session: overlayID)
@@ -623,10 +661,10 @@ final class AppModel: ObservableObject {
     private func applyWarmMicrophone() {
         guard servicesEnabled, !shuttingDown, activeCapture == nil else { return }
         let enabled = permissions.snapshot.microphone == .authorized && defaults.bool(forKey: "audio.keepMicrophoneWarm")
-        let uid = defaults.string(forKey: "audio.inputDeviceUID") ?? ""
+        let ranking = microphones.ranking
         warmTask = Task { [previous = warmTask, capture, weak self] in
             await previous?.value
-            do { try await capture.setWarmMicrophone(enabled: enabled, uid: uid) }
+            do { try await capture.setWarmMicrophone(enabled: enabled, ranking: ranking) }
             // A dictation took the microphone first; it reapplies this when it finishes.
             catch let failure as AudioCaptureFailure where failure.kind == .alreadyRecording {}
             catch { self?.diagnostics.report(Self.diagnostic(error as? AudioCaptureFailure ?? AudioCaptureFailure(.startFailed))) }
@@ -896,7 +934,7 @@ final class AppModel: ObservableObject {
             case .arming, .listening: state = .recording
             case .transcribing, .polishing: state = .transcribing
             case .error, .readyToPaste: state = .warning
-            case .hidden, .inserted, .milestone: state = .idle
+            case .hidden, .inserted, .milestone, .newMicrophone: state = .idle
             }
         }
         if mascotState != state { mascotState = state }

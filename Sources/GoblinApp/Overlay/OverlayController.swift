@@ -9,6 +9,8 @@ enum OverlayPhase: Equatable {
     case inserted(OverlayResult)
     case readyToPaste(application: String?, shortcut: Bool = true)
     case milestone(words: Int)
+    /// Asks once whether a microphone seen for the first time should be used.
+    case newMicrophone(name: String, uid: String)
     case error(OverlayNotice)
 
     var caption: String {
@@ -21,6 +23,7 @@ enum OverlayPhase: Equatable {
         case .inserted: "Typed"
         case .readyToPaste: "Ready to paste"
         case .milestone: "Milestone"
+        case .newMicrophone: "New microphone"
         case .error: "Needs attention"
         }
     }
@@ -47,7 +50,7 @@ struct OverlayNotice: Equatable {
 }
 
 /// Buttons the overlay can offer; the app decides where each one goes.
-enum OverlayAction { case setup, audioSettings, cleanupSettings }
+enum OverlayAction { case setup, audioSettings, cleanupSettings, useMicrophone(uid: String), dismiss }
 
 enum OverlayPosition: String, CaseIterable {
     case bottom, top
@@ -92,6 +95,8 @@ final class OverlayModel: ObservableObject {
     @Published var previewUnavailable = false
     /// Shown inside Listening while the microphone delivers only silence.
     @Published var microphoneNotice: String?
+    /// Shown inside Listening when this take uses a different microphone than the last one.
+    @Published var microphoneLine: String?
     static let levelHistory = 5
     var cancel: () -> Void = {}
     var perform: (OverlayAction) -> Void = { _ in }
@@ -114,6 +119,7 @@ final class OverlayModel: ObservableObject {
         mouthChanged = .distantPast
         previewUnavailable = false
         microphoneNotice = nil
+        microphoneLine = nil
         listeningStarted = nil
         audioSeconds = nil
         cleanupLabel = ""
@@ -159,6 +165,8 @@ final class OverlayController {
 
     @discardableResult
     func begin(onCancel: @escaping () -> Void) -> UUID {
+        // An unanswered question comes back after the take instead of being lost to it.
+        if case .newMicrophone = model.phase { completionNotices.append(model.phase) }
         hideTask?.cancel()
         orderOutTask?.cancel()
         sessionID = UUID()
@@ -200,6 +208,11 @@ final class OverlayController {
         model.microphoneNotice = notice
     }
 
+    func setMicrophoneLine(_ line: String?, session: UUID) {
+        guard session == sessionID, model.microphoneLine != line else { return }
+        model.microphoneLine = line
+    }
+
     func hide(session: UUID? = nil) {
         if let session, session != sessionID { return }
         hideTask?.cancel()
@@ -231,7 +244,8 @@ final class OverlayController {
         }
         let current = session == sessionID ? session : begin(onCancel: {})
         update(phase, session: current)
-        hide(after: 3, session: current)
+        // A question needs time to read and answer; ignoring it leaves the microphone below the line.
+        if case .newMicrophone = phase { hide(after: 12, session: current) } else { hide(after: 3, session: current) }
     }
 
     /// In 140 ms, out 120 ms, ease-out. Reduce Motion keeps the fade and drops the movement in the view.

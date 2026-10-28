@@ -85,6 +85,8 @@ public enum AudioCaptureEvent: Sendable {
     case level(sessionID: UUID, rms: Double)
     /// Non-terminal: the current silence warning, cleared with nil when sound returns.
     case silence(sessionID: UUID, cause: InputSilence?)
+    /// The take moved to another input, or reopened the same one, and carries on.
+    case switched(sessionID: UUID, from: AudioInputDevice, to: AudioInputResolution)
     case finished(CapturedAudio)
     case failed(sessionID: UUID, failure: AudioCaptureFailure)
     case cancelled(sessionID: UUID)

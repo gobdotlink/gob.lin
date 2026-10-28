@@ -143,6 +143,8 @@ The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a 
 | cleanup failed | sheepish | "Cleanup took too long, so I typed your words as you said them." Subline: `Cleanup › Cerebras didn't answer within 4.0 s`. Stays 2.5 s; hovering holds it. |
 | no microphone | squint, palm | "I can't hear anything. No microphone is connected." The subline holds "Choose Microphone…". Stays until dismissed, or 6 s. |
 | microphone silent | same while listening | A line under the header names the cause: muted, volume at zero, or no sound arriving. Device reports warn despite nonzero noise and clear on hardware recovery; a generic silence notice may remain. Sample-only warnings use 5 s before any sound or 15 s after sound and clear when sound returns. Recording continues. |
+| new microphone (new) | side-eye | Asks once, when a microphone is seen for the first time: "Lav Receiver just connected. Should I use it for dictation?" Subline: `Audio › new microphone` with Not Now and Use It. If a take is running, or starts while it's showing, it comes back when the take ends. It isn't asked when macOS already switched to the mic and gob.lin is following macOS, since the mic is already in use. Stays 12 s; ignoring it leaves the mic under "Only when picked". |
+| different microphone | same while listening | When a take uses a different mic from the last one, a quiet line under the header names it: "Using Lav Receiver". If the mic drops out mid-take, the take moves to the next mic in the ranking and the line says so: "Lav Receiver dropped out · now MacBook Pro Microphone". A silence notice replaces it. |
 | password field | side-eye, palm | "That's a password field, so I didn't type there." Subline: `Insert › Secure Input is on`. |
 | milestone (new) | cackle, sparkles | Replaces the inserted chip once, at 1k, 10k, 100k and 1M words: "10,000 words yapped." The bubble edge glows candle. Stays 2.5 s. |
 
@@ -157,7 +159,7 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 1. **Header:** the goblin at 64 pt, whose eyes follow the pointer anywhere over the popover and look ahead when it leaves (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button. While the goblin has dictionary suggestions, one moss line under the status ("3 new words for gob.lin") opens the Dictionary page.
 2. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
 3. **Update:** only when an update is available, with a Restart button.
-4. **Microphone:** a picker plus press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved.
+4. **Microphone:** the microphone in use, a picker in ranked order ending with Edit Ranking…, and press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved. While a higher-ranked mic is away or the lid has silenced it, the line under the meter says which one is standing in.
 5. **Cleanup and Tone** side by side. Clicking Cleanup's circle toggles it; its label opens the level menu.
 6. **Search:** a field plus the four latest dictations. Hovering a row shows copy and star. Then "All History".
 7. **Footer:** "Paste Last Dictation ⌥⇧⌘V" and "Settings… ⌘,".
@@ -179,6 +181,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Behaviour: Open at login, Click sounds, Add a space after each take.
   - Reduce audio while dictating: independent Pause current media and Mute audio switches. Explain that pause preserves the current player's position, mute lets playback advance, and both can be enabled. Preserve the existing pause preference; mute starts off.
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
+- **Audio:** Microphones is the ranked list. Each row has a light (green in use, amber silenced by the lid, hollow otherwise), the name, and its transport and state, plus a menu with the same moves as dragging. The System Default row is the line: mics above it are used in order, mics below it ("Only when picked") never on their own. A status row names the mic in use and the one it's standing in for.
 - **Cleanup:** the switch and level apply as soon as they change; the provider is edited in a sheet and applies on Save.
   - A top plate with the AI cleanup switch and a status row naming where the text goes. Turning it on with an unfinished provider opens the provider sheet, whose button reads Save and Turn On.
   - Provider: one row naming the service, with the model, host (Local and Custom) and "key saved" under it, and Edit…. While the provider can't run, an amber row says what's missing, with Set Up….

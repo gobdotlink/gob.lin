@@ -14,7 +14,7 @@ struct MenuPopover: View {
         VStack(spacing: 8) {
             PopoverHeader(model: model, eyes: eyes)
             PopoverNotices(model: model)
-            PopoverMicrophone(preview: model.audioPreview)
+            PopoverMicrophone(preview: model.audioPreview, microphones: model.microphones) { dismiss.then { model.openSettings(.audio) } }
             HStack(spacing: 8) { PopoverCleanup(model: model); PopoverTone() }
             PopoverRecents(model: model)
             PopoverFooter(model: model)
@@ -184,7 +184,8 @@ private struct PopoverNotices: View {
 /// Always the same height: the meter shows flat until the button is held, so the popover never resizes.
 private struct PopoverMicrophone: View {
     @ObservedObject var preview: AudioPreviewModel
-    @AppStorage("audio.inputDeviceUID") private var deviceUID = ""
+    @ObservedObject var microphones: MicrophonesModel
+    let editRanking: () -> Void
     @State private var levels = Array(repeating: 0.0, count: 28)
     @State private var testing = false
 
@@ -195,11 +196,26 @@ private struct PopoverMicrophone: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Microphone").font(.system(size: 11.5)).foregroundStyle(.secondary)
                     Menu {
-                        Picker("Microphone", selection: $deviceUID) {
-                            Text("Follow System Default").tag("")
-                            ForEach(preview.devices) { Text($0.name).tag($0.uid) }
+                        // In ranked order, the line included; picking one moves it above everything connected now.
+                        Picker("Microphone", selection: Binding(get: { selection }, set: { microphones.pick($0) })) {
+                            ForEach(microphones.ranking.entries) { entry in
+                                if entry.isSystemDefault {
+                                    Text("Follow System Default").tag("")
+                                } else if let device = microphones.device(entry.uid), device.kind != .virtual {
+                                    Text(device.silencedByLid ? "\(device.name) · Lid Closed" : device.name).tag(device.uid)
+                                        .disabled(device.silencedByLid)
+                                }
+                            }
                         }
                         .pickerStyle(.inline).labelsHidden()
+                        let others = ranked.filter { $0.kind == .virtual }
+                        if !others.isEmpty {
+                            Menu("Other Devices") {
+                                ForEach(others) { device in Button(device.name) { microphones.pick(device.uid) } }
+                            }
+                        }
+                        Divider()
+                        Button("Edit Ranking…", action: editRanking)
                     } label: {
                         HStack(spacing: 4) {
                             Text(deviceName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
@@ -235,24 +251,36 @@ private struct PopoverMicrophone: View {
             }
             .frame(height: 26)
             .accessibilityHidden(true)
-            Text(preview.silenceNotice ?? preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : "Hold the button to check your mic. Nothing is saved."))
+            Text(preview.silenceNotice ?? preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : note))
                 .font(.system(size: 11)).foregroundStyle(preview.silenceNotice == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(1)
         }
         .moduleBackground()
-        .onAppear { preview.refresh() }
         .onChange(of: preview.level) { _, level in levels = Array((levels + [level]).suffix(28)) }
+        // A microphone arriving or leaving mid-test moves the test with it.
+        .onChange(of: microphones.choice) { if testing { preview.start(ranking: microphones.ranking) } }
         .onDisappear { if testing { stopTest() } }
     }
 
-    private var deviceName: String {
-        preview.devices.first { $0.uid == deviceUID }?.name ?? (deviceUID.isEmpty ? "System Default" : "Saved microphone")
+    private var deviceName: String { microphones.inUse?.name ?? "No Microphone" }
+
+    private var ranked: [InputDevice] { microphones.ranking.entries.compactMap { microphones.device($0.uid) } }
+
+    private var selection: String {
+        guard let choice = microphones.choice else { return "" }
+        return choice.viaSystemDefault ? "" : choice.uid
+    }
+
+    /// Why the microphone in use isn't the favourite, so a stand-in is never a mystery.
+    private var note: String {
+        guard let passed = microphones.passedOver else { return "Hold the button to check your mic. Nothing is saved." }
+        return passed.lidClosed ? "Using this while the lid is closed." : "Using this until \(passed.entry.name) connects."
     }
 
     private func startTest() {
         guard !testing else { return }
         testing = true
         levels = Array(repeating: 0, count: levels.count)
-        preview.start(uid: deviceUID)
+        preview.start(ranking: microphones.ranking)
     }
 
     private func stopTest() {

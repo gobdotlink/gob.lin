@@ -19,12 +19,23 @@ final class CaptureProcessor: @unchecked Sendable {
     private var inputHostRange: (start: UInt64, end: UInt64)?
     private var hostTimesValid = true
     private var inputBufferDuration = 0.12
+    /// The open device stopped mid-take; the service moves the take to another input.
+    private var broken = false
+    /// When the take last had input, kept through failed reopens and cleared only when audio arrives again.
+    private var outageSince: ContinuousClock.Instant?
+    /// Rebound to a new input that hasn't delivered yet; a stop now keeps what the old one gave.
+    private var awaitingInput = false
+    /// Rebinds since the last delivered buffer. A device that breaks again on every reopen ends the take
+    /// instead of reopening forever while the take records nothing.
+    private var rebindsWithoutInput = 0
+    /// Set by a rebind: the first buffer from the new input is preceded by silence for the time between.
+    private var gapSince: ContinuousClock.Instant?
     private var pendingStop: (id: UUID, cutoff: UInt64, deadline: DispatchTime,
                               reply: CheckedContinuation<Void, Never>, timer: DispatchSourceTimer)?
-    private let nativeRate: Double
-    private let monoFormat: AVAudioFormat
+    private var nativeRate: Double
+    private var monoFormat: AVAudioFormat
     private let outputFormat: AVAudioFormat
-    private let converter: AVAudioConverter
+    private var converter: AVAudioConverter
     private var inputCount: Int64 = 0
     private var outputCount: Int64 = 0
     private var ring = [Float]()
@@ -89,6 +100,9 @@ final class CaptureProcessor: @unchecked Sendable {
             closeIngressLocked()
             lock.unlock(); return
         }
+        // ponytail: an outage is kept as at most 2 s of silence; longer reads as a pause, not lost time.
+        let gap = gapSince.map { min(2, max(0, Self.seconds($0.duration(to: now)) - Double(buffer.frameLength) / nativeRate)) } ?? 0
+        gapSince = nil
         if let time, time.isSampleTimeValid {
             if recordingSince != nil, let nextInputSample, time.sampleTime != nextInputSample {
                 pendingFailure = .noCallbacks
@@ -98,7 +112,7 @@ final class CaptureProcessor: @unchecked Sendable {
             }
             nextInputSample = time.sampleTime + AVAudioFramePosition(buffer.frameLength)
         }
-        lastCallback = now; hasCallback = true
+        lastCallback = now; hasCallback = true; awaitingInput = false; rebindsWithoutInput = 0; outageSince = nil
         let frames = Int(buffer.frameLength)
         // Stop instead of silently dropping input or allowing memory to grow with recording duration.
         guard pendingFrames + frames <= Int(nativeRate * 2) else {
@@ -145,6 +159,7 @@ final class CaptureProcessor: @unchecked Sendable {
             guard self.failure == nil else { return }
             self.preview(rms)
             do {
+                if gap > 0 { try self.deliver([Float](repeating: 0, count: Int(gap * 16_000))) }
                 let protected = self.feedback?.protectsInput(at: capturedAt, duration: durationTicks) ?? false
                 try self.convert(self.feedback == nil ? copiedSamples : self.cueFilter.apply(copiedSamples, enabled: protected))
                 if self.firstBufferPending, self.file != nil, let id = self.feedbackSessionID {
@@ -171,6 +186,8 @@ final class CaptureProcessor: @unchecked Sendable {
             await withCheckedContinuation { reply in
                 lock.withLock {
                     guard accepting else { reply.resume(); return }
+                    // The new input's first buffer can be a second away; the take ends with what it has.
+                    if awaitingInput { closeIngressLocked(); reply.resume(); return }
                     guard pendingStop == nil else {
                         queue.async { self.fail(.staleSession) }
                         closeIngressLocked(); reply.resume(); return
@@ -255,7 +272,7 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func resume() {
         queue.sync { converter.reset(); inputCount = 0; outputCount = 0; ring.removeAll(keepingCapacity: true) }
-        lock.withLock { closeIngressLocked(); accepting = true; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil; inputHostRange = nil; hostTimesValid = true; inputBufferDuration = 0.12 }
+        lock.withLock { closeIngressLocked(); accepting = true; broken = false; gapSince = nil; outageSince = nil; awaitingInput = false; rebindsWithoutInput = 0; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil; inputHostRange = nil; hostTimesValid = true; inputBufferDuration = 0.12 }
     }
 
     private func fail(_ kind: AudioCaptureFailure.Kind, recoveryURL: URL? = nil) {
@@ -276,6 +293,57 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func interrupt(_ kind: AudioCaptureFailure.Kind) {
         lock.withLock { queue.async { self.fail(kind) }; closeIngressLocked() }
+    }
+
+    /// The device stopped rendering or changed under the stream. A take stops taking input and waits for
+    /// the service to move it to another one; a stop meanwhile finishes with what arrived. Outside a take
+    /// this ends the stream as before.
+    func inputBroke() {
+        lock.withLock {
+            if recordingSince != nil {
+                if outageSince == nil { outageSince = .now }
+                broken = true
+            } else { queue.async { self.fail(.configurationChanged) } }
+            closeIngressLocked()
+        }
+    }
+
+    var inputBroken: Bool { lock.withLock { broken } }
+    /// How long a take has gone without input since its mic first broke, failed reopens included.
+    var outageFor: Duration { lock.withLock { outageSince.map { $0.duration(to: .now) } ?? .zero } }
+
+    /// Moves a take to another input, or the same one in a new format. What the old input delivered is
+    /// converted and kept; the take continues at the same sample position.
+    func rebind(format: AVAudioFormat, resolution: AudioInputResolution) throws {
+        guard format.commonFormat == .pcmFormatFloat32, format.channelCount > 0, format.sampleRate > 0,
+              let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false),
+              let converter = AVAudioConverter(from: mono, to: outputFormat) else { throw AudioCaptureFailure(.invalidFormat) }
+        converter.primeMethod = .none
+        guard lock.withLock({ rebindsWithoutInput < 3 }) else { throw AudioCaptureFailure(.configurationChanged) }
+        // Safe without the lock only because the service closed the old unit and starts the new one after
+        // this returns: no render thread reads the converter or rate meanwhile.
+        try queue.sync {
+            guard let file, failure == nil else { throw AudioCaptureFailure(.staleSession) }
+            try drainConverter()
+            let previous = self.resolution.device
+            self.converter = converter; monoFormat = mono; nativeRate = format.sampleRate
+            cueFilter = CaptureCueFilter(sampleRate: format.sampleRate)
+            inputCount = 0; outputCount = 0
+            self.resolution = resolution
+            handler?(.switched(sessionID: file.sessionID, from: previous, to: resolution))
+        }
+        lock.withLock {
+            // A stop that arrived meanwhile already finished the take with what it had.
+            guard recordingSince != nil else { return }
+            // Counted from the last real buffer, even across several rebinds.
+            gapSince = gapSince ?? lastCallback
+            lastCallback = .now; nextInputSample = nil; inputHostRange = nil; hostTimesValid = true
+            broken = false; awaitingInput = true; rebindsWithoutInput += 1; accepting = true
+        }
+    }
+
+    private static func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
     }
 
     func finish(sessionID: UUID, cancel: Bool) async throws -> CapturedAudio? {

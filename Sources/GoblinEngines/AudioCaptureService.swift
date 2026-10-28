@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Darwin
 import Foundation
+import GoblinCore
 
 /// The capture service's own thread. CoreAudio calls can take hundreds of
 /// milliseconds, or never return while a device misbehaves; off the main thread, that never
@@ -21,7 +22,13 @@ public final class AudioCaptureService {
     public private(set) var activeSessionID: UUID?
     public private(set) var warmMicrophoneEnabled = false
     public private(set) var inputResolution: AudioInputResolution?
-    private var warmUID = ""
+    private var warmRanking = MicrophoneRanking()
+    /// What the running take resolves again if its microphone drops out.
+    private var sessionRanking = MicrophoneRanking()
+    /// Mics that failed to open during the current outage, left out of the next try.
+    private var unopenable: Set<AudioDeviceID> = []
+    /// A take without input for longer ends, audio kept, rather than coming back with a hole nobody sees.
+    private static let outageLimit: Duration = .seconds(2)
     private var input: AudioInputUnit?
     private var processor: CaptureProcessor?
     private var generation = UUID()
@@ -43,7 +50,7 @@ public final class AudioCaptureService {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { @Sendable [weak self] _ in
             Task { @CaptureActor in
                 guard let self, self.warmMicrophoneEnabled, self.activeSessionID == nil else { return }
-                do { try self.prepareInput(uid: self.warmUID); try self.startInput() }
+                do { try self.openWarm() }
                 catch { self.closeInput() }
             }
         }
@@ -57,13 +64,14 @@ public final class AudioCaptureService {
     public static func recoverRecordings(in directory: URL) throws -> [URL] { try CaptureFile.recover(in: directory) }
 
     @discardableResult
-    public func start(uid: String, directory: URL? = nil,
+    public func start(ranking: MicrophoneRanking, directory: URL? = nil,
                       feedback: FeedbackSounds? = nil,
                       feedbackSessionID: UUID? = nil,
                       onEvent: @escaping @Sendable (AudioCaptureEvent) -> Void) throws -> UUID {
         guard activeSessionID == nil else { throw AudioCaptureFailure(.alreadyRecording) }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { throw AudioCaptureFailure(.permissionMissing) }
-        try prepareInput(uid: uid)
+        try prepareInput(AudioInputDevices.resolve(ranking))
+        sessionRanking = ranking; unopenable = []
         let id = UUID()
         do {
             try processor!.begin(sessionID: id, directory: try directory ?? Self.defaultDirectory(), resolution: inputResolution!,
@@ -135,21 +143,19 @@ public final class AudioCaptureService {
         } catch { cancellationError = error; throw error }
     }
 
-    public func setWarmMicrophone(enabled: Bool, uid: String) throws {
+    public func setWarmMicrophone(enabled: Bool, ranking: MicrophoneRanking) throws {
         guard activeSessionID == nil else { throw AudioCaptureFailure(.alreadyRecording) }
-        warmMicrophoneEnabled = enabled; warmUID = uid
+        warmMicrophoneEnabled = enabled; warmRanking = ranking
         if enabled {
-            do { try prepareInput(uid: uid); try startInput() }
+            do { try openWarm() }
             catch { closeInput(); throw error }
         } else if previews.isEmpty { closeInput() }
     }
 
     @discardableResult
-    public func beginPreview(uid: String, onEvent: @escaping @MainActor @Sendable (AudioPreviewEvent) -> Void) throws -> UUID {
-        if activeSessionID != nil {
-            let requested = try AudioInputDevices.resolve(uid: uid)
-            guard requested.device.id == inputResolution?.device.id else { throw AudioCaptureFailure(.alreadyRecording) }
-        } else { try prepareInput(uid: uid) }
+    public func beginPreview(ranking: MicrophoneRanking, onEvent: @escaping @MainActor @Sendable (AudioPreviewEvent) -> Void) throws -> UUID {
+        // During a take the preview shows the mic actually recording, whatever the ranking would pick next.
+        if activeSessionID == nil { try prepareInput(AudioInputDevices.resolve(ranking)) }
         let id = UUID()
         previews[id] = onEvent
         notifyPreviews(.silence(silenceCause))
@@ -162,7 +168,7 @@ public final class AudioCaptureService {
         previews.removeValue(forKey: id)
         if previews.isEmpty && activeSessionID == nil {
             if warmMicrophoneEnabled {
-                do { try prepareInput(uid: warmUID); try startInput() } catch { closeInput() }
+                do { try openWarm() } catch { closeInput() }
             } else { closeInput() }
         }
     }
@@ -173,10 +179,17 @@ public final class AudioCaptureService {
         closeInput()
     }
 
-    private func prepareInput(uid: String) throws {
+    /// Warm mode never holds a Bluetooth microphone open: that would keep headphones at call quality
+    /// between dictations. A Bluetooth microphone opens at key-down instead.
+    private func openWarm() throws {
+        let resolved = try AudioInputDevices.resolve(warmRanking)
+        guard resolved.device.kind != .bluetooth else { if previews.isEmpty { closeInput() }; return }
+        try prepareInput(resolved); try startInput()
+    }
+
+    /// Callers resolve the ranking and current default on every start, even when the previous input is warm.
+    private func prepareInput(_ resolved: AudioInputResolution) throws {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { throw AudioCaptureFailure(.permissionMissing) }
-        // Resolve the UID and current default on every start, even when the previous input is warm.
-        let resolved = try AudioInputDevices.resolve(uid: uid)
         if let input, resolved.device.id == input.device.id, input.isHealthy { inputResolution = resolved; return }
         closeInput()
         let input = try AudioInputUnit(device: resolved.device)
@@ -195,13 +208,7 @@ public final class AudioCaptureService {
             }
         })
         self.input = input; self.processor = processor; inputResolution = resolved
-        input.observeChanges { [weak self] in
-            Task { @CaptureActor in
-                // A notification can repeat a value the open stream already has.
-                guard let self, self.generation == token, let input = self.input, !input.isHealthy else { return }
-                processor.interrupt(.configurationChanged)
-            }
-        }
+        watch(input, token: token, processor: processor)
         sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { @Sendable [weak self] _ in
             Task { @CaptureActor in
                 guard let self, self.generation == token else { return }
@@ -218,12 +225,67 @@ public final class AudioCaptureService {
             Task { @CaptureActor in
                 guard let self, self.generation == token else { return }
                 if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized { processor.interrupt(.permissionMissing) }
+                // A render failure can arrive before any device notice; this is where it gets rerouted.
+                else if processor.inputBroken { self.reroute() }
                 else if let failure = processor.watchdogFailure() { processor.interrupt(failure) }
                 else { await self.updateSilenceWarning() }
             }
         }
         self.watchdog = watchdog
         watchdog.resume()
+    }
+
+    private func watch(_ unit: AudioInputUnit, token: UUID, processor: CaptureProcessor) {
+        unit.observeChanges { [weak self] in
+            Task { @CaptureActor in
+                // A notification can repeat a value the open stream already has.
+                guard let self, self.generation == token, let input = self.input, input === unit, !input.isHealthy else { return }
+                // With a stop already waiting, release it before a close that can block for hundreds of
+                // milliseconds; the take gives up its last tenth of a second instead of failing.
+                if self.terminalTask == nil { input.closeDelivering() }
+                processor.inputBroke()
+                self.reroute()
+            }
+        }
+    }
+
+    /// A take outlives its microphone. When the open device dies or changes format, the take moves to
+    /// whichever microphone the ranking picks now (the same one reopened, after a format change) and
+    /// carries on. Only when nothing opens within the outage limit does it end, with its audio kept, as before.
+    private func reroute() {
+        guard let processor, processor.inputBroken, let old = input, activeSessionID != nil, terminalTask == nil else { return }
+        old.close()
+        guard processor.outageFor < Self.outageLimit else { processor.interrupt(.configurationChanged); return }
+        let dead = AudioInputDevices.isAlive(old.device.id) ? nil : old.device.id
+        var attempted: AudioDeviceID?
+        do {
+            // Never onto a mic the lid has silenced: that would record zeros with no warning for 15 s.
+            let usable: (AudioInputDevice) -> Bool = { $0.id != dead && !$0.silencedByLid }
+            let resolved: AudioInputResolution
+            do { resolved = try AudioInputDevices.resolve(sessionRanking) { usable($0) && !self.unopenable.contains($0.id) } }
+            catch let failure as AudioCaptureFailure where failure.kind == .deviceUnavailable && !unopenable.isEmpty {
+                // Every mic is out: one that failed a moment ago (a headset switching modes) may have settled.
+                unopenable = []
+                resolved = try AudioInputDevices.resolve(sessionRanking, keeping: usable)
+            }
+            attempted = resolved.device.id
+            let unit = try AudioInputUnit(device: resolved.device)
+            // Opening can block; a mic that opens after the limit doesn't rescue the take.
+            guard processor.outageFor < Self.outageLimit else { throw AudioCaptureFailure(.configurationChanged) }
+            try processor.rebind(format: unit.format, resolution: resolved)
+            input = unit; inputResolution = resolved
+            watch(unit, token: generation, processor: processor)
+            try unit.start(delivering: processor)
+            unopenable = []
+        } catch let failure as AudioCaptureFailure where [.deviceUnavailable, .invalidFormat, .startFailed].contains(failure.kind)
+                    && processor.outageFor < Self.outageLimit {
+            // A mic that won't open is left out of the next try, and macOS can still name an unplugged mic as
+            // default for a moment: the watchdog tries again within the 2 s and three-rebind limits.
+            if let attempted { unopenable.insert(attempted) }
+            processor.inputBroke()
+        } catch {
+            processor.interrupt(.configurationChanged)
+        }
     }
 
     /// Publishes the silence warning when it changes. The device read can block briefly;
@@ -261,7 +323,7 @@ public final class AudioCaptureService {
             if let cancellationError { waiter.resume(throwing: cancellationError) } else { waiter.resume() }
         }
         if let input, input.isHealthy, let processor {
-            if warmMicrophoneEnabled || !previews.isEmpty {
+            if warmMicrophoneEnabled && input.device.kind != .bluetooth || !previews.isEmpty {
                 processor.resume(); silenceCause = nil
                 notifyPreviews(.silence(nil))
             }

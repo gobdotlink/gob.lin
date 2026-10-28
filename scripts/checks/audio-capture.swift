@@ -1,6 +1,8 @@
 import AVFoundation
 import Darwin
 import Foundation
+import GoblinCore
+import os
 
 private enum CaptureCheckError: Error, LocalizedError {
     case noNonzeroInput
@@ -34,7 +36,7 @@ final class CaptureEvidence: @unchecked Sendable {
                 for sample in frame.samples { peak = max(peak, abs(Double(sample))); sum += Double(sample) * Double(sample) }
             case .failed(_, let error): failure = error.kind
             case .finished(let audio): precondition(audio.sampleCount == expectedPosition)
-            case .level, .silence, .cancelled: break
+            case .level, .silence, .switched, .cancelled: break
             }
         }
     }
@@ -77,7 +79,7 @@ struct AudioCaptureCheck {
         if CommandLine.arguments.contains("--native") || Bundle.main.bundleIdentifier == "app.goblin.dictation" { try await native(); return }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-capture-check-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let device = AudioInputResolution(requestedUID: "", device: AudioInputDevice(id: 0, uid: "check", name: "Check input"))
+        let device = AudioInputResolution(device: AudioInputDevice(id: 0, uid: "check", name: "Check input"))
         // Frequency gating must suppress cues without removing concurrent low-band speech or its timing.
         for rate in [16_000.0, 44_100.0, 48_000.0] {
             let count = Int(rate)
@@ -121,6 +123,104 @@ struct AudioCaptureCheck {
             evidence.report(label: "converter \(Int(rate))Hz stereo → mono", audio: audio)
             let data = try Data(contentsOf: audio.fileURL)
             precondition(data.count == 44 + Int(audio.sampleCount) * 4)
+        }
+        // A take outlives its microphone: a 48 kHz stereo device drops out, the take moves to a 24 kHz mono
+        // one (a Bluetooth headset's call rate), and the timeline stays contiguous with the outage as silence.
+        do {
+            func feed(_ processor: CaptureProcessor, _ format: AVAudioFormat, seconds: Double) {
+                var remaining = Int(format.sampleRate * seconds), phase = 0
+                while remaining > 0 {
+                    let count = min(1024, remaining)
+                    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+                    buffer.frameLength = buffer.frameCapacity
+                    for channel in 0..<Int(format.channelCount) {
+                        for i in 0..<count { buffer.floatChannelData![channel][i] = Float(sin(Double(phase + i) * 0.05) * 0.25) }
+                    }
+                    processor.receive(buffer); remaining -= count; phase += count
+                }
+            }
+            let wide = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: false)!
+            let narrow = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24_000, channels: 1, interleaved: false)!
+            let headset = AudioInputResolution(device: AudioInputDevice(id: 1, uid: "headset", name: "Headset", kind: .bluetooth), position: 1)
+            let processor = try CaptureProcessor(format: wide, resolution: device, preview: { _ in }, onFailure: { _ in })
+            let id = UUID(), evidence = CaptureEvidence()
+            let switched = OSAllocatedUnfairLock(initialState: [String]())
+            try processor.begin(sessionID: id, directory: directory, resolution: device) { event in
+                if case .switched(_, let from, let to) = event { switched.withLock { $0.append("\(from.uid)→\(to.device.uid)") } }
+                evidence.record(event)
+            }
+            feed(processor, wide, seconds: 0.5)
+            processor.inputBroke()
+            precondition(processor.inputBroken && processor.watchdogFailure() == nil, "A broken input mid-take must wait for a reroute, not fail")
+            feed(processor, wide, seconds: 0.1) // late callbacks from the dead device are dropped
+            try processor.rebind(format: narrow, resolution: headset)
+            try await Task.sleep(for: .milliseconds(300))
+            feed(processor, narrow, seconds: 0.5)
+            precondition(processor.outageFor == .zero, "Audio arriving again ends the outage")
+            let audio = try await processor.finish(sessionID: id, cancel: false)!
+            try evidence.check(audio, requireNonzero: true)
+            precondition(switched.withLock { $0 } == ["check→headset"])
+            let gap = Int(audio.sampleCount) - 16_000
+            precondition((3_000...6_000).contains(gap), "The outage must be kept as silence, got \(gap) samples")
+            let samples = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!,
+                                           frameCapacity: AVAudioFrameCount(audio.sampleCount))!
+            try AVAudioFile(forReading: audio.fileURL, commonFormat: .pcmFormatFloat32, interleaved: false).read(into: samples)
+            let silence = UnsafeBufferPointer(start: samples.floatChannelData![0] + 8_100, count: gap - 200)
+            precondition(silence.allSatisfy { $0 == 0 }, "The outage must read as silence")
+            evidence.report(label: "rerouted take 48 kHz stereo → 24 kHz mono", audio: audio)
+
+            // Stopping while the input is broken finishes with what arrived instead of failing.
+            let stopped = try CaptureProcessor(format: wide, resolution: device, preview: { _ in }, onFailure: { _ in })
+            let stoppedID = UUID(), stoppedEvidence = CaptureEvidence()
+            try stopped.begin(sessionID: stoppedID, directory: directory, resolution: device, handler: stoppedEvidence.record)
+            feed(stopped, wide, seconds: 0.25)
+            stopped.inputBroke()
+            let kept = try await stopped.finish(sessionID: stoppedID, cancel: false)!
+            try stoppedEvidence.check(kept, requireNonzero: true)
+            precondition(kept.sampleCount == 4_000)
+
+            // Stopping after a switch, before the new input's first buffer, keeps what the old one gave.
+            let early = try CaptureProcessor(format: wide, resolution: device, preview: { _ in }, onFailure: { _ in })
+            let earlyID = UUID(), earlyEvidence = CaptureEvidence()
+            try early.begin(sessionID: earlyID, directory: directory, resolution: device, handler: earlyEvidence.record)
+            feed(early, wide, seconds: 0.25)
+            early.inputBroke()
+            try early.rebind(format: narrow, resolution: headset)
+            try await Task.sleep(for: .milliseconds(200))
+            await early.seal(atHostTime: mach_absolute_time())
+            let earlyAudio = try await early.finish(sessionID: earlyID, cancel: false)!
+            try earlyEvidence.check(earlyAudio, requireNonzero: true)
+            precondition(earlyAudio.sampleCount == 4_000)
+
+            // Two switches before audio returns count the outage from the last real buffer, and a device
+            // that breaks on every reopen ends the take after three tries instead of looping.
+            let flaky = try CaptureProcessor(format: wide, resolution: device, preview: { _ in }, onFailure: { _ in })
+            let flakyID = UUID(), flakyEvidence = CaptureEvidence()
+            try flaky.begin(sessionID: flakyID, directory: directory, resolution: device, handler: flakyEvidence.record)
+            feed(flaky, wide, seconds: 0.25)
+            flaky.inputBroke(); try flaky.rebind(format: narrow, resolution: headset)
+            try await Task.sleep(for: .milliseconds(150))
+            flaky.inputBroke(); try flaky.rebind(format: wide, resolution: device)
+            try await Task.sleep(for: .milliseconds(150))
+            feed(flaky, wide, seconds: 0.25)
+            let twice = try await flaky.finish(sessionID: flakyID, cancel: false)!
+            try flakyEvidence.check(twice, requireNonzero: true)
+            precondition(twice.sampleCount - 8_000 >= 3_500, "Silence must cover both switches, got \(twice.sampleCount - 8_000)")
+            let looping = try CaptureProcessor(format: wide, resolution: device, preview: { _ in }, onFailure: { _ in })
+            let loopingID = UUID()
+            try looping.begin(sessionID: loopingID, directory: directory, resolution: device, handler: { _ in })
+            feed(looping, wide, seconds: 0.1)
+            // The outage clock runs from the first break through failed reopens, so the 2 s limit holds.
+            looping.inputBroke()
+            try await Task.sleep(for: .milliseconds(60))
+            try looping.rebind(format: narrow, resolution: headset)
+            looping.inputBroke()
+            precondition(looping.outageFor >= .milliseconds(60), "A failed reopen must not restart the outage clock")
+            for _ in 0..<2 { try looping.rebind(format: narrow, resolution: headset); looping.inputBroke() }
+            looping.inputBroke()
+            do { try looping.rebind(format: narrow, resolution: headset); preconditionFailure("A fourth rebind without input must fail") }
+            catch let failure as AudioCaptureFailure { precondition(failure.kind == .configurationChanged) }
+            _ = try await looping.finish(sessionID: loopingID, cancel: true)
         }
         let file = try CaptureFile(sessionID: UUID(), directory: directory)
         try file.append([0.125, 0.25, -0.5])
@@ -392,43 +492,55 @@ struct AudioCaptureCheck {
         let config = (try? JSONSerialization.jsonObject(with: Data(contentsOf: configURL))) as? [String: Double] ?? [:]
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_DIRECTORY"] ?? root.appendingPathComponent("audio").path)
         let seconds = Double(ProcessInfo.processInfo.environment["GOBLIN_CAPTURE_PROBE_SECONDS"] ?? "3") ?? 3
-        var verifiedUID: String?
+        var verified: AudioInputDevice?
         for (label, uid) in [("built-in cold", builtIn?.uid ?? ""), ("selected external", external?.uid ?? ""), ("built-in restart", builtIn?.uid ?? ""), ("selected external restart", external?.uid ?? ""), ("missing UID fallback", "unavailable-probe-device")] {
             if label.hasPrefix("built-in") && builtIn == nil { print("Built-in: unavailable, not tested"); continue }
             if label.hasPrefix("selected external") && external == nil { print("Selected external: unavailable, not tested"); continue }
             let evidence = CaptureEvidence()
             do {
-                let id = try await service.start(uid: uid, directory: directory, onEvent: evidence.record)
-                let actualUID = await service.inputResolution?.device.uid
+                let id = try await service.start(ranking: only(uid), directory: directory, onEvent: evidence.record)
+                let actual = await service.inputResolution?.device
+                // The ranking passes over a mic it can't use (a lid-silenced built-in one); that's no evidence for it.
+                if !label.hasPrefix("missing"), actual?.uid != uid {
+                    try? await service.cancel(sessionID: id)
+                    print("Hardware scenario \(label) unmet: opened \(actual?.name ?? "nothing") instead"); fflush(nil)
+                    continue
+                }
                 try await Task.sleep(for: .seconds(label.hasPrefix("built-in") ? max(seconds, 6) : seconds))
                 let audio = try await service.stop(sessionID: id)
-                evidence.report(label: label, audio: audio)
+                evidence.report(label: "\(label) on \(actual?.name ?? "unknown")", audio: audio)
                 try evidence.check(audio, requireNonzero: true)
-                verifiedUID = actualUID
+                verified = actual
             } catch {
                 evidence.report(label: label + " failed")
                 print("Hardware scenario \(label) unmet: \(error.localizedDescription)"); fflush(nil)
                 if let id = await service.activeSessionID { try? await service.cancel(sessionID: id) }
             }
         }
-        guard let verifiedUID else { await service.shutdown(); throw CaptureCheckError.noNonzeroInput }
-        try await service.setWarmMicrophone(enabled: true, uid: verifiedUID)
+        guard let verified else { await service.shutdown(); throw CaptureCheckError.noNonzeroInput }
+        let verifiedUID = verified.uid
+        try await service.setWarmMicrophone(enabled: true, ranking: only(verifiedUID))
         try await Task.sleep(for: .seconds(1))
+        // Warm mode never holds a Bluetooth mic open, so there is no pre-roll to expect.
+        let bluetooth = verified.kind == .bluetooth
+        let warmInput = await service.inputResolution
+        if bluetooth { precondition(warmInput == nil, "Warm mode must not open a Bluetooth mic") }
         let evidence = CaptureEvidence()
-        let id = try await service.start(uid: verifiedUID, directory: directory, onEvent: evidence.record)
-        try await Task.sleep(for: .seconds(1))
+        let id = try await service.start(ranking: only(verifiedUID), directory: directory, onEvent: evidence.record)
+        // A cold Bluetooth mic can take over a second to switch into call mode and send its first audio.
+        try await Task.sleep(for: .seconds(bluetooth ? 3 : 1))
         let audio = try await service.stop(sessionID: id)
-        try evidence.check(audio, requireNonzero: true); precondition(audio.preRollSampleCount > 0)
-        evidence.report(label: "verified device warm", audio: audio)
-        try await service.setWarmMicrophone(enabled: false, uid: "")
-        let cancelledID = try await service.start(uid: verifiedUID, directory: directory, onEvent: { _ in })
+        try evidence.check(audio, requireNonzero: true); precondition(bluetooth ? audio.preRollSampleCount == 0 : audio.preRollSampleCount > 0)
+        evidence.report(label: bluetooth ? "verified Bluetooth device, not kept warm" : "verified device warm", audio: audio)
+        try await service.setWarmMicrophone(enabled: false, ranking: MicrophoneRanking())
+        let cancelledID = try await service.start(ranking: only(verifiedUID), directory: directory, onEvent: { _ in })
         try await Task.sleep(for: .milliseconds(250))
         try await service.cancel(sessionID: cancelledID)
         precondition(!FileManager.default.fileExists(atPath: directory.appendingPathComponent(cancelledID.uuidString + ".partial.wav").path))
         if let longSeconds = config["longSeconds"], longSeconds >= 1800 {
             print("Starting actual long capture: \(longSeconds) wall-clock seconds"); fflush(nil)
             let evidence = CaptureEvidence()
-            let id = try await service.start(uid: verifiedUID, directory: directory, onEvent: evidence.record)
+            let id = try await service.start(ranking: only(verifiedUID), directory: directory, onEvent: evidence.record)
             let start = ContinuousClock.now
             var elapsed = 0.0
             while elapsed < longSeconds {
@@ -446,4 +558,9 @@ struct AudioCaptureCheck {
         await service.shutdown()
         print("Native capture complete; probe engine closed. Raw probe audio is private and may be deleted after inspection.")
     }
+}
+
+/// One device ahead of the system default, as a person ranking it first would have it.
+private func only(_ uid: String) -> MicrophoneRanking {
+    MicrophoneRanking(entries: uid.isEmpty ? [.systemDefault] : [.init(uid: uid, name: "Check device"), .systemDefault])
 }

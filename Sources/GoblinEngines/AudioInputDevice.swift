@@ -2,21 +2,43 @@ import AudioToolbox
 import AVFoundation
 import CoreAudio
 import Foundation
+import GoblinCore
+import IOKit
 
 public struct AudioInputDevice: Identifiable, Sendable, Equatable {
     public let id: AudioDeviceID
     public let uid: String
     public let name: String
+    /// Product name and USB IDs. Unlike a USB UID, it stays the same when the device moves to another port.
+    public let model: String?
+    public let kind: MicrophoneKind
+    /// A built-in microphone cut off by the closed lid: it still lists, but records only silence.
+    public let silencedByLid: Bool
 
-    public init(id: AudioDeviceID, uid: String, name: String) {
-        self.id = id; self.uid = uid; self.name = name
+    public init(id: AudioDeviceID, uid: String, name: String, model: String? = nil, kind: MicrophoneKind = .other, silencedByLid: Bool = false) {
+        self.id = id; self.uid = uid; self.name = name; self.model = model; self.kind = kind; self.silencedByLid = silencedByLid
     }
 }
 
+extension AudioInputDevice {
+    public var facts: MicrophoneFacts { MicrophoneFacts(uid: uid, name: name, model: model, kind: kind, silencedByLid: silencedByLid) }
+}
+
+/// The inputs and the system default at one moment.
+public struct AudioInputSnapshot: Sendable, Equatable {
+    public let devices: [AudioInputDevice]
+    public let defaultUID: String?
+}
+
 public struct AudioInputResolution: Sendable, Equatable {
-    public let requestedUID: String
     public let device: AudioInputDevice
-    public var usedFallback: Bool { !requestedUID.isEmpty && requestedUID != device.uid }
+    /// The ranking entry that chose the device.
+    public let position: Int
+    public let viaSystemDefault: Bool
+
+    public init(device: AudioInputDevice, position: Int = 0, viaSystemDefault: Bool = false) {
+        self.device = device; self.position = position; self.viaSystemDefault = viaSystemDefault
+    }
 }
 
 public enum AudioInputDevices {
@@ -31,27 +53,67 @@ public enum AudioInputDevices {
             AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, $0.baseAddress!)
         }
         guard status == noErr else { throw AudioCaptureFailure(.deviceUnavailable) }
+        let lidClosed = Self.lidClosed()
         return ids.prefix(Int(size) / MemoryLayout<AudioDeviceID>.size).compactMap { id in
             var streams = property(kAudioDevicePropertyStreams, scope: kAudioDevicePropertyScopeInput)
             var bytes: UInt32 = 0
             guard AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &bytes) == noErr, bytes > 0,
+                  number(id, selector: kAudioDevicePropertyIsHidden) != 1,
+                  // Just after an unplug a device can still list for a moment while reporting itself dead.
+                  number(id, selector: kAudioDevicePropertyDeviceIsAlive) != 0,
                   let uid = string(id, selector: kAudioDevicePropertyDeviceUID),
                   let name = string(id, selector: kAudioObjectPropertyName) else { return nil }
-            return AudioInputDevice(id: id, uid: uid, name: name)
+            let kind = Self.kind(transport: number(id, selector: kAudioDevicePropertyTransportType) ?? 0)
+            // A headset in the headphone jack shows as the built-in device's external source and still hears.
+            let jack = number(id, selector: kAudioDevicePropertyDataSource, scope: kAudioDevicePropertyScopeInput) == 0x656D_6963 // 'emic'
+            return AudioInputDevice(id: id, uid: uid, name: name, model: string(id, selector: kAudioDevicePropertyModelUID),
+                                    kind: kind, silencedByLid: lidClosed && kind == .builtIn && !jack)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    static func resolve(uid: String) throws -> AudioInputResolution {
+    public static func snapshot() throws -> AudioInputSnapshot {
         let devices = try list()
-        if !uid.isEmpty, let device = devices.first(where: { $0.uid == uid }) {
-            return AudioInputResolution(requestedUID: uid, device: device)
-        }
+        let id = defaultInputID()
+        return AudioInputSnapshot(devices: devices, defaultUID: devices.first { $0.id == id }?.uid)
+    }
+
+    /// Read fresh at every open, so a key press never acts on a stale device list. A reroute narrows the
+    /// list: right after an unplug it can still hold the dead device for a moment.
+    static func resolve(_ ranking: MicrophoneRanking, keeping usable: (AudioInputDevice) -> Bool = { _ in true }) throws -> AudioInputResolution {
+        let listed = try snapshot()
+        let snapshot = AudioInputSnapshot(devices: listed.devices.filter(usable), defaultUID: listed.defaultUID)
+        guard let choice = ranking.resolve(connected: snapshot.devices.map(\.facts), systemDefault: snapshot.defaultUID),
+              let device = snapshot.devices.first(where: { $0.uid == choice.uid }) else { throw AudioCaptureFailure(.deviceUnavailable) }
+        return AudioInputResolution(device: device, position: choice.position, viaSystemDefault: choice.viaSystemDefault)
+    }
+
+    /// Apple silicon and T2 laptops disconnect the internal microphone in hardware while the lid is closed.
+    public static func lidClosed() -> Bool {
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return false }
+        defer { IOObjectRelease(root) }
+        return IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool ?? false
+    }
+
+    static func isAlive(_ id: AudioDeviceID) -> Bool { number(id, selector: kAudioDevicePropertyDeviceIsAlive) == 1 }
+
+    private static func defaultInputID() -> AudioDeviceID? {
         var address = property(kAudioHardwarePropertyDefaultInputDevice)
         var id = AudioDeviceID(0)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id) == noErr,
-              let device = devices.first(where: { $0.id == id }) else { throw AudioCaptureFailure(.deviceUnavailable) }
-        return AudioInputResolution(requestedUID: uid, device: device)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id) == noErr, id != 0 else { return nil }
+        return id
+    }
+
+    private static func kind(transport: UInt32) -> MicrophoneKind {
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn: .builtIn
+        case kAudioDeviceTransportTypeUSB: .usb
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: .bluetooth
+        case kAudioDeviceTransportTypeContinuityCaptureWired, kAudioDeviceTransportTypeContinuityCaptureWireless: .iPhone
+        case kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate: .virtual
+        default: .other
+        }
     }
 
     public static func loudestChannelRMS(_ buffer: AVAudioPCMBuffer) -> Double {
@@ -116,6 +178,14 @@ public enum AudioInputDevices {
 
     fileprivate static func property(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    }
+
+    private static func number(_ id: AudioDeviceID, selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> UInt32? {
+        var address = property(selector, scope: scope)
+        guard AudioObjectHasProperty(id, &address) else { return nil }
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr ? value : nil
     }
 
     private static func string(_ id: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
@@ -230,6 +300,14 @@ final class AudioInputUnit: @unchecked Sendable {
         AudioOutputUnitStop(unit); AudioUnitUninitialize(unit); AudioComponentInstanceDispose(unit)
     }
 
+    /// Closes, then hands over the batch the device was still filling, so a take moving to another input
+    /// keeps the last tenth of a second before the change.
+    func closeDelivering() {
+        guard !closed else { return }
+        close()
+        if chunk.frameLength > 0, let processor { deliver(to: processor) }
+    }
+
     private func render(_ flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>, _ time: UnsafePointer<AudioTimeStamp>,
                         _ bus: UInt32, _ frames: UInt32) -> OSStatus {
         guard let processor, frames > 0 else { return noErr }
@@ -245,7 +323,11 @@ final class AudioInputUnit: @unchecked Sendable {
             slice[channel] = AudioBuffer(mNumberChannels: 1, mDataByteSize: frames * 4, mData: channels[channel] + Int(chunk.frameLength))
         }
         let status = AudioUnitRender(unit, flags, time, bus, frames, slice.unsafeMutablePointer)
-        guard status == noErr else { processor.interrupt(.configurationChanged); return status }
+        guard status == noErr else {
+            // What this device already delivered into the batch is real audio; keep it before the take moves on.
+            if chunk.frameLength > 0 { deliver(to: processor) }
+            processor.inputBroke(); return status
+        }
         chunk.frameLength += frames
         // Hand over about 100 ms at a time, like an engine tap: stop and backlog bounds downstream assume it.
         if chunk.frameLength + frames > target { deliver(to: processor) }

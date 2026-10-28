@@ -88,8 +88,8 @@ struct NativeDictationCheck {
                 try await wait("native hotkey capture readiness", seconds: 5) { model.overlay.model.phase == .listening }
                 if let input = await AudioCaptureService.shared.inputResolution {
                     report["inputDevice"] = input.device.name
-                    report["inputUsedFallback"] = input.usedFallback
-                    report["inputFollowsSystemDefault"] = input.requestedUID.isEmpty
+                    report["inputRankPosition"] = input.position
+                    report["inputFollowsSystemDefault"] = input.viaSystemDefault
                 }
                 try await play(source)
                 let hadLiveText = !model.overlay.model.committedText.isEmpty || !model.overlay.model.tentativeText.isEmpty
@@ -222,7 +222,7 @@ struct NativeDictationCheck {
                 let beforeFinalCancel = model.history.entries.count
                 post(down: true)
                 try await wait("final cancel capture readiness", seconds: 5) { model.overlay.model.phase == .listening }
-                model.audioPreview.start(uid: defaults.string(forKey: "audio.inputDeviceUID") ?? "")
+                model.audioPreview.start(ranking: model.microphones.ranking)
                 // The preview opens on the capture thread.
                 do { try await wait("Settings preview joining active capture", seconds: 2) { model.audioPreview.running } }
                 catch { throw CheckFailure("Settings preview could not join active capture: \(model.audioPreview.error ?? "no error")") }

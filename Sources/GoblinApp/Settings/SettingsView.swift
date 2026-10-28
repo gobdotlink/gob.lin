@@ -92,7 +92,7 @@ struct SettingsView: View {
     private var sectionContents: some View {
         switch section {
         case .general: GeneralSettingsView(model: model)
-        case .audio: AudioSettingsView(permissions: model.permissions, preview: model.audioPreview)
+        case .audio: AudioSettingsView(permissions: model.permissions, preview: model.audioPreview, microphones: model.microphones)
         case .model:
             if let speechModels { ModelSettingsView(service: speechModels) }
             else { Section { Text("The speech model service is not connected.").foregroundStyle(.secondary) } }

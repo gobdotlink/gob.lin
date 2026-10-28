@@ -60,7 +60,7 @@ private struct OverlayGoblin: View {
         case .polishing: .squint
         case .inserted: .closed
         case .milestone: .cackle
-        case .readyToPaste: .side
+        case .readyToPaste, .newMicrophone: .side
         case .error(let notice): NoticeCopy(notice).face
         }
     }
@@ -158,6 +158,10 @@ private struct OverlayBubble: View {
                     }
                     .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
+                } else if let line = model.microphoneLine {
+                    Label(line, systemImage: "mic.fill").labelStyle(OverlayLineLabelStyle())
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 words(caret: true)
             }
@@ -216,6 +220,20 @@ private struct OverlayBubble: View {
                     Text("\(words.formatted()) words yapped.").font(.system(size: 14, weight: .semibold))
                     Text(model.deliveryApplication.map { "Text landed in \($0)" } ?? "About \(max(1, words / 250).formatted()) pages you didn't type.")
                         .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
+                }
+            }
+        case .newMicrophone(let name, let uid):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "mic.badge.plus").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon).padding(.top, 1)
+                    Text("\(Text(name).fontWeight(.semibold)) just connected. Should I use it for dictation?")
+                        .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Subline {
+                    Text("Audio › new microphone").lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Not Now") { model.perform(.dismiss) }.buttonStyle(OverlayPillStyle())
+                    Button("Use It") { model.perform(.useMicrophone(uid: uid)) }.buttonStyle(OverlayPillStyle())
                 }
             }
         case .error(let notice):
@@ -353,6 +371,11 @@ private struct NoticeCopy {
 }
 
 // MARK: - Pieces
+
+/// The microphone line's symbol and words, 6 pt apart like the silence notice.
+private struct OverlayLineLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View { HStack(spacing: 6) { configuration.icon; configuration.title } }
+}
 
 private struct Subline<Content: View>: View {
     @ViewBuilder var content: Content

@@ -208,6 +208,8 @@ struct SettingsCapture {
             ("milestone", make(.milestone(words: 10_000))),
             ("error-cleanup", make(.error(OverlayNotice(.rewriteTimeout)))),
             ("error-microphone", make(.error(OverlayNotice(.microphoneUnavailable)))),
+            ("listening-new-microphone", make(.listening, committed: words, tentative: " see first") { $0.microphoneLine = "Using Lav Receiver" }),
+            ("new-microphone", make(.newMicrophone(name: "Lav Receiver", uid: "preview-lav"))),
             ("error-secure", make(.error(OverlayNotice(.secureInputEnabled)))),
             ("mirrored", make(.listening, committed: "Sounds good, send it", tentative: " over") { $0.mirrored = true }),
             ("top", make(.listening, committed: "Top-right, under the menu bar") { $0.edge = .top }),
