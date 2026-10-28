@@ -6,14 +6,14 @@ binary_directory=$(swift build --show-bin-path)
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 swiftc -parse-as-library -swift-version 6 \
-    -I "$binary_directory/Modules" -I Sources/CSQLite \
+    -I "$binary_directory" -I Sources/CSQLite \
     Sources/GoblinApp/Updates/*.swift scripts/checks/updates.swift \
-    "$binary_directory"/GoblinCore.build/*.swift.o -o "$temporary/check"
+    "$binary_directory/GoblinCore.o" -o "$temporary/check"
 "$temporary/check" "$@"
 swiftc -parse-as-library -swift-version 6 \
-    -I "$binary_directory/Modules" -I Sources/CSQLite \
+    -I "$binary_directory" -I Sources/CSQLite \
     Sources/GoblinApp/Updates/*.swift scripts/checks/update-termination.swift \
-    "$binary_directory"/GoblinCore.build/*.swift.o -o "$temporary/termination-check"
+    "$binary_directory/GoblinCore.o" -o "$temporary/termination-check"
 python3 - "$temporary" <<'PY'
 import pathlib, subprocess, sys
 directory = pathlib.Path(sys.argv[1])
