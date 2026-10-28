@@ -301,8 +301,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `scope` is the app and project dictated into; it selects their dictionary terms.
-    func processTranscript(_ raw: String, scope: DictionaryScope) async -> TranscriptProcessingResult {
+    /// `scope` is the app and project dictated into; it selects their dictionary terms. `context` is where the text lands.
+    func processTranscript(_ raw: String, scope: DictionaryScope, context: DictationContext? = nil) async -> TranscriptProcessingResult {
         let operation = UUID()
         diagnostics.developmentLog.record(.processingStarted, area: .application, operation: operation)
         var completed = DevelopmentDetails()
@@ -332,7 +332,7 @@ final class AppModel: ObservableObject {
         let rewriting = settings.enabled && settings.cleanup != .none && !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if rewriting { diagnostics.developmentLog.record(.rewriteStarted, area: .rewrite, operation: operation) }
         let result = await processor.process(raw, dictionaryEntries: dictionary.entries.active(in: scope), tone: tone,
-                                             rewriteSettings: settings, apiKey: key)
+                                             rewriteSettings: settings, apiKey: key, context: context)
         completed.failure = result.warning
         completed.timings = result.timings
         completed.succeeded = result.warning == nil
@@ -378,7 +378,19 @@ final class AppModel: ObservableObject {
     private func beginDictation() {
         guard activeCapture == nil else { return }
         finishEditObservation()
-        let session = DictationSession(destination: insertion.destination)
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let quirks = frontmost.map { AppInsertionQuirks.forBundle($0.bundleIdentifier ?? "", at: $0.bundleURL) }
+        let treeRequested = quirks?.requestsAccessibilityTree == true && frontmost.map { FocusedText.requestAccessibilityTree(pid: $0.processIdentifier) } == true
+        let session = DictationSession(target: frontmost, destination: insertion.destination)
+        let cleanup = RewriteSettingsStore.load(defaults: defaults)
+        if let target = session.target, quirks?.credentialManager == false, cleanup.enabled, cleanup.cleanup != .none, cleanup.usesScreenContext {
+            let pid = target.processIdentifier
+            session.nearbyReading = Task.detached(priority: .userInitiated) {
+                // A tree asked for just now arrives a moment later, while the user is still talking.
+                if treeRequested { try? await Task.sleep(for: .milliseconds(400)) }
+                return FocusedText.nearbyText(pid: pid)
+            }
+        }
         if let target = session.target, dictionary.suggestsTerms || dictionary.entries.contains(where: { !$0.projects.isEmpty }) {
             // Runs while the user speaks; recognition starts with app-scoped terms and never waits for it.
             let pid = target.processIdentifier, bundle = target.bundleIdentifier
@@ -749,7 +761,15 @@ final class AppModel: ObservableObject {
                 dictionary.offerTerms(from: project)
             }
         }
-        let result = await processTranscript(raw, scope: session.dictionaryContext)
+        let context = await session.currentContext()
+        var read = DevelopmentDetails()
+        read.succeeded = context != nil
+        read.fieldCharacters = context.map { ($0.textBefore + $0.selectedText + $0.textAfter).count }
+        read.nearbyCharacters = context?.nearbyText.count
+        read.nearbyElements = session.nearby?.elements
+        read.nearbyMilliseconds = session.nearby?.milliseconds
+        diagnostics.developmentLog.record(.screenContextRead, area: .application, operation: session.id, details: read)
+        let result = await processTranscript(raw, scope: session.dictionaryContext, context: context)
         try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
     }
 

@@ -344,7 +344,7 @@ final class TextInsertionService: ObservableObject {
     /// expected value split around the inserted span (UTF-16, like the AX ranges).
     private func anchor(target: FocusedText, expected: String, selection: NSRange, text: String,
                         quirks: AppInsertionQuirks) -> InsertionAnchor? {
-        guard watchEdits, !quirks.editWatchBlocked, !quirks.remoteDesktop else { return nil }
+        guard watchEdits, !quirks.credentialManager, !quirks.remoteDesktop else { return nil }
         let value = expected as NSString
         let end = selection.location + (text as NSString).length
         guard selection.location >= 0, end >= selection.location, end <= value.length else { return nil }
@@ -424,8 +424,14 @@ struct AppInsertionQuirks {
     var preferPaste = false
     var remoteDesktop = false
     var emptyEditorLineBreak = false
-    /// Never watch edits in credential managers, even outside their secure fields.
-    var editWatchBlocked = false
+    /// Never watch edits or read text in credential managers, even outside their secure fields.
+    var credentialManager = false
+    var electron = false
+    /// VS Code and its forks can switch to screen reader mode when an assistive app turns on their tree.
+    var codeEditor = false
+
+    /// Electron builds its web accessibility tree only for assistive apps that ask for it.
+    var requestsAccessibilityTree: Bool { electron && !codeEditor && !credentialManager }
 
     static func forBundle(_ bundle: String, at url: URL? = nil) -> Self {
         let pasteOnly: Set<String> = ["com.apple.Terminal", "com.mitchellh.ghostty", "com.google.Chrome",
@@ -436,9 +442,12 @@ struct AppInsertionQuirks {
         let credentialManagers: Set<String> = ["com.1password.1password", "com.agilebits.onepassword7",
                                                "com.bitwarden.desktop", "com.dashlane.Dashlane",
                                                "org.keepassxc.KeePassXC", "com.lastpass.LastPass"]
+        let codeEditors: Set<String> = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium",
+                                        "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf", "dev.kiro.desktop", "com.google.antigravity"]
         return Self(preferPaste: electron || pasteOnly.contains(bundle) || remote.contains(bundle),
                     remoteDesktop: remote.contains(bundle),
                     emptyEditorLineBreak: electron || bundle == "com.t3tools.t3code",
-                    editWatchBlocked: credentialManagers.contains(bundle))
+                    credentialManager: credentialManagers.contains(bundle),
+                    electron: electron, codeEditor: codeEditors.contains(bundle))
     }
 }

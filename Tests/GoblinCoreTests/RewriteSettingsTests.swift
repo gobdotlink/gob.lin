@@ -9,6 +9,25 @@ struct RewriteSettingsTests {
         #expect(settings.enabled && settings.model == "my-model" && settings.cleanup == .medium)
         #expect(settings.baseURL == "https://api.groq.com/openai/v1/" && settings.provider == .groq)
         #expect(settings.reasoning == .automatic && settings.temperature == 0 && settings.extraRequestJSON.isEmpty)
+        #expect(settings.screenContextEndpoint == nil && !settings.usesScreenContext)
+    }
+
+    @Test func screenContextConsentStaysWithTheAddressItWasGivenFor() throws {
+        var settings = RewriteSettings(enabled: true)
+        settings.selectProvider(.local)
+        #expect(!settings.usesScreenContext)
+        settings.usesScreenContext = true
+        // A new destination asks again; the one that was allowed keeps its consent.
+        settings.selectProvider(.cerebras)
+        #expect(!settings.usesScreenContext)
+        settings.selectProvider(.local)
+        settings = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
+        #expect(settings.usesScreenContext)
+        settings.baseURL = "https://remote.example/v1"
+        #expect(!settings.usesScreenContext)
+        settings.selectProvider(.appleIntelligence)
+        settings.usesScreenContext = true
+        #expect(!settings.usesScreenContext)
     }
 
     @Test func providerSwitchesRememberTuningAndPersistOmittedTemperature() throws {

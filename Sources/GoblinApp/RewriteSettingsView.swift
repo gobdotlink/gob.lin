@@ -30,11 +30,13 @@ struct RewriteSettingsView: View {
         Section {
             Toggle(isOn: Binding(get: { settings.enabled }, set: { setEnabled($0) })) {
                 Text("AI cleanup")
-                Text("Off unless you turn it on. Only the text of each take is sent, never the audio.")
+                Text("Off unless you turn it on. Only text is sent, never the audio.")
             }
             StatusRow(isOn ? .ready : .off,
                       Text(isOn ? (settings.provider.runsOnDevice
                                    ? "Cleanup runs on this Mac with \(Text(settings.provider.title).fontWeight(.semibold)). Nothing is sent anywhere."
+                                   : settings.usesScreenContext
+                                   ? "Your text and the text near your cursor go to \(Text(settings.provider.title).fontWeight(.semibold)). Everything else stays on this Mac."
                                    : "Your text goes to \(Text(settings.provider.title).fontWeight(.semibold)). Everything else stays on this Mac.")
                                 : "Off. Everything stays on this Mac."))
             if let message { StatusRow(.problem, Text(message)) }
@@ -61,6 +63,14 @@ struct RewriteSettingsView: View {
             } label: {
                 Text("Level")
                 Text(settings.cleanup.detail)
+            }
+            if !settings.provider.runsOnDevice {
+                Toggle(isOn: Binding(get: { settings.usesScreenContext }, set: { on in
+                    var next = settings; next.usesScreenContext = on; persist(next)
+                })) {
+                    Text("Send text near the cursor")
+                    Text("Also sends the app, window title, the text around the cursor and nearby text such as the messages above it to \(settings.provider.title) with each take, to spell names and fit what's already there. Text in password fields and password managers is never sent.")
+                }
             }
         } header: { Text("Style") }
         Section {

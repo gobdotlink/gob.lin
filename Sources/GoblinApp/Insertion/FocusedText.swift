@@ -1,5 +1,15 @@
 import AppKit
+import GoblinCore
 @preconcurrency import ApplicationServices
+
+/// Text read near a field while the user speaks; `field` ties it to the field it was read around.
+/// Unchecked: an AXUIElement is an immutable handle that is safe to pass between threads.
+struct NearbyText: @unchecked Sendable {
+    let field: AXUIElement
+    let text: String
+    let elements: Int
+    let milliseconds: Double
+}
 
 struct FocusedText {
     let pid: pid_t
@@ -60,6 +70,52 @@ struct FocusedText {
         }
         return FocusedText(pid: pid, element: element, value: value, selection: selection, secure: false,
                            applicationFallback: false, role: role, window: window, document: document, identity: identity)
+    }
+
+    /// The app, window title and text around the cursor, for cleanup, with `nearby` text when it was read from this
+    /// field. Never for password fields.
+    func dictationContext(application: String?, nearby: NearbyText? = nil) -> DictationContext? {
+        guard !secure else { return nil }
+        let title = identity["windowTitle"] ?? window.flatMap { Self.attribute($0, kAXTitleAttribute) as? String }
+        let nearbyText = nearby.flatMap { CFEqual($0.field, element) ? $0.text : nil }
+        return DictationContext(application: application, windowTitle: title, fieldText: value, selection: selection, nearbyText: nearbyText)
+    }
+
+    @MainActor private static var treesRequested: Set<pid_t> = []
+
+    /// Asks an Electron app to build its accessibility tree, once per process. True when this call asked: the tree
+    /// arrives a moment later.
+    @MainActor static func requestAccessibilityTree(pid: pid_t) -> Bool {
+        guard !treesRequested.contains(pid) else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.05)
+        // A busy app can miss the request, so it's asked again next take rather than never.
+        if AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success { treesRequested.insert(pid) }
+        return true
+    }
+
+    /// The text before `pid`'s focused field in its window, such as the messages above a message box. Runs off the main
+    /// thread while the user speaks; each element read has its own timeout, and the walk stops at `budget`.
+    static func nearbyText(pid: pid_t, budget: Duration = .milliseconds(600)) -> NearbyText? {
+        let start = ContinuousClock.now
+        func timed(_ element: AXUIElement) -> AXUIElement { AXUIElementSetMessagingTimeout(element, 0.1); return element }
+        guard let field = elementAttribute(timed(AXUIElementCreateApplication(pid)), kAXFocusedUIElementAttribute).map(timed),
+              attribute(field, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole else { return nil }
+        let found = DictationContext.textBefore(field,
+            parent: { attribute($0, kAXRoleAttribute) as? String == kAXWindowRole ? nil : elementAttribute($0, kAXParentAttribute).map(timed) },
+            children: { (attribute($0, kAXChildrenAttribute) as? [AXUIElement] ?? []).map(timed) },
+            text: { element in
+                switch attribute(element, kAXRoleAttribute) as? String {
+                case kAXStaticTextRole: attribute(element, kAXValueAttribute) as? String ?? ""
+                // Other fields' contents stay unread, password fields above all.
+                case kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole: ""
+                default: nil
+                }
+            },
+            isSame: { CFEqual($0, $1) }, deadline: start.advanced(by: budget))
+        let elapsed = start.duration(to: .now).components
+        return NearbyText(field: field, text: found.text, elements: found.visited,
+                          milliseconds: Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15)
     }
 
     var supportsDirectInsertion: Bool {

@@ -32,6 +32,7 @@ public enum DevelopmentEventName: String {
     case tapInstalling, tapInstalled, engineStarting, engineStarted, firstBuffer, configurationChanged
     case previewFailed, previewStopping, previewStopped
     case livePreviewDegraded, livePreviewRecovered, liveFinalRecovery, speechNotDetected
+    case screenContextRead
 }
 public enum DevelopmentReason: String {
     case user, restart, selectionChanged, viewClosed, permissionLost, configurationChanged, startFailed, shutdown
@@ -66,11 +67,20 @@ public struct DevelopmentDetails {
     public var succeeded: Bool?
     public var timings: DictationTimings?
     public var underlyingError: Error?
+    /// Screen context sizes only, never its text: characters read from the field and near it, elements walked.
+    public var fieldCharacters: Int?
+    public var nearbyCharacters: Int?
+    public var nearbyElements: Int?
+    public var nearbyMilliseconds: Double?
     public init(reason: DevelopmentReason? = nil) { self.reason = reason }
 
     fileprivate var fields: [String: Any] {
         var fields: [String: Any] = [:]
         fields["reason"] = reason?.rawValue
+        fields["fieldCharacters"] = fieldCharacters
+        fields["nearbyCharacters"] = nearbyCharacters
+        fields["nearbyElements"] = nearbyElements
+        if let nearbyMilliseconds, nearbyMilliseconds.isFinite { fields["nearbyMilliseconds"] = nearbyMilliseconds.rounded() }
         fields["selectedDevice"] = selectedDevice?.token
         fields["resolvedDevice"] = resolvedDevice?.token
         fields["deviceCount"] = deviceCount

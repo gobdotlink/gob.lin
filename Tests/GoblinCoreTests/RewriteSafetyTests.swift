@@ -91,6 +91,25 @@ struct RewriteSafetyTests {
         #expect(messages[1]["content"]?.contains("dictation_payload_") == true)
     }
 
+    @Test func screenContextReachesACloudProviderOnlyWithConsent() async throws {
+        let context = DictationContext(application: "Mail", windowTitle: "Re: Postgres upgrade",
+                                       fieldText: "Hi Nikolai, ", selection: NSRange(location: 12, length: 0))
+        var consented = settings
+        consented.usesScreenContext = true
+        #expect(!settings.usesScreenContext && consented.usesScreenContext)
+        for (rewriteSettings, sent) in [(settings, false), (consented, true)] {
+            RewriteStubState.shared.prepare([StubReply(status: 200, body: #"{"choices":[{"message":{"content":"Thanks for the help."}}]}"#)])
+            let result = await TranscriptPostprocessor(rewriteClient: client()).process("thanks for the help", dictionaryEntries: [],
+                tone: .formal, rewriteSettings: rewriteSettings, apiKey: "fixture-key", context: context)
+            let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
+            let messages = body["messages"] as! [[String: String]]
+            #expect(messages[1]["content"]!.contains("Nikolai") == sent)
+            #expect(messages[0]["content"]!.contains("screen_context") == sent)
+            // Fitting the sentence happens on this Mac, sent or not.
+            #expect(result.finalText == "thanks for the help.")
+        }
+    }
+
     @Test func providerErrorsAreExplicitRawFallbackAndUnrelated400DoesNotRetry() async throws {
         RewriteStubState.shared.prepare([StubReply(status: 429, body: "{}")])
         let result = await client().rewrite("Raw dictation", settings: settings, apiKey: "fixture-key")

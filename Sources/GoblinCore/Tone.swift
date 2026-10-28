@@ -28,7 +28,8 @@ public enum DictationTone: String, CaseIterable, Codable, Sendable, Identifiable
 }
 
 public enum ToneFormatter {
-    public static func format(_ input: String, tone: DictationTone, protectedTerms: [String] = []) -> String {
+    /// `continuesSentence`: the text lands mid-sentence, so an ordinary first word is lowered whatever the tone.
+    public static func format(_ input: String, tone: DictationTone, protectedTerms: [String] = [], continuesSentence: Bool = false) -> String {
         guard !input.isEmpty else { return input }
         var text = input
         var protected = protectedRanges(in: text, terms: protectedTerms)
@@ -39,13 +40,17 @@ public enum ToneFormatter {
             guard !protected.contains(where: { NSIntersectionRange($0, nsrange).length > 0 }),
                   let range = Range(nsrange, in: text) else { continue }
             let word = String(text[range])
+            let lower = word.lowercased()
             let replacement: String
             switch tone {
+            case _ where continuesSentence && match.range.location == 0:
+                // "I" and unknown words, which may be names, keep their capital.
+                replacement = sentenceWords.contains(lower) && lower != "i" && !lower.hasPrefix("i'") && !lower.hasPrefix("i’") ? lower : word
             case .formal, .casual:
                 replacement = capitalizingFirst(word)
             case .veryCasual:
                 // Unknown capitalized words may be names; lower only ordinary sentence starts.
-                replacement = sentenceWords.contains(word.lowercased()) ? word.lowercased() : word
+                replacement = sentenceWords.contains(lower) ? lower : word
             }
             text.replaceSubrange(range, with: replacement)
         }

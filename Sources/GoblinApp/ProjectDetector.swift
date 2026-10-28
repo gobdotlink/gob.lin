@@ -11,19 +11,15 @@ actor ProjectDetector {
     /// Every accessibility call: each element has its own timeout, and the deadline can't interrupt a call in progress.
     private static let messagingTimeout: Float = 0.2
     private var cache: [String: (project: DetectedProject, expires: ContinuousClock.Instant)] = [:]
-    private var accessibleElectronApps: Set<pid_t> = []
 
     /// The project open in the frontmost window of `pid`, or nil when nothing identifies one.
     func detect(pid: pid_t, bundleIdentifier: String?, budget: Duration = .milliseconds(1500)) -> DetectedProject? {
         let deadline = ContinuousClock.now.advanced(by: budget)
         let bundle = bundleIdentifier ?? ""
         let isT3 = bundle.hasPrefix(ProjectResolution.t3CodeBundlePrefix), isPaseo = bundle == ProjectResolution.paseoBundle
+        // Dictation has already asked Electron apps such as these to build their web accessibility tree.
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        if (isT3 || isPaseo), accessibleElectronApps.insert(pid).inserted {
-            // Electron builds its web accessibility tree only for assistive clients that ask for it.
-            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        }
         guard let window = Self.element(app, kAXFocusedWindowAttribute) ?? Self.element(app, kAXMainWindowAttribute) else { return nil }
 
         if let document = Self.string(window, kAXDocumentAttribute),

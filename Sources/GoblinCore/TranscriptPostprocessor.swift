@@ -28,26 +28,28 @@ public actor TranscriptPostprocessor {
 
     public init(rewriteClient: RewriteClient = RewriteClient()) { self.rewriteClient = rewriteClient }
 
+    /// `context` fits the text to where it lands. It leaves the Mac only when the settings allow it for their provider.
     public func process(_ rawText: String, dictionaryEntries: [DictionaryEntry], tone: DictationTone,
-                        rewriteSettings: RewriteSettings, apiKey: String = "") async -> TranscriptProcessingResult {
+                        rewriteSettings: RewriteSettings, apiKey: String = "", context: DictationContext? = nil) async -> TranscriptProcessingResult {
         let start = ContinuousClock.now
         let entries: [DictionaryEntry]
         do { entries = try DictionaryRepository.validated(dictionaryEntries) }
         catch { return result(rawText, final: rawText, tone: tone, polished: false, warning: .dictionaryUnavailable, start: start) }
         let corrected = DictionaryCorrector.correct(rawText, entries: entries, allowFuzzy: false).text
         let preferred = entries.map(\.spelling)
+        let continues = context?.continuesSentence ?? false
         if rewriteSettings.enabled && rewriteSettings.cleanup != .none {
             // Callers pass the active terms most important first; the prompt gets the same limit as recognition.
             let rewritten = await rewriteClient.rewrite(corrected, settings: rewriteSettings, apiKey: apiKey, tone: tone,
-                                                        preferredSpellings: Array(preferred.prefix(DictionaryScope.activeLimit)))
+                                                        preferredSpellings: Array(preferred.prefix(DictionaryScope.activeLimit)), context: context)
             if let failure = rewritten.failure {
                 // A failed rewrite must recover the original ASR output, before dictionary or tone edits.
                 return result(rawText, final: rawText, tone: tone, polished: false, warning: .rewrite(failure), start: start)
             }
-            return result(rawText, final: ToneFormatter.format(rewritten.outputText, tone: tone, protectedTerms: preferred),
+            return result(rawText, final: ToneFormatter.format(rewritten.outputText, tone: tone, protectedTerms: preferred, continuesSentence: continues),
                           tone: tone, polished: rewritten.wasRewritten, warning: nil, start: start)
         }
-        return result(rawText, final: ToneFormatter.format(corrected, tone: tone, protectedTerms: preferred),
+        return result(rawText, final: ToneFormatter.format(corrected, tone: tone, protectedTerms: preferred, continuesSentence: continues),
                       tone: tone, polished: false, warning: nil, start: start)
     }
 
