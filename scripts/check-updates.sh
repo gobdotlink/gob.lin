@@ -3,17 +3,24 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 swift build --target GoblinCore >/dev/null
 binary_directory=$(swift build --show-bin-path)
+# Swift Build (the default from Swift 6.4) puts each module and one merged object straight into the
+# products folder; the native build system keeps modules in Modules and an object per source file.
+if [ -f "$binary_directory/GoblinCore.o" ]; then
+    modules=$binary_directory; objects=("$binary_directory/GoblinCore.o")
+else
+    modules=$binary_directory/Modules; objects=("$binary_directory"/GoblinCore.build/*.swift.o)
+fi
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 swiftc -parse-as-library -swift-version 6 \
-    -I "$binary_directory" -I Sources/CSQLite \
+    -I "$modules" -I Sources/CSQLite \
     Sources/GoblinApp/Updates/*.swift scripts/checks/updates.swift \
-    "$binary_directory/GoblinCore.o" -o "$temporary/check"
+    "${objects[@]}" -o "$temporary/check"
 "$temporary/check" "$@"
 swiftc -parse-as-library -swift-version 6 \
-    -I "$binary_directory" -I Sources/CSQLite \
+    -I "$modules" -I Sources/CSQLite \
     Sources/GoblinApp/Updates/*.swift scripts/checks/update-termination.swift \
-    "$binary_directory/GoblinCore.o" -o "$temporary/termination-check"
+    "${objects[@]}" -o "$temporary/termination-check"
 python3 - "$temporary" <<'PY'
 import pathlib, subprocess, sys
 directory = pathlib.Path(sys.argv[1])
