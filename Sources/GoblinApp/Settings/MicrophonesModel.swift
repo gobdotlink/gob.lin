@@ -35,9 +35,11 @@ final class MicrophonesModel: ObservableObject {
             return
         }
         // ponytail: listeners last for the process; the model is created once per launch.
+        // @Sendable keeps the block off the main actor: CoreAudio calls it on the listener queue, where a
+        // main-actor block fails Swift's isolation check and crashes the app.
         for selector in [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice] {
             var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, Self.listenerQueue) { [weak self] _, _ in
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, Self.listenerQueue) { @Sendable [weak self] _, _ in
                 Task { @MainActor in self?.refresh() }
             }
         }
