@@ -247,6 +247,10 @@ final class TextInsertionService: ObservableObject {
         setStatus("Waiting for the focused app to consume the transcript", outcome: .pending)
         onPasteSent?()
         guard expected != nil, !quirks.remoteDesktop else {
+            if expected == nil, !quirks.remoteDesktop, target.role == "AXWebArea",
+               await confirmForwardedPaste(text, from: target, provider: provider, ownedCount: ownedCount, snapshot: snapshot, quirks: quirks) {
+                return
+            }
             setStatus("Paste sent; this app does not expose edit verification. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .unverified)
             return
         }
@@ -263,27 +267,57 @@ final class TextInsertionService: ObservableObject {
             let observed = FocusedText.read(pid: target.pid, element: target.element)
             if !quirks.remoteDesktop,
                InsertionPolicy.mayRestoreClipboard(providerRead: provider.hasBeenRead, targetPID: target.pid, focusedPID: observed.pid,
-                                                    before: target.value, expected: expected, observed: observed.value,
+                                                    before: target.value, expected: expected, observed: observed.value, inserted: text,
                                                     ownedChangeCount: ownedCount, currentChangeCount: pasteboard.changeCount) {
-                if let expected, let selection = target.selection {
+                if let expected, let selection = target.selection, observed.value == expected {
                     lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
+                } else if let before = target.value, let value = observed.value,
+                          let range = InsertionPolicy.pastedRange(before: before, observed: value, inserted: text) {
+                    lastAnchor = anchor(target: target, expected: value, selection: NSRange(location: range.location, length: 0),
+                                        text: text, quirks: quirks)
                 }
-                if snapshot.restore(to: pasteboard) {
-                    recovery = nil
-                    hasRecoveryClipboard = false
-                    unverifiedChangeCount = nil
-                    providers.removeAll()
-                    setStatus("Paste verified in the focused app · clipboard restored", outcome: .success)
-                } else {
-                    unverifiedChangeCount = pasteboard.changeCount
-                    setStatus("Paste verified, but clipboard restore failed; recovery remains available", outcome: .failure(.insertionClipboardBusy))
-                }
+                finishVerifiedPaste(restoring: snapshot)
                 return
             }
             try? await Task.sleep(for: .milliseconds(50))
         }
         // This deadline only abandons verification. It must never trigger a clipboard restore.
         setStatus("Paste sent; the edit could not be verified. Check the target before retrying. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .unverified)
+    }
+
+    /// A page with focus, as after selecting text in a T3 Code reply, can move a paste into one of its fields. Confirms
+    /// the paste there when the app read it and the field it focused holds the only copy.
+    private func confirmForwardedPaste(_ text: String, from page: FocusedText, provider: TranscriptDataProvider, ownedCount: Int,
+                                       snapshot: ClipboardSnapshot, quirks: AppInsertionQuirks) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + 3
+        while ProcessInfo.processInfo.systemUptime < deadline, !Task.isCancelled, pasteboard.changeCount == ownedCount,
+              AXIsProcessTrusted(), !IsSecureEventInputEnabled() {
+            if provider.hasBeenRead, let field = FocusedText.capture(timeout: 0.05), field.pid == page.pid, !field.secure,
+               !CFEqual(field.element, page.element), let value = field.value,
+               let range = InsertionPolicy.forwardedRange(of: text, in: value) {
+                lastAnchor = anchor(target: field, expected: value, selection: NSRange(location: range.location, length: 0),
+                                    text: text, quirks: quirks)
+                // The field held nothing else, so it was empty; emptied again, it reads as a line break.
+                if range.length == (value as NSString).length { lastAnchor?.normalizesEmptyLineBreak = quirks.emptyEditorLineBreak }
+                finishVerifiedPaste(restoring: snapshot)
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
+    private func finishVerifiedPaste(restoring snapshot: ClipboardSnapshot) {
+        if snapshot.restore(to: pasteboard) {
+            recovery = nil
+            hasRecoveryClipboard = false
+            unverifiedChangeCount = nil
+            providers.removeAll()
+            setStatus("Paste verified in the focused app · clipboard restored", outcome: .success)
+        } else {
+            unverifiedChangeCount = pasteboard.changeCount
+            setStatus("Paste verified, but clipboard restore failed; recovery remains available", outcome: .failure(.insertionClipboardBusy))
+        }
     }
 
     private func readyToPaste() {

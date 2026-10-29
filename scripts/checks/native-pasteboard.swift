@@ -26,7 +26,7 @@ expect(pasteboard.string(forType: .string) == "transcript ", "provider serves tr
 expect(provider.hasBeenRead, "native provider records consumption")
 expect(pasteboard.changeCount == owned, "serving promised data preserves ownership count")
 expect(!InsertionPolicy.mayRestoreClipboard(providerRead: provider.hasBeenRead, targetPID: 1, focusedPID: 1,
-                                            before: "before", expected: "transcript ", observed: "before",
+                                            before: "before", expected: "transcript ", observed: "before", inserted: "transcript ",
                                             ownedChangeCount: owned, currentChangeCount: pasteboard.changeCount), "simulated clipboard-manager read cannot trigger restore")
 expect(snapshot.restore(to: pasteboard), "restore original multi-item clipboard")
 let restored = pasteboard.pasteboardItems!

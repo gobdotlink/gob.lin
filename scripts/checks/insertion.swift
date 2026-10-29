@@ -16,10 +16,10 @@ expect(InsertionPolicy.expectedValue(before: "\n", selectedRange: NSRange(locati
 expect(InsertionPolicy.expectedValue(before: "earlier\n", selectedRange: NSRange(location: 0, length: 0), inserted: "hello ",
     replacesEmptyLineBreak: true) == "hello earlier\n", "nonempty editor content is never normalized")
 expect(!InsertionPolicy.mayRestoreClipboard(providerRead: true, targetPID: 1, focusedPID: 1,
-    before: "hello", expected: "hello", observed: "hello", ownedChangeCount: 5, currentChangeCount: 5), "an unchanged value never becomes changed-insertion evidence")
+    before: "hello", expected: "hello", observed: "hello", inserted: "hello", ownedChangeCount: 5, currentChangeCount: 5), "an unchanged value never becomes changed-insertion evidence")
 func canRestore(read: Bool = true, focused: Int32 = 1, observed: String? = "hello transcript ", count: Int = 5) -> Bool {
     InsertionPolicy.mayRestoreClipboard(providerRead: read, targetPID: 1, focusedPID: focused,
-                                        before: "hello ", expected: "hello transcript ", observed: observed,
+                                        before: "hello ", expected: "hello transcript ", observed: observed, inserted: "transcript ",
                                         ownedChangeCount: 5, currentChangeCount: count)
 }
 expect(canRestore(), "only complete target evidence restores")
@@ -28,4 +28,8 @@ expect(!canRestore(observed: "hello "), "clipboard-manager provider read cannot 
 expect(!canRestore(focused: 2), "never restore after focus changes")
 expect(!canRestore(count: 6), "never overwrite a newer clipboard")
 expect(!canRestore(observed: nil), "unverifiable apps leave transcript available")
+expect(canRestore(observed: "transcript hello "), "a caret reported in another text space still finds the paste")
+expect(!canRestore(observed: "hello transcript! "), "a rewritten paste is not evidence")
+expect(InsertionPolicy.forwardedRange(of: "transcript ", in: "transcript ") != nil, "a page forwards the paste into an empty field")
+expect(InsertionPolicy.forwardedRange(of: "transcript ", in: "transcript transcript ") == nil, "a second copy is not evidence")
 print("Insertion safety checks passed")
