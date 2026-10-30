@@ -7,7 +7,7 @@ import GoblinCore
 enum RewriteEvaluation {
     static let usage = """
         Usage: goblin rewrite-eval <dictionary-eval.jsonl> (--glossary <terms.txt> | --no-glossary)
-          [--source raw|text] [--text-join] [--concurrency 4]
+          [--source raw|text] [--concurrency 4]
         """
 
     static func run(_ arguments: [String]) async throws {
@@ -17,7 +17,7 @@ enum RewriteEvaluation {
         var index = 1
         while index < arguments.count {
             let option = arguments[index]
-            if ["--no-glossary", "--text-join"].contains(option) { flags.insert(option); index += 1; continue }
+            if option == "--no-glossary" { flags.insert(option); index += 1; continue }
             guard ["--glossary", "--source", "--concurrency"].contains(option),
                   values[option] == nil, index + 1 < arguments.count else { throw CommandError.usage(usage) }
             values[option] = arguments[index + 1]
@@ -46,7 +46,7 @@ enum RewriteEvaluation {
         try write(["recordType": "configuration", "source": URL(fileURLWithPath: source).lastPathComponent,
                    "engine": "\(sourceConfiguration["engine"] as? String ?? "unknown")+cleanup", "method": "rewrite",
                    "sourceField": useRaw ? "rawText" : "text", "glossary": values["--glossary"].map { URL(fileURLWithPath: $0).lastPathComponent } ?? NSNull(),
-                   "glossarySHA256": glossaryData.map(sha256) ?? NSNull(), "termCount": terms.count, "textJoin": flags.contains("--text-join"),
+                   "glossarySHA256": glossaryData.map(sha256) ?? NSNull(), "termCount": terms.count,
                    "provider": configuration.rewrite.provider.rawValue, "model": configuration.rewrite.model,
                    "cleanup": configuration.rewrite.cleanup.rawValue, "reasoning": configuration.rewrite.reasoning.rawValue,
                    "temperature": configuration.rewrite.temperature ?? NSNull(), "tone": configuration.tone.rawValue,
@@ -54,10 +54,8 @@ enum RewriteEvaluation {
                    "deduplicated": configuration.rewrite.temperature == 0, "goblinVersion": GoblinMetadata.version])
 
         struct Job: Sendable { let order: Int; let input: String }
-        let jobs = clips.enumerated().map { order, clip -> Job in
-            var input = (useRaw ? clip["rawText"] : clip["text"]) as? String ?? ""
-            if flags.contains("--text-join") { input = ParakeetCorrectionGuard.textJoin(input, terms: terms) }
-            return Job(order: order, input: input)
+        let jobs = clips.enumerated().map { order, clip in
+            Job(order: order, input: (useRaw ? clip["rawText"] : clip["text"]) as? String ?? "")
         }
 
         // Identical requests at temperature 0 are sent once; repeated transcripts reuse the first result.

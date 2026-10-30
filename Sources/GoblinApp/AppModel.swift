@@ -165,12 +165,6 @@ final class AppModel: ObservableObject {
         speechModels.$selectedModel.sink { [weak self] model in
             self?.overlay.model.modelName = model.name
         }.store(in: &subscriptions)
-        // Dictionary correction downloads its model only once there is a term to correct.
-        if servicesEnabled {
-            dictionary.$entries.map { !$0.isEmpty }.removeDuplicates().sink { [weak self] hasTerms in
-                Task { @MainActor in self?.speechModels.setDictionaryHasTerms(hasTerms) }
-            }.store(in: &subscriptions)
-        }
         if servicesEnabled {
             microphones.onNewMicrophone = { [weak self] device in
                 self?.overlay.showCompletion(.newMicrophone(name: device.name, uid: device.uid), session: UUID())
@@ -305,13 +299,15 @@ final class AppModel: ObservableObject {
     }
 
     /// `scope` is the app and project dictated into; it selects their dictionary terms. `context` is where the text lands.
-    func processTranscript(_ raw: String, scope: DictionaryScope, context: DictationContext? = nil) async -> TranscriptProcessingResult {
+    /// `reportsOutcome: false` leaves a provider failure unshown, for a draft cleanup that may be discarded.
+    func processTranscript(_ raw: String, scope: DictionaryScope, context: DictationContext? = nil,
+                           reportsOutcome: Bool = true) async -> TranscriptProcessingResult {
         let operation = UUID()
         diagnostics.developmentLog.record(.processingStarted, area: .application, operation: operation)
         var completed = DevelopmentDetails()
         defer { diagnostics.developmentLog.record(.processingFinished, area: .application, severity: completed.failure == nil ? .info : .warning, operation: operation, details: completed) }
-        let settings = RewriteSettingsStore.load(defaults: defaults)
-        let tone = DictationTone(rawValue: defaults.string(forKey: DictationTone.preferenceKey) ?? "") ?? .formal
+        let inputs = processingInputs
+        let settings = inputs.settings, tone = inputs.tone
         guard dictionary.available else {
             completed.failure = .dictionaryUnavailable
             showFailure(.dictionaryUnavailable)
@@ -334,15 +330,27 @@ final class AppModel: ObservableObject {
         }
         let rewriting = settings.enabled && settings.cleanup != .none && !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if rewriting { diagnostics.developmentLog.record(.rewriteStarted, area: .rewrite, operation: operation) }
-        let result = await processor.process(raw, dictionaryEntries: dictionary.entries.active(in: scope), tone: tone,
+        let result = await processor.process(raw, dictionaryEntries: inputs.entries.active(in: scope), tone: tone,
                                              rewriteSettings: settings, apiKey: key, context: context)
         completed.failure = result.warning
         completed.timings = result.timings
         completed.succeeded = result.warning == nil
         if rewriting { diagnostics.developmentLog.record(.rewriteFinished, area: .rewrite, severity: result.warning == nil ? .info : .warning, operation: operation, details: completed) }
+        if reportsOutcome { reportProcessingOutcome(result) }
+        return result
+    }
+
+    /// What processing reads besides the transcript and where it lands. A draft's cleanup stands only while these are
+    /// unchanged, so changing Cleanup, the tone or the dictionary mid-take never pastes a result made with the old ones.
+    private var processingInputs: ProcessingInputs {
+        ProcessingInputs(settings: RewriteSettingsStore.load(defaults: defaults),
+                         tone: DictationTone(rawValue: defaults.string(forKey: DictationTone.preferenceKey) ?? "") ?? .formal,
+                         entries: dictionary.entries)
+    }
+
+    private func reportProcessingOutcome(_ result: TranscriptProcessingResult) {
         if let warning = result.warning { showFailure(warning) }
         else { diagnostics.resolve(.rewrite) }
-        return result
     }
 
     func handleHotkey(_ action: HotkeyStateMachine.Action) {
@@ -386,6 +394,7 @@ final class AppModel: ObservableObject {
         let treeRequested = quirks?.requestsAccessibilityTree == true && frontmost.map { FocusedText.requestAccessibilityTree(pid: $0.processIdentifier) } == true
         let session = DictationSession(target: frontmost, destination: insertion.destination)
         let cleanup = RewriteSettingsStore.load(defaults: defaults)
+        if servicesEnabled { Task { [processor] in await processor.prewarm(cleanup) } }
         if let target = session.target, quirks?.credentialManager == false, cleanup.enabled, cleanup.cleanup != .none, cleanup.usesScreenContext {
             let pid = target.processIdentifier
             session.nearbyReading = Task.detached(priority: .userInitiated) {
@@ -437,6 +446,21 @@ final class AppModel: ObservableObject {
                 self.overlay.update(.listening,
                     committed: text.committedText, tentative: text.tentativeText,
                     previewUnavailable: text.recoveryReason == .decodeUnavailable || text.recoveryReason == .modelPreviewUnavailable, session: overlayID)
+            }
+        }
+        if servicesEnabled, cleanup.enabled, cleanup.cleanup != .none {
+            // Each pause settles text; its AI cleanup starts while the talk key is still held. At key-up it is kept only
+            // when the final transcript has the same words, so a take that ends at a pause pastes almost at once.
+            active.earlyCleanupTask = Task { @MainActor [weak self, weak active] in
+                guard let stream = active?.live.settledTexts else { return }
+                for await text in stream {
+                    guard let self, let active, !session.cancelled, !active.stopping else { break }
+                    if let current = active.earlyCleanup, DraftTranscriptMatch(draft: current.text, final: text) == .same { continue }
+                    active.earlyCleanup?.task.cancel()
+                    active.earlyCleanup = DraftCleanup(text: text, inputs: self.processingInputs, task: Task { @MainActor [weak self] in
+                        await self?.cleanup(text, session: session, reportsOutcome: false, showsProgress: false)
+                    })
+                }
             }
         }
         let previousDrain = captureDrainTask
@@ -550,7 +574,8 @@ final class AppModel: ObservableObject {
                 await active.audioReduction?.finish()
                 throw error
             }
-            await active.audioReduction?.finish()
+            self.diagnostics.developmentLog.record(.captureStopped, area: .microphone, operation: active.session.id)
+            active.audioReduction?.end()
             active.sounds?.end(sessionID: active.session.id, playStop: !active.session.cancelled)
             active.audio = audio
             await active.frameTask?.value
@@ -559,7 +584,11 @@ final class AppModel: ObservableObject {
             return audio
         }
         let stop = active.stopTask
-        captureDrainTask = Task { _ = try? await stop?.value }
+        // Media and output restore when capture ends; only the next capture waits for their helpers to exit.
+        captureDrainTask = Task { @MainActor in
+            _ = try? await stop?.value
+            await active.audioReduction?.finish()
+        }
         enqueueDictation(active)
     }
 
@@ -568,18 +597,38 @@ final class AppModel: ObservableObject {
         active.enqueued = true
         processingQueue.enqueue(active.session, operation: { [weak self] in
             guard let self else { return }
+            var drafts: [DraftCleanup] = []
+            defer { for draft in drafts { draft.task.cancel() } }
             do {
                 guard let stop = active.stopTask else { throw CancellationError() }
                 let audio = try await stop.value
                 await active.frameTask?.value
                 try active.session.checkCancellation()
-                let result = try await active.live.finish()
+                // AI cleanup starts before the final transcript: at the last pause while the key was held, at key-up
+                // for anything said since, then from the window's draft if the recording itself is recognized. A
+                // draft's cleanup is kept only when the final transcript has the same words; see `completeDictation`.
+                let settings = RewriteSettingsStore.load(defaults: self.defaults)
+                let speculates = self.servicesEnabled && settings.enabled && settings.cleanup != .none
+                let session = active.session
+                active.earlyCleanupTask?.cancel()
+                if let early = active.earlyCleanup { drafts.append(early); active.earlyCleanup = nil }
+                @MainActor func startDraftCleanup(_ text: String) {
+                    guard speculates, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          !drafts.contains(where: { DraftTranscriptMatch(draft: $0.text, final: text) == .same }) else { return }
+                    drafts.append(DraftCleanup(text: text, inputs: self.processingInputs, task: Task { @MainActor [weak self] in
+                        await self?.cleanup(text, session: session, reportsOutcome: false)
+                    }))
+                }
+                startDraftCleanup(await active.live.speculativeText())
+                // The clipboard is saved while the text is prepared, so pasting only rereads it if it changed.
+                self.insertion.prepareClipboard()
+                let ending = try await active.live.finishWithDraft()
                 await active.textTask?.value
                 try active.session.checkCancellation()
                 var timings = DictationTimings(captureMilliseconds: active.captureMilliseconds,
                                                asrMilliseconds: await active.live.computeMilliseconds)
                 let raw: String
-                if let result {
+                if let result = ending.result {
                     raw = result.text
                     if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, result.speechPresence == .notDetected {
                         self.diagnostics.developmentLog.record(.speechNotDetected, area: .application, operation: active.session.id)
@@ -587,14 +636,16 @@ final class AppModel: ObservableObject {
                 }
                 else {
                     self.diagnostics.developmentLog.record(.liveFinalRecovery, area: .application, operation: active.session.id)
+                    if let draft = ending.draft { startDraftCleanup(draft) }
                     let engine = try await active.readiness.value
                     try active.session.checkCancellation()
                     let run = try await RecordedAudioPipeline(engine: engine, options: active.lease.options).transcribe(audio.fileURL)
                     raw = run.rawText
                     timings.asrMilliseconds += run.timings.asrMilliseconds
                 }
+                self.diagnostics.developmentLog.record(.transcriptReady, area: .application, operation: active.session.id)
                 try await self.completeDictation(raw, model: active.lease.modelID, audioURL: audio.fileURL,
-                    duration: audio.duration, timings: timings, session: active.session)
+                    duration: audio.duration, timings: timings, session: active.session, drafts: drafts)
             } catch is CancellationError {
             } catch {
                 await active.frameTask?.value
@@ -611,6 +662,8 @@ final class AppModel: ObservableObject {
             await active.eventTask?.value
             await active.levelTask?.value
             await active.live.cancel()
+            active.earlyCleanupTask?.cancel()
+            active.earlyCleanup?.task.cancel()
             await active.textTask?.value
             _ = try? await active.readiness.value
             if active.session.cancelled, !active.session.audioOwnedByHistory, let audio = active.audio {
@@ -740,40 +793,94 @@ final class AppModel: ObservableObject {
 
     private func completeDictation(_ raw: String, model: String, audioURL: URL,
                                   duration: Double, timings: DictationTimings,
-                                  session: DictationSession) async throws {
+                                  session: DictationSession, drafts: [DraftCleanup] = []) async throws {
         try session.checkCancellation()
-        let cleanup = RewriteSettingsStore.load(defaults: defaults)
-        if let overlayID = session.overlayID, cleanup.enabled, cleanup.cleanup != .none,
+        // A draft whose words match, processed with the current settings, stands for the final transcript; exact matches
+        // are tried first.
+        let inputs = processingInputs
+        var candidates: [(draft: DraftCleanup, match: DraftTranscriptMatch)] = []
+        for draft in drafts where draft.inputs == inputs {
+            let match = DraftTranscriptMatch(draft: draft.text, final: raw)
+            if match == .same { candidates.insert((draft, match), at: 0) }
+            else if match != .different { candidates.append((draft, match)) }
+        }
+        var drafted: TranscriptProcessingResult?
+        for (draft, match) in candidates {
+            // Cancelling the take stops the provider request instead of waiting out its deadline.
+            let task = draft.task
+            let value = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+            try session.checkCancellation()
+            guard let result = value else { continue }
+            if match.keeps(result) {
+                // History keeps the final transcript, not the draft's spelling of the same words.
+                drafted = TranscriptProcessingResult(rawText: raw, finalText: result.finalText, tone: result.tone, polished: result.polished,
+                                                     warning: result.warning, timings: result.timings)
+                break
+            }
+            if let fallback = match.providerFallback(result, final: raw) { drafted = fallback; break }
+        }
+        for draft in drafts { draft.task.cancel() }
+        try session.checkCancellation()
+        if let drafted {
+            diagnostics.developmentLog.record(.draftCleanupUsed, area: .rewrite, severity: drafted.warning == nil ? .info : .warning,
+                                              operation: session.id)
+            reportProcessingOutcome(drafted)
+        } else if !drafts.isEmpty {
+            diagnostics.developmentLog.record(.draftCleanupDiscarded, area: .rewrite, operation: session.id)
+        }
+        let result: TranscriptProcessingResult
+        if let drafted { result = drafted }
+        else { result = await cleanup(raw, session: session, reportsOutcome: true) }
+        try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
+    }
+
+    /// Shows the transcript being polished, then processes it with the take's project and landing-field context.
+    /// `showsProgress: false` leaves the overlay alone, for a cleanup started while the user is still talking.
+    private func cleanup(_ raw: String, session: DictationSession, reportsOutcome: Bool,
+                         showsProgress: Bool = true) async -> TranscriptProcessingResult {
+        let settings = RewriteSettingsStore.load(defaults: defaults)
+        if showsProgress, let overlayID = session.overlayID, !session.cancelled, settings.enabled, settings.cleanup != .none,
            !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            overlay.model.cleanupLabel = "\(cleanup.cleanup.title) · \(cleanup.provider.title)"
+            overlay.model.cleanupLabel = "\(settings.cleanup.title) · \(settings.provider.title)"
             overlay.update(.polishing, committed: raw, tentative: "", session: overlayID)
         }
-        // Without project terms only suggestions need the project, and they can wait for slow detection in the background.
-        let needsProject = dictionary.entries.contains { !$0.projects.isEmpty }
-        await session.resolveProject(within: .milliseconds(needsProject ? 300 : 20))
-        dictionary.lastContext = (session.target?.localizedName, session.dictionaryScope, session.dictionaryProject)
-        if let project = session.dictionaryProject { dictionary.offerTerms(from: project) }
-        else if !needsProject, session.projectDetection != nil {
-            Task { [weak self] in
-                await session.resolveProject(within: .milliseconds(1500))
-                guard let self, let project = session.dictionaryProject else { return }
-                // A later dictation may have finished first; its context stays.
-                if dictionary.lastContext?.bundleIdentifier == session.dictionaryScope, dictionary.lastContext?.project == nil {
-                    dictionary.lastContext = (session.target?.localizedName, session.dictionaryScope, project)
+        let context = await completionContext(for: session)
+        return await processTranscript(raw, scope: session.dictionaryContext, context: context, reportsOutcome: reportsOutcome)
+    }
+
+    /// Settles the project and reads where the text lands, once per take.
+    private func completionContext(for session: DictationSession) async -> DictationContext? {
+        if let settled = session.completionContext { return await settled.value }
+        let task = Task { @MainActor [weak self] () -> DictationContext? in
+            guard let self else { return nil }
+            // Without project terms only suggestions need the project, and they can wait for slow detection in the background.
+            let needsProject = dictionary.entries.contains { !$0.projects.isEmpty }
+            await session.resolveProject(within: .milliseconds(needsProject ? 300 : 20))
+            dictionary.lastContext = (session.target?.localizedName, session.dictionaryScope, session.dictionaryProject)
+            if let project = session.dictionaryProject { dictionary.offerTerms(from: project) }
+            else if !needsProject, session.projectDetection != nil {
+                Task { [weak self] in
+                    await session.resolveProject(within: .milliseconds(1500))
+                    guard let self, let project = session.dictionaryProject else { return }
+                    // A later dictation may have finished first; its context stays.
+                    if dictionary.lastContext?.bundleIdentifier == session.dictionaryScope, dictionary.lastContext?.project == nil {
+                        dictionary.lastContext = (session.target?.localizedName, session.dictionaryScope, project)
+                    }
+                    dictionary.offerTerms(from: project)
                 }
-                dictionary.offerTerms(from: project)
             }
+            let context = await session.currentContext()
+            var read = DevelopmentDetails()
+            read.succeeded = context != nil
+            read.fieldCharacters = context.map { ($0.textBefore + $0.selectedText + $0.textAfter).count }
+            read.nearbyCharacters = context?.nearbyText.count
+            read.nearbyElements = session.nearby?.elements
+            read.nearbyMilliseconds = session.nearby?.milliseconds
+            diagnostics.developmentLog.record(.screenContextRead, area: .application, operation: session.id, details: read)
+            return context
         }
-        let context = await session.currentContext()
-        var read = DevelopmentDetails()
-        read.succeeded = context != nil
-        read.fieldCharacters = context.map { ($0.textBefore + $0.selectedText + $0.textAfter).count }
-        read.nearbyCharacters = context?.nearbyText.count
-        read.nearbyElements = session.nearby?.elements
-        read.nearbyMilliseconds = session.nearby?.milliseconds
-        diagnostics.developmentLog.record(.screenContextRead, area: .application, operation: session.id, details: read)
-        let result = await processTranscript(raw, scope: session.dictionaryContext, context: context)
-        try await finishDictation(result, model: model, audioURL: audioURL, duration: duration, timings: timings, session: session)
+        session.completionContext = task
+        return await task.value
     }
 
     /// Shared completion path, including successful cleanup that leaves nothing to insert.
@@ -829,7 +936,10 @@ final class AppModel: ObservableObject {
                     // Pastes report as soon as they're sent; direct Accessibility writes once verified.
                     finishEditObservation()
                     pendingEditObservationID = session.id
-                    await insertion.insert(result.finalText, into: insertionTarget, onPasteSent: showChip)
+                    await insertion.insert(result.finalText, into: insertionTarget, onPasteSent: { [weak self] in
+                        self?.diagnostics.developmentLog.record(.pasteSent, area: .insertion, operation: session.id)
+                        showChip()
+                    })
                     insertionAnchor = insertion.takeLastAnchor()
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {
@@ -962,4 +1072,18 @@ final class AppModel: ObservableObject {
         }
         if mascotState != state { mascotState = state }
     }
+}
+
+/// An AI cleanup started before the final transcript, from the text the live path had so far.
+struct DraftCleanup {
+    let text: String
+    let inputs: ProcessingInputs
+    let task: Task<TranscriptProcessingResult?, Never>
+}
+
+/// The settings, tone and dictionary processing used, besides the transcript.
+struct ProcessingInputs: Equatable {
+    let settings: RewriteSettings
+    let tone: DictationTone
+    let entries: [DictionaryEntry]
 }

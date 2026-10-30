@@ -29,11 +29,15 @@ final class AudioReductionSession {
         } catch { try? input.fileHandleForWriting.close(); try? input.fileHandleForReading.close() }
     }
 
+    /// Ends the lease: the helpers restore media and output now. `finish` waits for them to exit.
+    func end() {
+        guard !ended else { return }
+        ended = true
+        for helper in helpers { try? helper.input.fileHandleForWriting.close() }
+    }
+
     func finish() async {
-        if !ended {
-            ended = true
-            for helper in helpers { try? helper.input.fileHandleForWriting.close() }
-        }
+        end()
         // Await this lease before the next capture so a late pause cannot outlive its owner.
         let deadline = ContinuousClock.now.advanced(by: .seconds(4))
         while helpers.contains(where: { $0.process.isRunning }) && ContinuousClock.now < deadline {

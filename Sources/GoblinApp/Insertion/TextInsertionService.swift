@@ -30,6 +30,8 @@ final class TextInsertionService: ObservableObject {
     var onPasteRequested: (() -> Void)?
     private var recovery: ClipboardSnapshot?
     private var unverifiedChangeCount: Int?
+    /// The clipboard saved ahead of a paste, valid while its change count still matches.
+    private var prepared: (changeCount: Int, snapshot: ClipboardSnapshot)?
     private var providers: [TranscriptDataProvider] = []
     private var previousApplication: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
@@ -240,7 +242,7 @@ final class TextInsertionService: ObservableObject {
         recovery = snapshot
         hasRecoveryClipboard = true
         unverifiedChangeCount = ownedCount
-        guard await sendPaste(code: code, target: target) else {
+        guard await sendPaste(code: code, target: target, quirks: quirks) else {
             setStatus("Paste cancelled after focus changed; transcript remains on clipboard and the previous clipboard is recoverable", outcome: .failure(.insertionTargetChanged))
             return
         }
@@ -390,18 +392,28 @@ final class TextInsertionService: ObservableObject {
                                    && selection == NSRange(location: 0, length: 0))
     }
 
+    /// Saves the clipboard while a dictation is still being prepared, so the paste only rereads it if it changed.
+    func prepareClipboard() {
+        let count = pasteboard.changeCount
+        guard !busy, unverifiedChangeCount != count else { prepared = nil; return }
+        prepared = ClipboardSnapshot(pasteboard: pasteboard).map { (count, $0) }
+    }
+
     private func clipboardToPreserve() -> ClipboardSnapshot? {
+        defer { prepared = nil }
         if unverifiedChangeCount == pasteboard.changeCount, let recovery { return recovery }
+        if let prepared, prepared.changeCount == pasteboard.changeCount { return prepared.snapshot }
         return ClipboardSnapshot(pasteboard: pasteboard)
     }
 
-    private func sendPaste(code: CGKeyCode, target: FocusedText) async -> Bool {
+    private func sendPaste(code: CGKeyCode, target: FocusedText, quirks: AppInsertionQuirks) async -> Bool {
         guard let source = CGEventSource(stateID: .privateState),
               let commandDown = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: true),
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false),
               let commandUp = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: false) else { return false }
-        guard pasteTargetIsUnchanged(target), pasteboard.changeCount == unverifiedChangeCount else { return false }
+        // The target was checked just before the clipboard was written; it is checked again after the hold, before V.
+        guard pasteboard.changeCount == unverifiedChangeCount else { return false }
         for event in [commandDown, keyDown, keyUp, commandUp] { event.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventTag) }
         commandDown.flags = .maskCommand
         keyDown.flags = .maskCommand
@@ -410,7 +422,9 @@ final class TextInsertionService: ObservableObject {
         commandDown.post(tap: .cghidEventTap)
         // Key-up must always be sent, including cancellation/focus loss, so Command cannot stick.
         defer { commandUp.post(tap: .cghidEventTap) }
-        try? await Task.sleep(for: .milliseconds(100))
+        // V carries the Command flag itself; the brief hold only orders the modifier first. Remote desktop
+        // clients forward keys over the network and get longer.
+        try? await Task.sleep(for: .milliseconds(quirks.remoteDesktop ? 100 : 15))
         guard !Task.isCancelled, pasteTargetIsUnchanged(target), !IsSecureEventInputEnabled(),
               pasteboard.changeCount == unverifiedChangeCount else { return false }
         keyDown.post(tap: .cghidEventTap)

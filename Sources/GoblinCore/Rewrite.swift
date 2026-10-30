@@ -294,6 +294,7 @@ public actor RewriteClient {
     private let session: URLSession
     private struct EffortScope: Hashable { let endpoint: URL; let model: String }
     private var rejectedEfforts: [EffortScope: Set<String>] = [:]
+    private var lastPrewarm: (endpoint: URL, at: ContinuousClock.Instant)?
 
     public init(session: URLSession? = nil) {
         if let session { self.session = session }
@@ -305,6 +306,23 @@ public actor RewriteClient {
             configuration.urlCache = nil
             self.session = URLSession(configuration: configuration, delegate: NoRewriteRedirects(), delegateQueue: nil)
         }
+    }
+
+    /// Opens the provider's connection while the user is still speaking, so the cleanup sent at key-up skips the
+    /// TLS handshake. Sends no key and no text: an address-only HEAD whose answer is ignored.
+    public func prewarm(_ settings: RewriteSettings) {
+        guard settings.enabled, settings.cleanup != .none, !settings.provider.runsOnDevice,
+              let endpoint = try? settings.endpoint() else { return }
+        let now = ContinuousClock.now
+        // A connection opened moments ago is still open.
+        if let last = lastPrewarm, last.endpoint == endpoint, last.at.duration(to: now) < .seconds(10) { return }
+        lastPrewarm = (endpoint, now)
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = Self.hardTimeout
+        request.setValue("gob.lin/\(GoblinMetadata.version) (macOS dictation)", forHTTPHeaderField: "User-Agent")
+        let session = session
+        Task.detached(priority: .userInitiated) { _ = try? await session.data(for: request) }
     }
 
     /// `context` is sent only when the settings allow it for their provider; see `RewriteSettings.usesScreenContext`.

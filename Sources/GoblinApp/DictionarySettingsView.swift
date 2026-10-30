@@ -108,7 +108,7 @@ final class DictionaryModel: ObservableObject {
         // Before init finishes loading, and while the file can't be read, there is nothing to compare against.
         guard suggestsTerms, available else { if !suggestions.isEmpty { suggestions = [] }; return }
         let next = TermSuggestions.review(correctionCandidates + repositoryCandidates, entries: entries, dismissed: dismissed,
-                                          isKnownWord: ParakeetCorrectionGuard.isKnownEnglishWord)
+                                          isKnownWord: TermSuggestions.isKnownEnglishWord)
         if next != suggestions { suggestions = next }
     }
 
@@ -196,27 +196,6 @@ struct DictionarySettingsView: View {
         return entries.sorted { $0.spelling.localizedStandardCompare($1.spelling) == .orderedAscending }
     }
 
-    /// Parakeet's correction: a CTC model rescores each finished English dictation; the spelling guard keeps a change only
-    /// when it rejoins a split term or replaces a word the spell checker doesn't know.
-    @ViewBuilder private func correctionStatus(terms: Int) -> some View {
-        let name = service.selectedModel.name
-        let size = ByteCountFormatter.string(fromByteCount: ParakeetDictionaryCorrection.downloadBytes, countStyle: .decimal)
-        switch service.dictionaryCorrection {
-        case .unsupported, .noTerms:
-            StatusRow(.ready, Text("When you add a term, I'll download a \(size) correction model for \(name)."))
-        case .preparing(let progress):
-            StatusRow(.waiting, Text("I'm preparing the dictionary correction model. Until it's ready, I use your terms in aliases and Cleanup only.")) {
-                if let fraction = progress.fractionCompleted { Text(fraction, format: .percent.precision(.fractionLength(0))).monospacedDigit() }
-            }
-        case .ready:
-            StatusRow(.ready, Text("I correct \(terms) \(terms == 1 ? "term" : "terms")\(model.entries.contains(where: \.isScoped) ? " used in every app" : "") after recognition. I only replace words the spell checker doesn't know, or rejoin a term split into words.").monospacedDigit())
-        case .failed(let message):
-            StatusRow(.problem, Text("I couldn't prepare dictionary correction: \(message)")) {
-                Button("Retry") { service.retryDictionaryCorrection() }
-            }
-        }
-    }
-
     private static func describe(_ source: DetectedProject.Source) -> String {
         switch source {
         case .repository: "from the open file's repository"
@@ -298,7 +277,6 @@ struct DictionarySettingsView: View {
             } label: {
                 Text("Speech Model")
                 if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms, project and app terms first, then newest") }
-                if service.selectedModel.capabilities.dictionaryCorrection { Text("Correction after recognition · English only") }
             }
             LabeledContent {
                 Text("Every model")
@@ -319,8 +297,6 @@ struct DictionarySettingsView: View {
             }
             if !model.available {
                 StatusRow(.problem, Text("I couldn't load your dictionary."))
-            } else if service.selectedModel.capabilities.dictionaryCorrection {
-                correctionStatus(terms: current.terms.count)
             } else if !service.selectedModel.capabilities.customVocabulary {
                 StatusRow(.off, Text("\(service.selectedModel.name) doesn't support a native dictionary. I don't send terms during recognition."))
             } else if current.terms.isEmpty {
@@ -341,8 +317,6 @@ struct DictionarySettingsView: View {
         } header: { Text("How I Use Them") } footer: {
             if model.available, scoped, service.selectedModel.capabilities.customVocabulary {
                 Text("App-specific terms join these when you dictate into their apps and share the same limit. Project terms apply after recognition, once I know the project.")
-            } else if model.available, scoped, service.selectedModel.capabilities.dictionaryCorrection {
-                Text("App-specific terms join these when you dictate into their apps. Project terms apply in aliases and Cleanup, once I know the project, and when you retranscribe from History.")
             }
         }
         .task(id: current) {
@@ -503,5 +477,21 @@ private struct DictionaryEntryEditor: View {
             .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
         }
         .frame(width: 460)
+    }
+}
+
+extension TermSuggestions {
+    // NSSpellChecker knows inflections ("manages", "windows") that plain word lists lack.
+    // Proper nouns are accepted in their capitalized form ("Monday"). Words the user taught macOS count as known.
+    @MainActor static func isKnownEnglishWord(_ surface: String) -> Bool {
+        let word = surface.trimmingCharacters(in: .punctuationCharacters)
+        guard word.contains(where: \.isLetter) else { return true }
+        let checker = NSSpellChecker.shared
+        func known(_ value: String) -> Bool {
+            checker.checkSpelling(of: value, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil)
+                .location == NSNotFound
+        }
+        let lower = word.lowercased()
+        return known(lower) || known(lower.prefix(1).uppercased() + lower.dropFirst())
     }
 }

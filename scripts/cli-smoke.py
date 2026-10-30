@@ -32,14 +32,9 @@ assert sum(model["default"] for model in catalog) == 1
 assert all(model["downloadBytes"] > 0 and model["languages"] for model in catalog)
 assert all(model["id"] != "cohere-transcribe" for model in catalog)
 assert all(model["customVocabulary"] == model["id"].startswith("whisper-") for model in catalog)
-assert {model["id"] for model in catalog if model["dictionaryCorrection"]} == {"parakeet-tdt-v3", "parakeet-ultra", "parakeet-redux", "phonon-2"}
+assert all("dictionaryCorrection" not in model for model in catalog)
 assert "Unknown speech model" in run("models", "--model", "unknown", status=2).stderr
-# These share v3's vocabulary, so --vocabulary-support would download them; every other model refuses.
-shared = {"parakeet-tdt-v3", "parakeet-ultra", "parakeet-redux", "phonon-2"}
-for model in catalog:
-    if model["id"] not in shared:
-        failure = run("prepare-model", "--model", model["id"], "--vocabulary-support", status=2)
-        assert "Parakeet model with v3's vocabulary" in failure.stderr
+assert "Usage: goblin prepare-model" in run("prepare-model", "--vocabulary-support", status=2).stderr
 assert "requires one value" in run("models", "--language", status=2).stderr
 assert "does not support language" in run("models", "--model", "parakeet-tdt-v3", "--language", "ja", status=2).stderr
 assert "Unknown speech model" in run("transcribe", "missing.wav", "--model", "cohere-transcribe", status=2).stderr

@@ -5,6 +5,13 @@
 focused 16-term and historical 120-term glossaries. All audio is macOS text-to-speech. These are controlled comparisons,
 not accuracy on natural human dictation.
 
+**Update, 30 October 2026:** Parakeet's CTC correction, which the app shipped from these results, has been removed along
+with its CLI arms (`--parakeet-correction`, `--guard`, `--text-join`, `--vocabulary-support`). Replaying 120 real
+dictations, the shipped path changed text 7 times and every change was wrong: one global term replaced correctly heard
+phrases, which these synthetic clips, read by text-to-speech and dense with names, never exposed. It also kept the live
+transcript from being final at key-up. See [Dictionary](../dictionary.md#no-parakeet-correction). The Parakeet sections
+below are kept as a record; the Parakeet arm of `scripts/run-dictionary-eval.sh` is now recognition without terms.
+
 ## Results, all 128 clips
 
 | Arm | Terms | Names (unbiased → biased) | Ordinary clips worsened | Words damaged | WER (unbiased → biased) | Median ms with dictionary |
@@ -229,10 +236,8 @@ scripts/run-dictionary-eval.sh <dataset-dir> <output-dir>     # prepare-model fi
 scripts/score-dictionary-eval.py --split original <output-dir>/*.jsonl
 scripts/score-dictionary-eval.py --split fresh <output-dir>/*.jsonl
 scripts/score-dictionary-eval.py --json <arm>.jsonl           # per-case damage details
-goblin rewrite-eval <arm>.jsonl --glossary <terms> [--text-join]  # sends transcripts to the saved cleanup provider
-goblin dictionary-eval <manifest.json> --model parakeet-ultra --glossary <terms> --guard spelling --text-join
-goblin dictionary-eval <manifest.json> --model parakeet-ultra --glossary <terms> --parakeet-correction app
+goblin rewrite-eval <arm>.jsonl --glossary <terms>            # sends transcripts to the saved cleanup provider
 ```
 
 `goblin dictionary-eval <manifest.json> --glossary <terms>` writes one configuration record and one paired
-unbiased/biased record per clip. Glossary and manifest hashes, FLUID_* overrides, boost and padding are recorded.
+unbiased/biased record per clip. Glossary and manifest hashes, boost and padding are recorded.

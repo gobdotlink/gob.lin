@@ -18,6 +18,8 @@ final class DictationSession {
     var dictionaryScope: String { target?.bundleIdentifier ?? "" }
     /// The project open where dictation started, once detection finishes; see `ProjectDetector`.
     var dictionaryProject: DetectedProject?
+    /// The project and landing-field context, settled once per take so a draft cleanup and the final one share them.
+    var completionContext: Task<DictationContext?, Never>?
     var projectDetection: Task<DetectedProject?, Never>?
     var dictionaryContext: DictionaryScope { DictionaryScope(application: dictionaryScope, project: dictionaryProject?.name) }
 

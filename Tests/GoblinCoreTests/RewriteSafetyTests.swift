@@ -91,6 +91,27 @@ struct RewriteSafetyTests {
         #expect(messages[1]["content"]?.contains("dictation_payload_") == true)
     }
 
+    @Test func prewarmOpensTheConnectionWithoutKeyOrText() async throws {
+        RewriteStubState.shared.prepare([StubReply(status: 405, body: "")])
+        let client = client()
+        await client.prewarm(settings)
+        // A take started moments later reuses the connection already opened.
+        await client.prewarm(settings)
+        var off = settings
+        off.enabled = false
+        await client.prewarm(off)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while RewriteStubState.shared.received().isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(100))
+        let requests = RewriteStubState.shared.received()
+        #expect(requests.count == 1)
+        #expect(requests.first?.httpMethod == "HEAD")
+        #expect(requests.first?.url == (try settings.endpoint()))
+        #expect(requests.first?.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(requests.first?.value(forHTTPHeaderField: "x-api-key") == nil)
+        #expect(requests.first?.httpBody?.isEmpty ?? true)
+    }
+
     @Test func screenContextReachesACloudProviderOnlyWithConsent() async throws {
         let context = DictationContext(application: "Mail", windowTitle: "Re: Postgres upgrade",
                                        fieldText: "Hi Nikolai, ", selection: NSRange(location: 12, length: 0))

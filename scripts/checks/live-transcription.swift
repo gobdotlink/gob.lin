@@ -61,12 +61,13 @@ actor SlowUntimedPCM: PCMSpeechEngine {
 }
 
 actor ScriptedPCM: PCMSpeechEngine {
-    enum FinalOverlap: Sendable { case unchanged, caseOnly, interiorWord, leadingFragment }
+    enum FinalOverlap: Sendable { case unchanged, caseOnly, punctuationOnly, interiorWord, leadingFragment }
     nonisolated let identifier = "check"
     nonisolated let maximumWindowSamples = 240_000
     private let empty: Bool
     private let finalOverlap: FinalOverlap
     private var calls = 0
+    private(set) var lastWindow = 0
     init(empty: Bool = false, finalOverlap: FinalOverlap = .unchanged) { self.empty = empty; self.finalOverlap = finalOverlap }
     func prepare() async throws {}
     func unload() async {}
@@ -75,6 +76,7 @@ actor ScriptedPCM: PCMSpeechEngine {
         precondition(samples.count <= maximumWindowSamples)
         if empty { return TranscriptionResult(text: "") }
         calls += 1
+        lastWindow = samples.count
         var text = "hello world tail"
         var tokens: [TranscriptionToken] = [
             .init(text: "▁hel", startSeconds: 0, endSeconds: 0.2, confidence: 1),
@@ -90,6 +92,11 @@ actor ScriptedPCM: PCMSpeechEngine {
                 text = "Hello WORLD tail"
                 tokens[0] = .init(text: "▁Hel", startSeconds: 0, endSeconds: 0.2, confidence: 1)
                 tokens[3] = .init(text: "WORLD", startSeconds: 0.6, endSeconds: 1, confidence: 1)
+            case .punctuationOnly:
+                // More speech after a word can move a sentence break; the words themselves are unchanged.
+                text = "hello, world. tail"
+                tokens[1] = .init(text: "lo,", startSeconds: 0.2, endSeconds: 0.5, confidence: 1)
+                tokens[3] = .init(text: "world.", startSeconds: 0.6, endSeconds: 1, confidence: 1)
             case .interiorWord:
                 text = "hello extra world tail"
                 tokens.insert(.init(text: " extra", startSeconds: 0.52, endSeconds: 0.58, confidence: 1), at: 2)
@@ -122,6 +129,42 @@ actor WordSequencePCM: PCMSpeechEngine {
   }
   return .init(text: tokens.map { $0.text }.joined().trimmingCharacters(in: .whitespaces), tokens: tokens)
  }
+}
+
+/// Words separated by short silences, too short to settle as a pause: `marker` runs are words, zeros are gaps.
+/// With `frame`, times snap to a grid of that many samples from the window's start, as Parakeet's 80 ms frames do, so
+/// decodes of windows that start at different places time the same word differently.
+actor GappedWordsPCM: PCMSpeechEngine {
+    nonisolated let identifier = "gapped"
+    nonisolated let maximumWindowSamples = 240_000
+    private let frame: Int
+    private var muted = false
+    private(set) var largestWindow = 0
+    init(frame: Int = 1) { self.frame = frame }
+    /// Later decodes hear nothing, as if the last words were lost.
+    func mute() { muted = true }
+    func prepare() async throws {}
+    func unload() async {}
+    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult { fatalError() }
+    func transcribe(samples: [Float], options: RecognitionOptions) async throws -> TranscriptionResult {
+        largestWindow = max(largestWindow, samples.count)
+        if muted { return .init(text: "", speechPresence: .notDetected) }
+        let snap = { (sample: Int) in Double(Int((Double(sample) / Double(self.frame)).rounded()) * self.frame) / 16_000 }
+        var tokens: [TranscriptionToken] = []
+        var start = 0
+        while start < samples.count {
+            let marker = samples[start]
+            var end = start + 1
+            while end < samples.count && samples[end] == marker { end += 1 }
+            if marker != 0 {
+                tokens.append(.init(text: " word" + String(Int((marker * 100).rounded())), startSeconds: snap(start),
+                                    endSeconds: max(snap(start), snap(end)), confidence: 1))
+            }
+            start = end
+        }
+        let text = tokens.map { $0.text }.joined().trimmingCharacters(in: .whitespaces)
+        return .init(text: text, tokens: tokens, speechPresence: tokens.isEmpty ? .notDetected : .detected(endSeconds: tokens.last!.endSeconds))
+    }
 }
 
 @main
@@ -167,26 +210,6 @@ struct LiveTranscriptionCheck {
         let used = await languageRuntime.optionsUsed
         verify(!used.isEmpty && used.allSatisfy { $0 == preferred }, "Preview and final window did not preserve language and dictionary")
 
-        // Dictionary correction runs once, on a final pass that covers the whole utterance.
-        let correcting = RecognitionOptions(language: "en", vocabulary: ["Kalikin"], dictionaryCorrection: true)
-        let shortRuntime = SignalPCM()
-        let shortLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { shortRuntime }, options: correcting)
-        var shortPosition: Int64 = 0
-        try await feed(0.1, seconds: 1.2, live: shortLive, position: &shortPosition)
-        let shortFinal = try await shortLive.finish()
-        let shortUsed = await shortRuntime.optionsUsed
-        verify(shortFinal?.text == "hello world.", "A short corrected dictation required recovery or lost its text")
-        verify(shortUsed.last == correcting && shortUsed.dropLast().allSatisfy { $0 == correcting.preview && !$0.dictionaryCorrection },
-               "Live previews requested dictionary correction, or the final pass did not")
-        let settledRuntime = SignalPCM()
-        let settledLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { settledRuntime }, options: correcting)
-        var settledPosition: Int64 = 0
-        try await feed(0.1, seconds: 1.2, live: settledLive, position: &settledPosition)
-        try await feed(0, seconds: 9, live: settledLive, position: &settledPosition)
-        try await feed(0.2, seconds: 1.2, live: settledLive, position: &settledPosition)
-        let settledFinal = try await settledLive.finish()
-        verify(settledFinal == nil, "Correction ran on a partial tail instead of recovering the whole recording")
-        verify(await settledRuntime.optionsUsed.allSatisfy { !$0.dictionaryCorrection }, "A partial window was corrected")
         let batchRuntime = SignalPCM()
         let batchOnly = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { batchRuntime }, options: preferred, previewAvailable: false)
         await batchOnly.append([Float](repeating: 0.1, count: 480_000), at: 0)
@@ -201,8 +224,57 @@ struct LiveTranscriptionCheck {
         verify(sequenceResult?.text == (1...80).map { "word" + String($0) }.joined(separator: " "), "Continuous speech lost or duplicated words at retained boundaries")
         verify(!(await sequence.requiresFinalRecovery), "Continuous timed speech fell back instead of advancing")
 
-        for variation in [ScriptedPCM.FinalOverlap.unchanged, .caseOnly, .interiorWord, .leadingFragment] {
-            let revised = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { ScriptedPCM(finalOverlap: variation) })
+        // Speech with only short gaps never settles a pause, yet each chunk closes between words as it nears a window and
+        // is decoded in the background, so key-up decodes only the last one and nothing is lost or repeated.
+        let gappedRuntime = GappedWordsPCM()
+        let gapped = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { gappedRuntime })
+        var gappedPosition: Int64 = 0
+        for word in 1...40 {
+            try await feed(Float(word) / 100, seconds: 0.4, live: gapped, position: &gappedPosition)
+            try await feed(0, seconds: 0.2, live: gapped, position: &gappedPosition)
+        }
+        let gappedFinal = try await gapped.finish()
+        let chunked = await gapped.chunkDiagnostics()
+        verify(gappedFinal?.text == (1...40).map { "word" + String($0) }.joined(separator: " "), "Chunked speech lost or repeated words")
+        verify(chunked.chunks >= 1 && chunked.chunking, "Long speech without pauses did not close a chunk between words")
+        verify(await gappedRuntime.largestWindow <= 240_000, "A chunk decode exceeded one window")
+
+        // Each decode times words on its own 80 ms grid, so the same word's start differs between decodes; a short word
+        // beside a boundary must still land in exactly one chunk.
+        let jitteredRuntime = GappedWordsPCM(frame: 1_280)
+        let jittered = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { jitteredRuntime })
+        var jitteredPosition: Int64 = 0
+        for word in 1...40 {
+            try await feed(Float(word) / 100, seconds: word.isMultiple(of: 2) ? 0.06 : 0.4, live: jittered, position: &jitteredPosition)
+            try await feed(0, seconds: 0.15, live: jittered, position: &jitteredPosition)
+        }
+        let jitteredFinal = try await jittered.finish()
+        verify(jitteredFinal?.text == (1...40).map { "word" + String($0) }.joined(separator: " "), "Differently timed decodes lost or repeated a word at a chunk boundary")
+        verify(await jittered.chunkDiagnostics().chunks >= 1, "Jittered speech never closed a chunk")
+
+        // Words the previews heard after a pause, which the key-up decode loses, send the take to the original recording
+        // instead of ending on the earlier chunk alone.
+        let lossyRuntime = GappedWordsPCM()
+        let lossy = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { lossyRuntime })
+        var lossyPosition: Int64 = 0
+        for word in 1...3 {
+            try await feed(Float(word) / 100, seconds: 0.4, live: lossy, position: &lossyPosition)
+            try await feed(0, seconds: 0.2, live: lossy, position: &lossyPosition)
+        }
+        try await feed(0, seconds: 9, live: lossy, position: &lossyPosition)
+        try await Task.sleep(for: .milliseconds(100))
+        verify(await lossy.chunkDiagnostics().pauses == 1, "The pause did not close a chunk")
+        for word in 4...5 {
+            try await feed(Float(word) / 100, seconds: 0.4, live: lossy, position: &lossyPosition)
+            try await feed(0, seconds: 0.2, live: lossy, position: &lossyPosition)
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        await lossyRuntime.mute()
+        verify(try await lossy.finish() == nil, "Key-up dropped words the previews heard after the last pause")
+
+        for variation in [ScriptedPCM.FinalOverlap.unchanged, .caseOnly, .punctuationOnly, .interiorWord, .leadingFragment] {
+            let script = ScriptedPCM(finalOverlap: variation)
+            let revised = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { script })
             let revisedValues = Values()
             let revisedCollector = Task { for await value in revised.updates { await revisedValues.add(value) } }
             await revised.append([Float](repeating: 0.1, count: 64_000), at: 0)
@@ -213,10 +285,17 @@ struct LiveTranscriptionCheck {
                 await revised.append([Float](repeating: 0.1, count: 9_600), at: 73_600)
                 try await Task.sleep(for: .milliseconds(20))
             }
-            let final = try await revised.finish()
+            let final = try await revised.finishWithDraft().result
             await revisedCollector.value
-            if variation == .interiorWord { verify(final == nil, "Interior overlap mismatch did not preserve original-file recovery") }
-            else { verify(final?.text == "hello world tail", "Consecutive overlap or leading-fragment handling regressed") }
+            // Key-up decodes everything since the last pause in one window, so its reading is the final text however
+            // the previews' seams lined up, including a word they heard differently (interiorWord).
+            let reading = ["hello world tail", "Hello WORLD tail", "hello, world. tail", "hello extra world tail", "fragment hello world tail"]
+            let index = [ScriptedPCM.FinalOverlap.unchanged, .caseOnly, .punctuationOnly, .interiorWord, .leadingFragment].firstIndex(of: variation)!
+            verify(final?.text == reading[index], "Key-up did not take the whole segment's reading")
+            verify(await script.lastWindow == (variation == .caseOnly ? 83_200 : 73_600), "Key-up decoded a tail instead of everything since the pause")
+            if variation == .punctuationOnly {
+                verify(!(await revised.requiresFinalRecovery), "Punctuation moving at the seam required original-file recovery")
+            }
             if variation == .caseOnly {
                 let snapshots = await revisedValues.values
                 verify(snapshots.last?.committedText == "hello world", "Case-only overlap regressed or recased committed text")
@@ -298,7 +377,9 @@ struct LiveTranscriptionCheck {
 
         let overflow = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { runtime }, maximumWindowSamples: 6_400)
         await overflow.append([Float](repeating: 0.1, count: 12_800), at: 0)
-        verify(try await overflow.finish() == nil, "Skipped window did not require original audio")
+        let overflowEnding = try await overflow.finishWithDraft()
+        verify(overflowEnding.result == nil, "Skipped window did not require original audio")
+        verify(overflowEnding.draft == nil, "A window that dropped audio drafted the take")
 
         let releaseRuntime = SlowUntimedPCM(delay: .milliseconds(100))
         let released = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { releaseRuntime })
@@ -314,12 +395,14 @@ struct LiveTranscriptionCheck {
 
         let discontinuous = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { runtime })
         await discontinuous.append([0.1], at: 1)
-        verify(try await discontinuous.finish() == nil, "Missing frame was accepted")
+        let gap = try await discontinuous.finishWithDraft()
+        verify(gap.result == nil, "Missing frame was accepted")
+        verify(gap.draft == nil, "A window with missing frames drafted the take")
         let cancelled = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { runtime })
         await cancelled.append([Float](repeating: 0.1, count: 6_400), at: 0)
         await cancelled.cancel()
         do { _ = try await cancelled.finish(); preconditionFailure("Cancelled stream produced text") }
         catch is CancellationError {}
-        print("Live regression checks passed: long pauses, continuous speech, slow untimed overflow progress, terminal ceiling/failure, overlap/fragments, reset, ordering and cancellation.")
+        print("Live regression checks passed: long pauses, continuous speech, slow untimed overflow progress, terminal ceiling/failure, overlap/punctuation/fragments, whole segments at key-up, chunks between words, drafts, reset, ordering and cancellation.")
     }
 }

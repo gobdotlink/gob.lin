@@ -204,7 +204,7 @@ struct SpeechModelRow: View {
                 Text(model.selectionSummary).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                 // The dictionary marker is the first thing to go when the row is narrow.
                 ViewThatFits(in: .horizontal) {
-                    if model.capabilities.recognitionDictionary { details(dictionary: true) }
+                    if model.capabilities.customVocabulary { details(dictionary: true) }
                     details(dictionary: false)
                 }.font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -421,8 +421,5 @@ private func modelSize(_ model: SpeechModelDescriptor) -> String {
 }
 
 private func dictionarySupport(_ model: SpeechModelDescriptor) -> String {
-    if model.capabilities.customVocabulary { return "Spelling hints while recognizing" }
-    guard model.capabilities.dictionaryCorrection else { return "Aliases and Cleanup only" }
-    let size = ByteCountFormatter.string(fromByteCount: ParakeetDictionaryCorrection.downloadBytes, countStyle: .decimal)
-    return "Correction after recognition, English · \(size) extra"
+    model.capabilities.customVocabulary ? "Spelling hints while recognizing" : "Aliases and Cleanup only"
 }

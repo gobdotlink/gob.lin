@@ -10,7 +10,7 @@ Background writes leave the clipboard untouched and require exact text readback 
 
 `TextInsertionService.insert(_:)` is the native pipeline entry. Accessibility writes `AXSelectedText` first when the focused control exposes it as settable. A timeout or ambiguous write failure never triggers a second insertion. Unsupported writes fall back to paste. Secure Input and accessible secure text fields reject insertion.
 
-Paste resolves the V key with `UCKeyTranslate` using the active layout's Command map (including Dvorak-QWERTY Command layouts). All synthetic events post on the main actor; Command is held for 100 ms and always released, including cancellation. This hold is keyboard-event sequencing, never a clipboard-restore delay. Synthetic events are tagged so gob.lin's own modifier hotkey cannot react to its Cmd+V.
+Paste resolves the V key with `UCKeyTranslate` using the active layout's Command map (including Dvorak-QWERTY Command layouts). All synthetic events post on the main actor; Command is held for 15 ms before V (100 ms for remote desktop clients, which forward keys over the network) and always released, including cancellation. This hold is keyboard-event sequencing, never a clipboard-restore delay. Synthetic events are tagged so gob.lin's own modifier hotkey cannot react to its Cmd+V.
 
 The entire previous clipboard is copied, preserving multiple items and data representations. If item retrieval fails, a promised representation cannot be read, or the clipboard changes during snapshotting, insertion stops before overwriting it. A genuinely empty item array remains a valid empty snapshot. The transcript uses a lazy `NSPasteboardItemDataProvider` with transient/concealed markers. Providers stay alive while the transcript remains available.
 

@@ -91,15 +91,28 @@ recovery mean **≤150 ms release-to-text and ~0.5s first text are not establish
 No bounded-tail versus full-file accuracy equivalence is claimed. EOU streaming
 and Apple diagnostic comparisons were not run; neither is another shipping model.
 
-### Vocabulary diagnostic
+## From key-up to transcript
 
-The CLI can explicitly acquire an auxiliary CTC 110M model and evaluate the
-SDK's acoustic rescoring path. It uses one TDT runtime and one distinct CTC
-model, with both caches under the same model-storage root. Recognition itself
-never downloads models. The app now ships this rescoring only behind the
-spelling guard and text join, for English dictation with the models that
-qualified on labelled synthetic clips; see [Dictionary](dictionary.md#parakeet-dictionary-correction).
-The unguarded measurement below is why the guard exists.
+`LiveTranscriber` builds the final transcript while the user talks. Previews decode a bounded window and stitch committed words. That is fine for showing progress, but the stitched text drops and garbles words that a decode with more context keeps: 2.6–4.3% of words differed from a whole-recording decode on 21 real dictations. So the final transcript is built separately, in chunks:
+
+- **Closing a chunk:** a chunk closes at every settled pause. Otherwise it closes once it reaches two thirds of a window, at the widest gap of at least 150 ms between committed words after its first quarter window.
+- **Decoding it:** each closed chunk is decoded once, in the background, from a window of up to 15 s that ends a second after its boundary. It hears the speech before it as context, and the start of what follows, so its last words aren't read as the end of an utterance.
+- **Assigning words:** words go to chunks by where they start, with one shared threshold 100 ms before each boundary. Splitting at the gap nearest each boundary instead repeated a word at 3 seams in 40 real dictations, because a word's end can stretch to punctuation emitted after it.
+- **Checking for lost words:** if a chunk's decode keeps no words where the previews heard some, key-up uses the previews' path, or the original recording, instead.
+- **At key-up:** only the open chunk is decoded the same way, then joined to the closed ones.
+- **Falling back to the original recording:** happens when a chunk can't close between words before it fills a window, when audio went missing, or when a decode fails.
+
+`goblin live-replay <recordings> --texts` replays recordings at speaking pace through this path and reports key-up timings next to a whole-recording decode. On 40 real dictations (1.4–85 s, 16 minutes in all, 30 October 2026, M4 Pro):
+
+- **Speed:** 39 takes ended on the chunked transcript, with key-up to transcript at a median of 99 ms and a p90 of 116 ms; an earlier run of the same path measured 86 ms and 103 ms. The other take, 28 s long, filled the live window before a chunk could close and was recognized again from the recording in 601 ms. A whole-recording decode took 3–830 ms.
+- **Accuracy:** 2.7% of words differed from the whole-recording decode, with errors on both sides: the chunks heard some technical terms correctly that the whole recording misheard, and the reverse.
+
+### Vocabulary diagnostic (removed)
+
+An earlier CLI diagnostic evaluated the SDK's acoustic rescoring path with an
+auxiliary CTC 110M model. The app later shipped it behind a spelling guard as
+Parakeet dictionary correction, and has since removed both; see
+[Dictionary](dictionary.md#no-parakeet-correction).
 
 With **120 available local terms** over the same 250 recordings, CTC/rescoring
 added **96.628 seconds** of work: p50 **223.0 ms**, p95 **1,159.8 ms**, maximum
@@ -117,8 +130,6 @@ goblin prepare-model
 goblin benchmark <private-recordings-directory> --repeat 1
 goblin benchmark <private-clips-directory> --repeat 3 --windows 1.5,3,6,12 --cadence-ms 400
 goblin benchmark <private-clips-directory> --windows 6 --cadence-ms 600
-goblin prepare-model --vocabulary-support
-goblin benchmark <private-recordings-directory> --vocabulary <private-terms-file>
 ```
 
 Benchmark JSONL contains detailed transcripts/tokens and must remain outside

@@ -6,7 +6,7 @@ import GoblinEngines
 
 /// Local timing output can include transcripts; keep detailed JSONL in a private evaluation directory.
 enum SpeechBenchmark {
-    static func prepare(_ runtime: SpeechModelRuntime, model: SpeechModelDescriptor, vocabularySupport: Bool = false) async throws {
+    static func prepare(_ runtime: SpeechModelRuntime, model: SpeechModelDescriptor) async throws {
         let engine = runtime.engine
         let directory = runtime.store.directory
         let existed = PinnedSpeechModelStore.isDownloaded(model: model, directory: directory)
@@ -14,11 +14,6 @@ enum SpeechBenchmark {
         let start = ContinuousClock.now
         _ = try await runtime.store.ensureAvailable(progress: { _ in })
         let acquisition = milliseconds(since: start)
-        let auxiliaryStart = ContinuousClock.now
-        if vocabularySupport {
-            _ = try await SpeechRuntimeFactory.dictionaryCorrectionStore(root: directory.deletingLastPathComponent()).ensureAvailable(progress: { _ in })
-        }
-        let auxiliaryAcquisition = vocabularySupport ? milliseconds(since: auxiliaryStart) : 0
         let loadStart = ContinuousClock.now
         try await engine.prepare()
         let load = milliseconds(since: loadStart)
@@ -31,21 +26,18 @@ enum SpeechBenchmark {
         let cachedReload = milliseconds(since: reloadStart)
         try write(["recordType": "preparation", "model": engine.identifier, "cacheExistedBefore": existed,
                    "prepareMilliseconds": preparation, "acquisitionMilliseconds": acquisition, "loadMilliseconds": load,
-                   "auxiliaryAcquisitionMilliseconds": auxiliaryAcquisition, "vocabularySupport": vocabularySupport,
-                   "auxiliaryCacheBytes": vocabularySupport ? try directoryBytes(directory.deletingLastPathComponent().appendingPathComponent(ParakeetDictionaryCorrection.cacheFolder)) : 0,
                    "cachedReloadMilliseconds": cachedReload,
                    "residentBytesBefore": before.map { $0 as Any } ?? NSNull(), "residentBytesLoaded": loaded.map { $0 as Any } ?? NSNull(),
                    "residentBytesUnloaded": unloaded.map { $0 as Any } ?? NSNull(), "cacheBytes": try directoryBytes(directory)])
     }
 
-    static func run(_ arguments: [String], engine: any PCMSpeechEngine, directory: URL, options: RecognitionOptions = .init()) async throws {
+    static func run(_ arguments: [String], engine: any PCMSpeechEngine, options: RecognitionOptions = .init()) async throws {
         guard let source = arguments.first, !source.hasPrefix("--") else {
             throw CommandError.usage("Usage: goblin benchmark <file | directory> [--repeat N] [--windows 1.5,3,6,12] [--cadence-ms 400]")
         }
         var repeats = 1
         var windows: [Double] = []
         var cadence = 400.0
-        var vocabularyURL: URL?
         var seen = Set<String>()
         var index = 1
         while index < arguments.count {
@@ -64,7 +56,6 @@ enum SpeechBenchmark {
                     }
                     return duration
                 }
-            case "--vocabulary": vocabularyURL = URL(fileURLWithPath: value)
             case "--cadence-ms":
                 guard let duration = Double(value), duration.isFinite, (100...5000).contains(duration) else {
                     throw CommandError.usage("--cadence-ms must be 100...5000")
@@ -84,14 +75,10 @@ enum SpeechBenchmark {
                 .sorted { $0.lastPathComponent < $1.lastPathComponent }
             : [url]
         guard !files.isEmpty else { throw CommandError.usage("No audio files found") }
-        guard vocabularyURL == nil || SpeechModelCatalog.model(id: engine.identifier)?.sharesParakeetV3Vocabulary == true else {
-            throw CommandError.usage("--vocabulary needs a Parakeet model with v3's vocabulary.")
-        }
         let loadStart = ContinuousClock.now
         try await engine.prepare()
         try write(["recordType": "load", "model": engine.identifier, "milliseconds": milliseconds(since: loadStart),
                    "residentBytes": SystemInfo.currentResidentMemoryBytes().map { $0 as Any } ?? NSNull()])
-        let vocabulary = try await vocabularyURL.map { try VocabularyDiagnostic(termsURL: $0, modelDirectory: directory) }?.load()
         for file in files {
             try Task.checkCancellation()
             let audio = try AVAudioFile(forReading: file)
@@ -107,16 +94,8 @@ enum SpeechBenchmark {
                        "audioSeconds": duration, "milliseconds": times, "text": recognition.text,
                        "residentBytes": SystemInfo.currentResidentMemoryBytes().map { $0 as Any } ?? NSNull(),
                        "peakResidentBytes": SystemInfo.peakResidentMemoryBytes().map { $0 as Any } ?? NSNull()])
-            if !windows.isEmpty || vocabulary != nil {
+            if !windows.isEmpty {
                 let samples = try AudioConverter().resampleAudioFile(file)
-                if let vocabulary {
-                    let start = ContinuousClock.now
-                    let boosted = try await vocabulary.rescore(recognition, samples: samples)
-                    try write(["recordType": "vocabulary", "id": file.lastPathComponent, "termCount": vocabulary.termCount,
-                               "milliseconds": milliseconds(since: start), "rawText": recognition.text, "text": boosted.text,
-                               "replacements": boosted.replacements, "detectedTerms": boosted.detectedTerms,
-                               "residentBytes": SystemInfo.currentResidentMemoryBytes().map { $0 as Any } ?? NSNull()])
-                }
                 for window in windows { try await benchmarkWindows(samples, file: file, seconds: window, cadenceMilliseconds: cadence, engine: engine, options: options) }
             }
         }

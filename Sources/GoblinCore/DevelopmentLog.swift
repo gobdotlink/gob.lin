@@ -33,6 +33,8 @@ public enum DevelopmentEventName: String {
     case previewFailed, previewStopping, previewStopped
     case livePreviewDegraded, livePreviewRecovered, liveFinalRecovery, speechNotDetected
     case screenContextRead
+    /// Key-up to text stages: capture closed, transcript known, draft cleanup kept or redone, paste keystroke sent.
+    case captureStopped, transcriptReady, draftCleanupUsed, draftCleanupDiscarded, pasteSent
 }
 public enum DevelopmentReason: String {
     case user, restart, selectionChanged, viewClosed, permissionLost, configurationChanged, startFailed, shutdown

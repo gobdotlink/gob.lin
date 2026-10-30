@@ -192,11 +192,6 @@ including raw recognition, audio duration, load time and resident memory.
 Those timings measure inference work; they do not measure native key-up, queued
 capture, text commitment or insertion latency. Keep detailed corpus JSONL private;
 accuracy metrics require trusted annotations, and machine agreement is not WER.
-For the acoustic-vocabulary diagnostic, explicitly acquire its pinned auxiliary
-model with `prepare-model --vocabulary-support`, then run
-`benchmark <directory> --vocabulary <terms-file>`. Terms may use the SDK JSON configuration or a text
-file with one term per line. The app uses the same model, behind a spelling guard and text join, as
-English dictionary correction for Parakeet v3, Ultra, Redux and Phonon-2; see [Dictionary](docs/dictionary.md).
 
 `--recorded` reads existing transcript JSONL files from a directory, or exports
 saved History entries. It labels each row `source: "recorded_transcript"` and
@@ -241,7 +236,7 @@ Native Swift, macOS 26+, distributed as a direct download.
 
 - On-device dictation with hold-to-talk, tap-to-toggle, and reliable insertion into the focused app.
 - A live transcription pill with the goblin mascot.
-- A user dictionary with recognizer biasing and measured, guarded corrections.
+- A user dictionary with exact aliases, Whisper recognition hints and Cleanup spellings.
 - Optional LLM rewriting, global tone controls, and recoverable history with raw text, final text, and audio.
 - Settings for microphone, hotkeys, model status, dictionary, rewriting, tone, and history retention.
 

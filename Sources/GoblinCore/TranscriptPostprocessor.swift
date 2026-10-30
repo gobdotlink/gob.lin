@@ -22,11 +22,60 @@ public struct TranscriptProcessingResult: Sendable {
     }
 }
 
+/// How the draft transcript a cleanup started from compares with the final transcript.
+public enum DraftTranscriptMatch: Sendable, Equatable {
+    case same, sameIgnoringCaseAndPunctuation, different
+
+    public init(draft: String, final: String) {
+        let draftWords = draft.split(whereSeparator: \.isWhitespace), finalWords = final.split(whereSeparator: \.isWhitespace)
+        if draftWords == finalWords { self = .same; return }
+        // Only sentence punctuation at a word's edges, which cleanup sets itself; signs and symbols change meaning
+        // ("-5", "$50", "50%", "C++").
+        let plain = { (words: [Substring]) in
+            words.map { $0.lowercased().trimmingCharacters(in: Self.sentencePunctuation) }.filter { !$0.isEmpty }
+        }
+        self = plain(draftWords) == plain(finalWords) ? .sameIgnoringCaseAndPunctuation : .different
+    }
+
+    private static let sentencePunctuation = CharacterSet(charactersIn: ".,!?;:…\"“”‘’'¡¿")
+
+    /// Whether the draft's processing stands for the final transcript. Processing reads words, so the same words
+    /// give the same result. Words differing only in case or edge punctuation qualify once AI cleanup polished
+    /// them, because that cleanup sets case and punctuation itself.
+    public func keeps(_ result: TranscriptProcessingResult) -> Bool {
+        guard result.warning == nil else { return false }
+        switch self {
+        case .same: return true
+        case .sameIgnoringCaseAndPunctuation: return result.polished
+        case .different: return false
+        }
+    }
+
+    /// When the provider itself failed on the draft's words (deadline, connection or HTTP status), the final
+    /// transcript's raw-text fallback, as one attempt on it would have produced. A second full deadline would only
+    /// delay it. Nil when the final transcript deserves its own attempt.
+    public func providerFallback(_ result: TranscriptProcessingResult, final: String) -> TranscriptProcessingResult? {
+        guard self != .different, let warning = result.warning, Self.isProviderFailure(warning) else { return nil }
+        return TranscriptProcessingResult(rawText: final, finalText: final, tone: result.tone, polished: false, warning: warning,
+                                          timings: result.timings)
+    }
+
+    private static func isProviderFailure(_ warning: DiagnosticFailure) -> Bool {
+        switch warning {
+        case .rewriteTimeout, .rewriteTransport, .rewriteHTTPStatus: true
+        default: false
+        }
+    }
+}
+
 /// Shared by the app and CLI; credentials are supplied by their platform shells.
 public actor TranscriptPostprocessor {
     private let rewriteClient: RewriteClient
 
     public init(rewriteClient: RewriteClient = RewriteClient()) { self.rewriteClient = rewriteClient }
+
+    /// Opens the cleanup provider's connection ahead of `process`; see `RewriteClient.prewarm`.
+    public func prewarm(_ settings: RewriteSettings) async { await rewriteClient.prewarm(settings) }
 
     /// `context` fits the text to where it lands. It leaves the Mac only when the settings allow it for their provider.
     public func process(_ rawText: String, dictionaryEntries: [DictionaryEntry], tone: DictationTone,

@@ -45,11 +45,6 @@ private actor CheckEngine: PCMSpeechEngine {
     }
 }
 
-extension CheckEngine: DictionaryCorrectingEngine {
-    func prepareDictionaryCorrection() async throws -> Bool { events.append("correction-load"); return true }
-    func unloadDictionaryCorrection() async { events.append("correction-unload") }
-}
-
 private actor CheckStore: SpeechModelAcquiring {
     nonisolated let directory: URL
     let delay: Duration
@@ -130,7 +125,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try await tokenizerBoundary()
         try whisperSuppression()
         try dictionaryCapacity()
-        try await dictionaryCorrection()
+        try await dictionaryRouting()
         try await expandedCatalog()
         print("PASS catalog, language, switching, leases, idle, cancellation, retry, acquisition and integrity checks")
     }
@@ -246,8 +241,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         let service = SpeechModelService(defaults: defaults, makeRuntime: factory)
         try expect(service.selectedModel == SpeechModelCatalog.defaultModel, "Default model was not selected")
         let initial = try service.beginSession(vocabulary: ["Parakeet"])
-        try expect(initial.options.vocabulary == ["Parakeet"] && !initial.options.dictionaryCorrection,
-                   "Parakeet lost its terms, or requested correction before the correction model was ready")
+        try expect(initial.options.vocabulary.isEmpty, "Parakeet received recognition terms; only Whisper's decoder takes them")
         _ = try await service.readyEngine(for: initial)
         service.endSession(initial)
         try await service.selectModel(id: SpeechModelCatalog.whisperTiny.id)
@@ -572,33 +566,17 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try expect(capped.usage.included == Array(many.dropLast()) && capped.usage.excluded == [many.last!],
                    "Dictionary prompt sent more terms than the active limit")
         let legacy = try JSONDecoder().decode(RecognitionOptions.self, from: Data("{\"language\":\"en\"}".utf8))
-        try expect(legacy == .init(language: "en") && !legacy.dictionaryCorrection, "Old recognition options no longer decode")
-        let correcting = RecognitionOptions(language: "en", vocabulary: ["Kalikin"], dictionaryCorrection: true)
-        try expect(correcting.preview == .init(language: "en", vocabulary: ["Kalikin"]), "Live previews kept dictionary correction or lost terms")
+        try expect(legacy == .init(language: "en"), "Old recognition options no longer decode")
+        // Options saved while Parakeet's dictionary correction existed carry a key that is now ignored.
+        let corrected = try JSONDecoder().decode(RecognitionOptions.self,
+            from: Data(#"{"language":"en","vocabulary":["Kalikin"],"dictionaryCorrection":true}"#.utf8))
+        try expect(corrected == .init(language: "en", vocabulary: ["Kalikin"]), "Options saved with dictionary correction no longer decode")
         for model in SpeechModelCatalog.supported {
             try expect(model.capabilities.customVocabulary == (model.kind == .whisper), "Native dictionary capability routed to another backend")
-            // Only models that qualified on the unseen evaluation clips, all sharing v3's vocabulary.
-            let qualified: Set = ["parakeet-tdt-v3", "parakeet-ultra", "parakeet-redux", "phonon-2"]
-            try expect(model.capabilities.dictionaryCorrection == qualified.contains(model.id)
-                       && (!model.capabilities.dictionaryCorrection || model.sharesParakeetV3Vocabulary),
-                       "Dictionary correction advertised for \(model.id) without its evaluation")
-            try expect(model.capabilities.recognitionDictionary == (model.capabilities.customVocabulary || model.capabilities.dictionaryCorrection),
-                       "Dictionary support summary disagrees with its mechanisms")
         }
-        try expect(SpeechModelCatalog.supported.filter(\.sharesParakeetV3Vocabulary).map(\.id).sorted()
-                   == ["parakeet-redux", "parakeet-tdt-v3", "parakeet-ultra", "phonon-2"], "Shared Parakeet vocabulary detection changed")
-        try expect(!SpeechModelCatalog.parakeetCompact.sharesParakeetV3Vocabulary, "TDT-CTC 110M's own vocabulary was treated as v3's")
-        try expect(ParakeetDictionaryCorrection.downloadBytes == 102_802_455, "Pinned dictionary correction download changed size")
         for (word, known) in [("lunch", true), ("manages", true), ("Monday", true), ("lunch,", true), ("Kalican", false), ("postgas", false)] {
-            try expect(ParakeetCorrectionGuard.isKnownEnglishWord(word) == known, "Spell checker disagrees about \(word)")
+            try expect(TermSuggestions.isKnownEnglishWord(word) == known, "Spell checker disagrees about \(word)")
         }
-        let european = SpeechModelCatalog.parakeet.capabilities.languageCodes
-        try expect(ParakeetDictionaryCorrection.isEnglish("Hallo zusammen", language: "en", candidates: european)
-                   && !ParakeetDictionaryCorrection.isEnglish("Ask CodeRabbit to review the change", language: "de", candidates: european)
-                   && ParakeetDictionaryCorrection.isEnglish("Kalikan approved the design yesterday afternoon.", language: nil, candidates: european)
-                   && !ParakeetDictionaryCorrection.isEnglish("Bitte frag Kalikin, ob er die letzte Änderung prüfen kann.", language: nil, candidates: european)
-                   && !ParakeetDictionaryCorrection.isEnglish("Pide a CodeRabbit que revise el cambio.", language: nil, candidates: european),
-                   "Dictionary correction ran outside English dictation, or missed English with an unfamiliar name")
         for type in [MLMultiArrayDataType.float16, .float32, .double] {
             let original = try MLMultiArray(shape: [8, 4], dataType: type)
             for index in 0..<32 { original[index] = NSNumber(value: index) }
@@ -611,142 +589,26 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         print("PASS dictionary whole-entry capacity, stable order, legacy options, backend gating and alignment strides")
     }
 
-    /// The correction model downloads only for a qualifying model with terms, never blocks sessions, and only ready
-    /// correction reaches recognition options.
-    @MainActor private static func dictionaryCorrection() async throws {
-        let suite = "app.goblin.dictionary-correction-check.\(UUID())"
+    /// Only Whisper's decoder takes preferred spellings; every other model leaves terms to aliases and Cleanup.
+    @MainActor private static func dictionaryRouting() async throws {
+        let suite = "app.goblin.dictionary-routing-check.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let engines = Dictionary(uniqueKeysWithValues: SpeechModelCatalog.supported.map { ($0.id, CheckEngine($0.id)) })
-        let correction = CheckStore()
         let service = SpeechModelService(defaults: defaults, makeRuntime: {
             SpeechModelRuntime(engine: engines[$0.id]!, store: CheckStore())
-        }, correctionStore: correction)
-        try expect(service.dictionaryCorrection == .noTerms, "Parakeet v3 did not offer dictionary correction")
+        })
         service.preload()
         try await settle(service)
-        let untouched = await correction.attempts
-        let parakeet = engines[SpeechModelCatalog.parakeet.id]!
-        let parakeetEvents = await parakeet.events
-        try expect(untouched == 0 && !parakeetEvents.contains("correction-load"),
-                   "An empty dictionary downloaded or loaded the correction model")
-        let empty = try service.beginSession(vocabulary: [])
-        try expect(!empty.options.dictionaryCorrection, "An empty dictionary requested an extra pass")
-        service.endSession(empty)
-
-        await correction.failOnce()
-        service.setDictionaryHasTerms(true)
-        let pending = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(!pending.options.dictionaryCorrection && pending.options.vocabulary == ["Kalikin"],
-                   "A session waited for, or assumed, a correction model still downloading")
-        service.endSession(pending)
-        try await waitForCorrection(service)
-        guard case .failed = service.dictionaryCorrection else { throw CheckFailure(message: "A failed correction download was hidden") }
-        service.retryDictionaryCorrection()
-        try await waitForCorrection(service)
-        let attempts = await correction.attempts
-        try expect(service.dictionaryCorrection == .ready && attempts == 2, "Retry did not install the correction model")
-        let loads = await parakeet.events.filter { $0 == "correction-load" }.count
-        try expect(loads == 1, "A failed download loaded correction, or retry didn't")
-        let ready = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(ready.options.dictionaryCorrection && ready.options.vocabulary == ["Kalikin"], "Ready correction did not reach the session")
-        service.endSession(ready)
-        // An explicit other language would only force original-file recovery, since correction is English-only.
-        try service.selectLanguage("de")
-        let german = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(!german.options.dictionaryCorrection && german.options.vocabulary == ["Kalikin"], "German dictation requested English correction")
-        service.endSession(german)
-        try service.selectLanguage("en")
-        let english = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(english.options.dictionaryCorrection, "Explicit English dictation lost correction")
-        service.endSession(english)
-        try service.selectLanguage("auto")
-
-        try await service.selectModel(id: SpeechModelCatalog.whisperTiny.id)
-        try expect(service.dictionaryCorrection == .unsupported, "Whisper reported Parakeet's dictionary correction")
-        let whisper = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(whisper.options.vocabulary == ["Kalikin"] && !whisper.options.dictionaryCorrection, "Whisper's prompt was routed to correction")
-        service.endSession(whisper)
-        try await service.selectModel(id: SpeechModelCatalog.parakeetCompact.id)
-        try expect(service.dictionaryCorrection == .unsupported, "TDT-CTC 110M advertised dictionary correction")
-        let compact = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(compact.options.vocabulary.isEmpty && !compact.options.dictionaryCorrection, "An unqualified model received dictionary terms")
-        service.endSession(compact)
-        try await service.selectModel(id: SpeechModelCatalog.parakeetUltra.id)
-        try await waitForCorrection(service)
-        try expect(service.dictionaryCorrection == .ready, "Switching to Ultra did not reuse the installed correction model")
-        let ultra = engines[SpeechModelCatalog.parakeetUltra.id]!
-        let ultraLoaded = await ultra.events.contains("correction-load")
-        try expect(ultraLoaded, "The switched-to engine never loaded correction")
-        func ultraLoads() async -> Int { await ultra.events.filter { $0 == "correction-load" }.count }
-
-        // A failed switch restores the previous engine, and correction with it.
-        let beforeRollback = await ultraLoads()
-        await engines[SpeechModelCatalog.parakeet.id]!.failOnce()
-        do {
-            try await service.selectModel(id: SpeechModelCatalog.parakeet.id)
-            throw CheckFailure(message: "A failing model switch succeeded")
-        } catch let failure as CheckFailure where failure.message == "Simulated model load failure" {}
-        try await waitForCorrection(service)
-        let afterRollback = await ultraLoads()
-        try expect(service.selectedModel.id == SpeechModelCatalog.parakeetUltra.id && afterRollback == beforeRollback + 1,
-                   "Rollback restored the recognizer without its dictionary correction")
-
-        // Emptying the dictionary mid-dictation keeps correction until that dictation finishes.
-        let recording = try service.beginSession(vocabulary: ["Kalikin"])
-        try expect(recording.options.dictionaryCorrection, "Ready correction did not reach the session")
-        service.setDictionaryHasTerms(false)
-        try await waitForCorrection(service)
-        try await Task.sleep(for: .milliseconds(20))
-        try expect(service.dictionaryCorrection == .noTerms, "Emptying the dictionary left correction advertised as active")
-        let duringRecording = await ultra.events.last
-        try expect(duringRecording == "correction-load", "Emptying the dictionary unloaded correction from an active dictation")
-        service.endSession(recording)
-        try await Task.sleep(for: .milliseconds(20))
-        let ultraLast = await ultra.events.last
-        try expect(ultraLast == "correction-unload", "Emptying the dictionary kept the correction model loaded")
-
-        // Terms removed while the correction model is still being acquired never start a load.
-        let beforeFlicker = await ultraLoads()
-        service.setDictionaryHasTerms(true)
-        service.setDictionaryHasTerms(false)
-        try await waitForCorrection(service)
-        try await Task.sleep(for: .milliseconds(20))
-        let afterFlicker = await ultraLoads()
-        try expect(afterFlicker == beforeFlicker && service.dictionaryCorrection == .noTerms,
-                   "Correction loaded for a dictionary emptied during acquisition")
-        let cleared = try service.beginSession(vocabulary: [])
-        try expect(!cleared.options.dictionaryCorrection, "An emptied dictionary still requested correction")
-        service.endSession(cleared)
+        for model in [SpeechModelCatalog.parakeet, SpeechModelCatalog.whisperTiny, SpeechModelCatalog.parakeetUltra, SpeechModelCatalog.parakeetCompact] {
+            if service.selectedModel.id != model.id { try await service.selectModel(id: model.id) }
+            let lease = try service.beginSession(vocabulary: ["Kalikin"])
+            try expect(lease.options.vocabulary == (model.capabilities.customVocabulary ? ["Kalikin"] : []),
+                       "\(model.name) received the wrong recognition terms")
+            service.endSession(lease)
+        }
         await service.shutdown()
-
-        // Files of the right size but the wrong bytes fail the pinned hash before Core ML sees them.
-        let tampered = FileManager.default.temporaryDirectory.appendingPathComponent("correction-tampered-\(UUID())")
-        defer { try? FileManager.default.removeItem(at: tampered) }
-        for file in SpeechModelAssets.manifest(for: ParakeetDictionaryCorrection.manifestID).files {
-            let url = tampered.appendingPathComponent(file.destination)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-            let handle = try FileHandle(forWritingTo: url)
-            try handle.truncate(atOffset: UInt64(file.size))
-            try handle.close()
-        }
-        let corrector = ParakeetDictionaryCorrection(directory: tampered)
-        try expect(corrector.isDownloaded, "Tampered fixture doesn't match the pinned sizes")
-        do { try await corrector.load(); throw CheckFailure(message: "A same-size modified correction cache loaded") }
-        catch SpeechModelStoreError.invalidCache {}
-        let rejectedLoaded = await corrector.isLoaded
-        try expect(!rejectedLoaded, "A rejected correction cache stayed loaded")
-        print("PASS dictionary correction capability, download and load on first term, retry, model switches, English-only leases, unload when emptied and pinned hashes")
-    }
-
-    @MainActor private static func waitForCorrection(_ service: SpeechModelService) async throws {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while ContinuousClock.now < deadline {
-            if !service.isPreparingDictionaryCorrection { return }
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        throw CheckFailure(message: "Dictionary correction did not settle")
+        print("PASS dictionary terms reach recognition through Whisper's prompt only")
     }
 
     private static func realDictionary(directory: URL, audio: URL) async throws {
@@ -875,10 +737,9 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = CheckStore(directory: modelDirectory)
-        let correction = CheckStore()
         let service = SpeechModelService(defaults: defaults, makeRuntime: { model in
             SpeechModelRuntime(engine: CheckEngine(model.id), store: store)
-        }, correctionStore: correction)
+        })
         let repository = DictionaryRepository(url: scratch.appendingPathComponent("dictionary.json"))
         try repository.save([DictionaryEntry(spelling: "CodeRabbit", aliases: ["code rabbit"]),
                              DictionaryEntry(spelling: "Postgres"), DictionaryEntry(spelling: "Kalikin")])
@@ -900,13 +761,7 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
             try snapshot(host, to: directory.appendingPathComponent(name + ".png"))
             print("Captured \(name)")
         }
-        service.setDictionaryHasTerms(true)
-        try await waitForCorrection(service)
-        for dark in [false, true] { try await shoot("dictionary-correction-\(dark ? "dark" : "light")", dark: dark) }
-        await correction.failOnce()
-        service.retryDictionaryCorrection()
-        try await waitForCorrection(service)
-        try await shoot("dictionary-correction-failed", dark: false)
+        for dark in [false, true] { try await shoot("dictionary-parakeet-\(dark ? "dark" : "light")", dark: dark) }
         try await service.selectModel(id: SpeechModelCatalog.parakeetCompact.id)
         for dark in [false, true] { try await shoot("dictionary-unsupported-\(dark ? "dark" : "light")", dark: dark) }
         try await service.selectModel(id: SpeechModelCatalog.whisperTurbo.id)

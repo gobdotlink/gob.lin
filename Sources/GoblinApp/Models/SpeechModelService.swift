@@ -35,17 +35,6 @@ enum SpeechModelState: Equatable {
     case notPrepared, preparing(SpeechModelPreparationProgress), ready, unloading, unloaded, cancelling, cancelled, failed(String), stopped
 }
 
-/// Parakeet's dictionary correction model, downloaded separately from the speech model.
-enum DictionaryCorrectionState: Equatable {
-    /// The selected model has no dictionary correction.
-    case unsupported
-    /// Supported, but the dictionary is empty, so nothing is downloaded or run.
-    case noTerms
-    case preparing(SpeechModelPreparationProgress)
-    case ready
-    case failed(String)
-}
-
 struct SpeechModelLoadTiming: Equatable {
     let cache: SpeechModelCacheUse
     let preparationMilliseconds: Double
@@ -64,7 +53,6 @@ final class SpeechModelService: ObservableObject {
     @Published private(set) var activeSessionCount = 0
     @Published private(set) var preparationStartedAt: Date?
     @Published private(set) var lastLoadTiming: SpeechModelLoadTiming?
-    @Published private(set) var dictionaryCorrection: DictionaryCorrectionState = .unsupported
     @Published var idleTimeout: ModelIdleTimeout {
         didSet { defaults.set(idleTimeout.rawValue, forKey: "modelIdleUnloadMinutes") }
     }
@@ -78,13 +66,6 @@ final class SpeechModelService: ObservableObject {
     private var engine: any PCMSpeechEngine
     private var store: any SpeechModelAcquiring
     private let makeRuntime: @Sendable (SpeechModelDescriptor) -> SpeechModelRuntime
-    private let correctionStore: any SpeechModelAcquiring
-    private var correctionTask: Task<Void, Never>?
-    private var correctionRefreshPending = false
-    /// Emptying the dictionary unloads correction only after dictations that requested it have finished.
-    private var correctionUnloadPending = false
-    private var correctionUnload: Task<Void, Never>?
-    private var dictionaryHasTerms = false
     private var switchTask: Task<Void, Error>?
     private var switchingRuntime = false
     private var leaseDrain: AsyncStream<Void>.Continuation?
@@ -100,11 +81,9 @@ final class SpeechModelService: ObservableObject {
     private var repairing = false
 
     init(defaults: UserDefaults = .standard,
-         makeRuntime: @escaping @Sendable (SpeechModelDescriptor) -> SpeechModelRuntime = { SpeechRuntimeFactory.make($0) },
-         correctionStore: any SpeechModelAcquiring = SpeechRuntimeFactory.dictionaryCorrectionStore()) {
+         makeRuntime: @escaping @Sendable (SpeechModelDescriptor) -> SpeechModelRuntime = { SpeechRuntimeFactory.make($0) }) {
         self.defaults = defaults
         self.makeRuntime = makeRuntime
-        self.correctionStore = correctionStore
         let selected = SpeechModelCatalog.supported.first { $0.id == defaults.string(forKey: "speechModelID") }
             ?? SpeechModelCatalog.defaultModel
         selectedModel = selected
@@ -121,16 +100,14 @@ final class SpeechModelService: ObservableObject {
         defaults.set(selectedModel.id, forKey: "speechModelID")
         defaults.set(preferredLanguage, forKey: "speechLanguage")
         defaults.set(idleTimeout.rawValue, forKey: "modelIdleUnloadMinutes")
-        if selected.capabilities.dictionaryCorrection { dictionaryCorrection = .noTerms }
     }
 
-    convenience init(engine: any PCMSpeechEngine, store: any SpeechModelAcquiring, defaults: UserDefaults = .standard,
-                     correctionStore: any SpeechModelAcquiring = SpeechRuntimeFactory.dictionaryCorrectionStore()) {
+    convenience init(engine: any PCMSpeechEngine, store: any SpeechModelAcquiring, defaults: UserDefaults = .standard) {
         defaults.set(engine.identifier, forKey: "speechModelID")
         self.init(defaults: defaults, makeRuntime: { model in
             precondition(model.id == engine.identifier)
             return SpeechModelRuntime(engine: engine, store: store)
-        }, correctionStore: correctionStore)
+        })
     }
 
     func preload() { startMaintenance(); startPreparation() }
@@ -139,13 +116,9 @@ final class SpeechModelService: ObservableObject {
     func beginSession(vocabulary: [String] = []) throws -> SpeechModelLease {
         guard !stopping else { throw SpeechModelServiceError.stopped }
         guard !repairing, !switchingRuntime, switchTask == nil || loaded else { throw SpeechModelServiceError.modelInUse }
-        let capabilities = selectedModel.capabilities
-        let terms = capabilities.recognitionDictionary ? vocabulary : []
-        let language = recognitionOptions.language
-        // Correction is English-only; an explicit other language would only force needless original-file recovery.
-        let english = language.map { SpeechModelCatalog.canonicalLanguage($0) == "en" } ?? true
-        let options = RecognitionOptions(language: language, vocabulary: terms,
-            dictionaryCorrection: capabilities.dictionaryCorrection && !terms.isEmpty && english && dictionaryCorrection == .ready)
+        // Only Whisper's decoder takes preferred spellings; other models leave the terms to aliases and Cleanup.
+        let terms = selectedModel.capabilities.customVocabulary ? vocabulary : []
+        let options = RecognitionOptions(language: recognitionOptions.language, vocabulary: terms)
         let lease = SpeechModelLease(model: selectedModel, options: options)
         leases.insert(lease)
         activeSessionCount = leases.count
@@ -179,7 +152,6 @@ final class SpeechModelService: ObservableObject {
         activeSessionCount = leases.count
         lastActivity = .now
         if leases.isEmpty { leaseDrain?.yield(()) }
-        unloadDictionaryCorrectionIfUnused()
     }
 
     func selectModel(id: String) async throws {
@@ -222,7 +194,6 @@ final class SpeechModelService: ObservableObject {
                 self.lastLoadTiming = timing
                 self.lastActivity = .now
                 self.state = .ready
-                self.refreshDictionaryCorrection()
             } catch {
                 self.acquisitionID = nil
                 await candidate.engine.unload()
@@ -231,7 +202,7 @@ final class SpeechModelService: ObservableObject {
                 if !self.stopping, wasLoaded, unloadedPrevious {
                     // Restoration runs outside the cancelled switch so the previous model can recover.
                     let restore = Task { try await previous.engine.prepare() }
-                    do { try await restore.value; self.loaded = true; self.state = .ready; self.refreshDictionaryCorrection() }
+                    do { try await restore.value; self.loaded = true; self.state = .ready }
                     catch { self.state = .failed("Previous model could not reload: \(error.localizedDescription)") }
                 } else { self.state = self.stopping ? .stopped : previousState }
                 self.finishSwitch()
@@ -318,77 +289,9 @@ final class SpeechModelService: ObservableObject {
         }
     }
 
-    /// The app reports whether the dictionary has any terms; correction downloads its model only once it does.
-    func setDictionaryHasTerms(_ hasTerms: Bool) {
-        guard hasTerms != dictionaryHasTerms else { return }
-        dictionaryHasTerms = hasTerms
-        refreshDictionaryCorrection()
-    }
-
-    func retryDictionaryCorrection() { refreshDictionaryCorrection() }
-    var isPreparingDictionaryCorrection: Bool { correctionTask != nil }
-
-    /// Installs the correction model and loads it into the selected engine whenever the engine is prepared and the
-    /// dictionary has terms; unloads it once the dictionary is empty and no dictation still needs it. `.ready` means
-    /// installed and verified: an engine reloaded after idle loads correction again right after preparation, and a
-    /// final pass corrects only once it is loaded. Dictation never waits for it, and Cleanup still receives the terms.
-    private func refreshDictionaryCorrection() {
-        guard !stopping else { return }
-        guard selectedModel.capabilities.dictionaryCorrection else { dictionaryCorrection = .unsupported; return }
-        // The engine or terms can change during a download; run again afterwards for the current engine.
-        guard correctionTask == nil else { correctionRefreshPending = true; return }
-        guard dictionaryHasTerms else {
-            // Only a dictionary that had terms can have loaded correction.
-            if dictionaryCorrection != .noTerms { correctionUnloadPending = true }
-            dictionaryCorrection = .noTerms
-            unloadDictionaryCorrectionIfUnused()
-            return
-        }
-        correctionUnloadPending = false
-        if dictionaryCorrection != .ready { dictionaryCorrection = .preparing(.init(phase: .checkingCache)) }
-        let store = correctionStore, engine = engine as? any DictionaryCorrectingEngine, unloading = correctionUnload
-        correctionTask = Task { [weak self] in
-            var outcome = DictionaryCorrectionState.ready
-            do {
-                // A pending unload must not land after, and discard, the load below.
-                await unloading?.value
-                _ = try await store.ensureAvailable { progress in
-                    Task { @MainActor in
-                        guard let self, self.correctionTask != nil, self.dictionaryCorrection != .ready else { return }
-                        self.dictionaryCorrection = .preparing(progress)
-                    }
-                }
-                // Terms may have been removed during the download; an unprepared engine is loaded after preparation.
-                if self?.dictionaryHasTerms == true { try await engine?.prepareDictionaryCorrection() }
-            } catch { outcome = Task.isCancelled ? .noTerms : .failed(error.localizedDescription) }
-            guard let self else { return }
-            self.correctionTask = nil
-            self.dictionaryCorrection = outcome
-            if self.correctionRefreshPending {
-                self.correctionRefreshPending = false
-                self.refreshDictionaryCorrection()
-            } else if !self.dictionaryHasTerms || !self.selectedModel.capabilities.dictionaryCorrection {
-                self.refreshDictionaryCorrection()
-            }
-        }
-    }
-
-    private func unloadDictionaryCorrectionIfUnused() {
-        guard correctionUnloadPending, !leases.contains(where: \.options.dictionaryCorrection),
-              let engine = engine as? any DictionaryCorrectingEngine else { return }
-        correctionUnloadPending = false
-        let previous = correctionUnload
-        correctionUnload = Task {
-            await previous?.value
-            await engine.unloadDictionaryCorrection()
-        }
-    }
-
     func shutdown() async {
         guard !stopping else { return }
         stopping = true
-        correctionTask?.cancel()
-        if let correctionTask { await correctionTask.value }
         maintenanceTask?.cancel()
         maintenanceTask = nil
         preparationTask?.cancel()
@@ -455,7 +358,6 @@ final class SpeechModelService: ObservableObject {
                 self.lastActivity = .now
                 self.preparationStartedAt = nil
                 self.state = .ready
-                self.refreshDictionaryCorrection()
             } catch {
                 // A cancelled CoreML load may already have completed; drain it before a retry.
                 await self.engine.unload()
