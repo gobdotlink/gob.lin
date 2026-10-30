@@ -159,6 +159,9 @@ final class AppModel: ObservableObject {
         hotkeys.$recording.sink { [weak self] recording in
             Task { @MainActor in self?.overlay.model.handsFree = recording == .handsFree }
         }.store(in: &subscriptions)
+        hotkeys.$shortcut.sink { [weak self] shortcut in
+            self?.overlay.model.talkKey = shortcut
+        }.store(in: &subscriptions)
         speechModels.$selectedModel.sink { [weak self] model in
             self?.overlay.model.modelName = model.name
         }.store(in: &subscriptions)

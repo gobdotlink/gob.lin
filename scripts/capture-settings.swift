@@ -202,6 +202,7 @@ struct SettingsCapture {
             ("listening-long", make(.listening, committed: long, tentative: " or two")),
             ("listening-dark", make(.listening, committed: words, tentative: " see first")),
             ("handsfree", make(.listening, committed: "Second point: the overlay copy needs one more pass", tentative: " before anyone sees it") { $0.handsFree = true }),
+            ("handsfree-keyed", make(.listening, committed: "Second point: the overlay copy needs one more pass") { $0.handsFree = true; $0.talkKey = .optionSpace }),
             ("transcribing", make(.transcribing, committed: words + " see first.")),
             ("polishing", make(.polishing, committed: "so um cut the export redesign instead keep the onboarding it's what people see first") { $0.cleanupLabel = "Light · Cerebras" }),
             ("inserted", make(.inserted(OverlayResult(application: "Team chat", words: 23, seconds: 0.59)))),

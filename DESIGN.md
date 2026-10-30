@@ -136,7 +136,7 @@ The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a 
 |---|---|---|
 | arming | shut | Compact: idle meter, "Warming up the mic…", esc |
 | listening | shut and yap on mic level (with hysteresis, at most 12 fps) | Header plus live words |
-| hands-free | same | The label reads "Hands-free", with a hint: "tap fn to finish" |
+| hands-free | same | The label reads "Hands-free", with a hint that names the talk key: "tap fn to finish" |
 | transcribing | look down, quill | Firm words. Subline: "Transcribing", then "Parakeet · 0:07 of audio" |
 | cleaning up | squint | Words with a highlight sweep every 900 ms. Subline: "Cleaning up · Light · Cerebras". Only shown when Cleanup is on. |
 | inserted (new) | closed, one nod | A one-line chip: "Typed into Mail · 23 words · 0.59 s". It leaves after 500 ms. |

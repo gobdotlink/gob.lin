@@ -142,8 +142,13 @@ private struct OverlayBubble: View {
                     .font(.system(size: 12))
                     Spacer(minLength: 8)
                     if model.handsFree {
-                        HStack(spacing: 6) { Text("tap"); DarkKey("fn"); Text("to finish") }
-                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                        HStack(spacing: 6) {
+                            Text("tap")
+                            HStack(spacing: 3) { ForEach(Array(talkKeys.enumerated()), id: \.offset) { DarkKey($0.element) } }
+                            Text("to finish")
+                        }
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).fixedSize()
+                        .accessibilityElement(children: .ignore).accessibilityLabel("Tap \(model.talkKey.title) to finish")
                     }
                     Button(action: model.cancel) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }
                         .buttonStyle(OverlayIconButtonStyle())
@@ -254,6 +259,13 @@ private struct OverlayBubble: View {
                 }
             }
         }
+    }
+
+    /// One cap per key, as the popover draws the talk key: fn, Right Option, or ⌥ then Space.
+    private var talkKeys: [String] {
+        let shortcut = model.talkKey
+        if shortcut.modifier == .fn { return ["fn"] }
+        return shortcut.keyCode == nil ? [shortcut.keyLabel] : shortcut.keys.map(\.symbol)
     }
 
     private var audioDetail: String {

@@ -75,6 +75,8 @@ final class OverlayModel: ObservableObject {
     @Published var committedText = ""
     @Published var tentativeText = ""
     @Published var handsFree = false
+    /// The talk key from Settings, named in the hands-free hint.
+    @Published var talkKey = HotkeyShortcut.fn
     private(set) var deliveryApplication: String?
     @Published var listeningStarted: Date?
     /// Seconds of audio, frozen when listening ends.
