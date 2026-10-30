@@ -43,7 +43,7 @@ struct PermissionChecks {
         var publications = 0
         let publication = model.$snapshot.dropFirst().sink { _ in publications += 1 }
         model.updateSnapshot(allowed)
-        precondition(publications == 1 && callbacks.isEmpty, "Equal snapshots must publish without transition callbacks")
+        precondition(publications == 0 && callbacks.isEmpty, "The once-a-second poll must not republish an unchanged snapshot")
         publication.cancel()
 
         var listenChanged = allowed

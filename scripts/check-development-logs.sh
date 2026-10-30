@@ -7,7 +7,6 @@ mkdir -p .build/development-log-check
 sources=(
     Sources/GoblinApp/Diagnostics/DiagnosticsModel.swift
     Sources/GoblinApp/Permissions/PermissionModel.swift
-    Sources/GoblinApp/Permissions/OnboardingView.swift
     Sources/GoblinApp/Hotkeys/EventTap.swift
     Sources/GoblinApp/Hotkeys/HotkeyShortcut.swift
     Sources/GoblinApp/GoblinBrand.swift

@@ -8,7 +8,6 @@ trap 'rm -rf "$check_directory"' EXIT
 swiftc -parse-as-library -swift-version 6 \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
     Sources/GoblinApp/Permissions/PermissionModel.swift \
-    Sources/GoblinApp/Permissions/OnboardingView.swift \
     Sources/GoblinApp/GoblinBrand.swift \
     Sources/GoblinApp/Hotkeys/EventTap.swift \
     Sources/GoblinApp/Hotkeys/HotkeyShortcut.swift \
