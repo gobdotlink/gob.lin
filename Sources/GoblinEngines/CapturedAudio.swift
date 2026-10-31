@@ -11,7 +11,17 @@ public struct CapturedAudio: Sendable {
     public let fileURL: URL
     public let sampleCount: Int64
     public let preRollSampleCount: Int
+    /// Where stopping went, for the development log.
+    public var stopTiming: CaptureStopTiming?
     public var duration: TimeInterval { Double(sampleCount) / 16_000 }
+}
+
+/// Milliseconds spent closing a take: waiting for the input buffer that covers the stop, then finishing the file.
+public struct CaptureStopTiming: Sendable {
+    public let seal: Double
+    public let file: Double
+    /// The input device's buffer length.
+    public let buffer: Double
 }
 
 public struct AudioCaptureFailure: Error, LocalizedError, Sendable {

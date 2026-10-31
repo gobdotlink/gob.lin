@@ -33,6 +33,8 @@ final class ActiveDictation {
     /// AI cleanup of the settled text, started at a pause while the user is still holding the talk key.
     var earlyCleanup: DraftCleanup?
     var earlyCleanupTask: Task<Void, Never>?
+    /// AI cleanup of the audio received by key-up, started while capture closes.
+    var releaseCleanup: Task<DraftCleanup?, Never>?
 
     init(session: DictationSession, lease: SpeechModelLease, readiness: Task<any PCMSpeechEngine, Error>) {
         self.session = session

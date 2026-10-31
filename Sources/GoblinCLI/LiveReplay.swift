@@ -7,17 +7,24 @@ import GoblinEngines
 /// the live final, and the whole-recording recognition the app falls back to. Prints match flags and timings,
 /// never transcript text, unless `--texts` is given; keep that output in a private evaluation directory.
 enum LiveReplay {
-    static let usage = "Usage: goblin live-replay <audio-file>... [--speed <x>] [--frame-ms <ms>] [--texts] [--decode-timing]"
+    static let usage = "Usage: goblin live-replay <audio-file>... [--speed <x>] [--frame-ms <ms>] [--in-flight-ms <ms>] [--stop-ms <ms>] [--texts] [--decode-timing]"
 
     static func run(_ arguments: [String], engine: any PCMSpeechEngine, options: RecognitionOptions) async throws {
         var files: [URL] = []
-        var speed = 1.0, frameMilliseconds = 64.0, texts = false, decodeTiming = false
+        // At key-up the last `inFlight` ms of audio are still on their way, and capture takes `stop` ms to close.
+        var speed = 1.0, frameMilliseconds = 64.0, inFlightMilliseconds = 100.0, stopMilliseconds = 120.0, texts = false, decodeTiming = false
         var index = 0
         while index < arguments.count {
             switch arguments[index] {
-            case "--speed", "--frame-ms":
-                guard index + 1 < arguments.count, let value = Double(arguments[index + 1]), value > 0 else { throw CommandError.usage(usage) }
-                if arguments[index] == "--speed" { speed = value } else { frameMilliseconds = value }
+            case "--speed", "--frame-ms", "--in-flight-ms", "--stop-ms":
+                guard index + 1 < arguments.count, let value = Double(arguments[index + 1]), value >= 0,
+                      value > 0 || ["--in-flight-ms", "--stop-ms"].contains(arguments[index]) else { throw CommandError.usage(usage) }
+                switch arguments[index] {
+                case "--speed": speed = value
+                case "--frame-ms": frameMilliseconds = value
+                case "--in-flight-ms": inFlightMilliseconds = value
+                default: stopMilliseconds = value
+                }
                 index += 2
             case "--texts": texts = true; index += 1
             case "--decode-timing": decodeTiming = true; index += 1
@@ -67,8 +74,9 @@ enum LiveReplay {
             let clock = ContinuousClock()
             let start = clock.now
             var position = 0
-            while position < samples.count {
-                let end = min(samples.count, position + frame)
+            let released = max(0, samples.count - Int(inFlightMilliseconds * 16))
+            while position < released {
+                let end = min(released, position + frame)
                 await live.append(Array(samples[position..<end]), at: Int64(position))
                 position = end
                 // Pace frames to the speaking clock, as capture would deliver them.
@@ -76,10 +84,14 @@ enum LiveReplay {
                 if due > clock.now { try await clock.sleep(until: due) }
             }
             let keyUp = clock.now
-            // As in the app: the key-up cleanup candidate is read before the previews stop.
-            let keyUpText = await live.speculativeText()
+            // As in the app: previews stop and the audio so far is decoded for cleanup while capture closes.
             await live.stopPreview()
+            let release = Task { () -> (text: String?, at: ContinuousClock.Instant) in (await live.releaseText(), ContinuousClock.now) }
+            try await clock.sleep(until: keyUp.advanced(by: .milliseconds(Int(stopMilliseconds))))
+            if position < samples.count { await live.append(Array(samples[position...]), at: Int64(position)) }
+            let keyUpText = await live.speculativeText()
             let ending = try await live.finishWithDraft()
+            let releaseResult = await release.value
             let chunkDiagnostics = await live.chunkDiagnostics()
             let finishMilliseconds = milliseconds(keyUp.duration(to: clock.now))
             let fullStart = clock.now
@@ -103,8 +115,12 @@ enum LiveReplay {
                 "earlyMatch": earlyText.map { "\(DraftTranscriptMatch(draft: $0.text, final: final))" } ?? NSNull(),
                 "earlyLeadMilliseconds": earlyText.map { milliseconds($0.at.duration(to: keyUp)) } ?? NSNull(),
                 "keyUpMatch": "\(DraftTranscriptMatch(draft: keyUpText, final: final))",
+                // The audio received at key-up, decoded at once for cleanup: would its cleanup stand for the final transcript?
+                "releaseMilliseconds": milliseconds(keyUp.duration(to: releaseResult.at)),
+                "releaseMatch": releaseResult.text.map { "\(DraftTranscriptMatch(draft: $0, final: final))" } ?? NSNull(),
                 "chunks": chunkDiagnostics.chunks, "pauseChunks": chunkDiagnostics.pauses, "chunking": chunkDiagnostics.chunking,
             ]
+            if texts { record["releaseText"] = releaseResult.text ?? NSNull() }
             if texts { record["full"] = full; record["draftText"] = ending.draft ?? NSNull(); record["trustedText"] = ending.result?.text ?? NSNull() }
             let data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys, .withoutEscapingSlashes])
             try FileHandle.standardOutput.write(contentsOf: data + Data([10]))

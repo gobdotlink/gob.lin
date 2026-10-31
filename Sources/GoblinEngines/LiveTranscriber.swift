@@ -62,6 +62,8 @@ public actor LiveTranscriber {
     private var chunks: [(text: Task<String?, Never>, pause: Bool, heard: Bool)] = []
     /// False once a chunk couldn't close between words in time, or audio went missing.
     private var chunking = true
+    /// The open chunk decoded at key-up from the audio received by then; see `releaseText`.
+    private var release: Task<String?, Never>?
     private var cancelled = false
     private var finishing = false
     private var previewStopped = false
@@ -192,6 +194,25 @@ public actor LiveTranscriber {
     /// The words the previews heard in the open chunk.
     private var openPreviewWords: [Word] { (committed + previous).filter { $0.start >= chunkStart - 1_600 } }
 
+    /// At key-up, before capture's last frames arrive: the closed chunks, then the open one decoded from the audio received
+    /// so far, as the final transcript will decode it. Cleanup starts on it at once; people stop talking before they let go,
+    /// so it usually has the final transcript's words. The final transcript is still decoded once capture stops.
+    /// Nil without usable chunks.
+    public func releaseText() async -> String? {
+        guard !cancelled, chunksUsable else { return nil }
+        if release == nil {
+            guard received > chunkStart, let window = contextWindow(through: received), window.origin <= chunkStart else { return nil }
+            let engine = engine, options = options, start = chunkStart
+            release = Task {
+                guard let runtime = try? await engine.value,
+                      let open = try? await Self.decode(window, from: start, runtime: runtime, options: options) else { return nil }
+                return open.text
+            }
+        }
+        guard let open = await release?.value, let closed = await chunkText() else { return nil }
+        return Self.join(closed, open)
+    }
+
     /// For diagnostics: closed chunks, and how many closed at a pause.
     public func chunkDiagnostics() -> (chunks: Int, pauses: Int, chunking: Bool) {
         (chunks.count, chunks.filter(\.pause).count, chunking)
@@ -310,6 +331,7 @@ public actor LiveTranscriber {
         cancelled = true
         inference?.cancel()
         for chunk in chunks { chunk.text.cancel() }
+        release?.cancel()
         continuation.finish()
         settledContinuation.finish()
         await inference?.value

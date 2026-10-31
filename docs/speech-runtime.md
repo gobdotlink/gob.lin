@@ -99,7 +99,7 @@ and Apple diagnostic comparisons were not run; neither is another shipping model
 - **Decoding it:** each closed chunk is decoded once, in the background, from a window of up to 15 s that ends a second after its boundary. It hears the speech before it as context, and the start of what follows, so its last words aren't read as the end of an utterance.
 - **Assigning words:** words go to chunks by where they start, with one shared threshold 100 ms before each boundary. Splitting at the gap nearest each boundary instead repeated a word at 3 seams in 40 real dictations, because a word's end can stretch to punctuation emitted after it.
 - **Checking for lost words:** if a chunk's decode keeps no words where the previews heard some, key-up uses the previews' path, or the original recording, instead.
-- **At key-up:** only the open chunk is decoded the same way, then joined to the closed ones.
+- **At key-up:** the open chunk is decoded at once from the audio received so far, for AI cleanup to start on while capture closes (`releaseText`). Once capture has stopped, the open chunk is decoded again with all of its audio and joined to the closed ones; that is the final transcript.
 - **Falling back to the original recording:** happens when a chunk can't close between words before it fills a window, when audio went missing, or when a decode fails.
 
 `goblin live-replay <recordings> --texts` replays recordings at speaking pace through this path and reports key-up timings next to a whole-recording decode. On 40 real dictations (1.4–85 s, 16 minutes in all, 30 October 2026, M4 Pro):

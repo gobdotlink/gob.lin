@@ -94,8 +94,14 @@ public final class AudioCaptureService {
         guard activeSessionID == sessionID, terminalTask == nil, let processor else { throw AudioCaptureFailure(.staleSession) }
         let cutoff = mach_absolute_time()
         let task = Task {
+            let start = ContinuousClock.now
             await processor.seal(atHostTime: cutoff)
-            return try await processor.finish(sessionID: sessionID, cancel: false)
+            let sealed = ContinuousClock.now
+            var result = try await processor.finish(sessionID: sessionID, cancel: false)
+            let milliseconds = { (duration: Duration) in Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15 }
+            result?.stopTiming = CaptureStopTiming(seal: milliseconds(start.duration(to: sealed)), file: milliseconds(sealed.duration(to: .now)),
+                                                   buffer: processor.bufferDuration * 1000)
+            return result
         }
         terminalTask = task
         defer { finishOwnership() }

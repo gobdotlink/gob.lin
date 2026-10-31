@@ -181,6 +181,9 @@ final class CaptureProcessor: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// The last input buffer's length, in seconds.
+    var bufferDuration: Double { lock.withLock { inputBufferDuration } }
+
     func seal(atHostTime cutoff: UInt64) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { reply in

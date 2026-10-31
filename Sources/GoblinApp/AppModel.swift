@@ -332,10 +332,15 @@ final class AppModel: ObservableObject {
         if rewriting { diagnostics.developmentLog.record(.rewriteStarted, area: .rewrite, operation: operation) }
         let result = await processor.process(raw, dictionaryEntries: inputs.entries.active(in: scope), tone: tone,
                                              rewriteSettings: settings, apiKey: key, context: context)
-        completed.failure = result.warning
+        // A draft's cleanup cancelled for the final transcript is not a provider failure.
+        let cancelled = Task.isCancelled
+        completed.failure = cancelled ? nil : result.warning
         completed.timings = result.timings
-        completed.succeeded = result.warning == nil
-        if rewriting { diagnostics.developmentLog.record(.rewriteFinished, area: .rewrite, severity: result.warning == nil ? .info : .warning, operation: operation, details: completed) }
+        completed.succeeded = cancelled ? nil : result.warning == nil
+        if rewriting {
+            diagnostics.developmentLog.record(cancelled ? .rewriteCancelled : .rewriteFinished, area: .rewrite,
+                                              severity: cancelled || result.warning == nil ? .info : .warning, operation: operation, details: completed)
+        }
         if reportsOutcome { reportProcessingOutcome(result) }
         return result
     }
@@ -557,6 +562,18 @@ final class AppModel: ObservableObject {
             if !counted { hotkeys.cancelRecording() }
         }
         if let overlayID = active.session.overlayID { overlay.update(.transcribing, session: overlayID) }
+        // The audio received so far is decoded at once and its AI cleanup starts while capture closes, instead of after.
+        // People stop talking before they let go, so it usually has the final transcript's words; see `completeDictation`.
+        let settings = RewriteSettingsStore.load(defaults: defaults)
+        let speculates = servicesEnabled && settings.enabled && settings.cleanup != .none
+        let session = active.session
+        active.releaseCleanup = Task { @MainActor [weak self] in
+            guard speculates, let text = await active.live.releaseText(), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let self, !session.cancelled else { return nil }
+            return DraftCleanup(text: text, inputs: self.processingInputs, task: Task { @MainActor [weak self] in
+                await self?.cleanup(text, session: session, reportsOutcome: false)
+            })
+        }
         active.stopTask = Task { @MainActor [weak self] in
             await active.live.stopPreview()
             await active.startTask?.value
@@ -574,7 +591,11 @@ final class AppModel: ObservableObject {
                 await active.audioReduction?.finish()
                 throw error
             }
-            self.diagnostics.developmentLog.record(.captureStopped, area: .microphone, operation: active.session.id)
+            var stopped = DevelopmentDetails()
+            stopped.sealMilliseconds = audio.stopTiming?.seal
+            stopped.fileMilliseconds = audio.stopTiming?.file
+            stopped.bufferMilliseconds = audio.stopTiming?.buffer
+            self.diagnostics.developmentLog.record(.captureStopped, area: .microphone, operation: active.session.id, details: stopped)
             active.audioReduction?.end()
             active.sounds?.end(sessionID: active.session.id, playStop: !active.session.cancelled)
             active.audio = audio
@@ -619,7 +640,10 @@ final class AppModel: ObservableObject {
                         await self?.cleanup(text, session: session, reportsOutcome: false)
                     }))
                 }
-                startDraftCleanup(await active.live.speculativeText())
+                if let release = await active.releaseCleanup?.value {
+                    if drafts.contains(where: { DraftTranscriptMatch(draft: $0.text, final: release.text) == .same }) { release.task.cancel() }
+                    else { drafts.append(release) }
+                } else { startDraftCleanup(await active.live.speculativeText()) }
                 // The clipboard is saved while the text is prepared, so pasting only rereads it if it changed.
                 self.insertion.prepareClipboard()
                 let ending = try await active.live.finishWithDraft()
@@ -664,6 +688,9 @@ final class AppModel: ObservableObject {
             await active.live.cancel()
             active.earlyCleanupTask?.cancel()
             active.earlyCleanup?.task.cancel()
+            // A take that ended before its operation took the key-up cleanup leaves it to cancel here.
+            active.releaseCleanup?.cancel()
+            if let release = await active.releaseCleanup?.value { release.task.cancel() }
             await active.textTask?.value
             _ = try? await active.readiness.value
             if active.session.cancelled, !active.session.audioOwnedByHistory, let audio = active.audio {

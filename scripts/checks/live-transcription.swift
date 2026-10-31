@@ -239,6 +239,24 @@ struct LiveTranscriptionCheck {
         verify(chunked.chunks >= 1 && chunked.chunking, "Long speech without pauses did not close a chunk between words")
         verify(await gappedRuntime.largestWindow <= 240_000, "A chunk decode exceeded one window")
 
+        // At key-up the audio received so far decodes as the final transcript will, so cleanup can start while capture
+        // closes; with nothing said after key-up, both have the same words.
+        let keyUpRuntime = GappedWordsPCM()
+        let keyUpLive = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { keyUpRuntime })
+        var keyUpPosition: Int64 = 0
+        for word in 1...6 {
+            try await feed(Float(word) / 100, seconds: 0.4, live: keyUpLive, position: &keyUpPosition)
+            try await feed(0, seconds: 0.2, live: keyUpLive, position: &keyUpPosition)
+        }
+        await keyUpLive.stopPreview()
+        let keyUpText = await keyUpLive.releaseText()
+        try await feed(0, seconds: 0.1, live: keyUpLive, position: &keyUpPosition)
+        let keyUpFinal = try await keyUpLive.finish()
+        verify(keyUpText != nil && keyUpText == keyUpFinal?.text, "The key-up decode differed from the final transcript of the same words")
+        let batchKeyUp = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { keyUpRuntime }, previewAvailable: false)
+        await batchKeyUp.append([Float](repeating: 0.01, count: 16_000), at: 0)
+        verify(await batchKeyUp.releaseText() == nil, "A take without live chunks drafted at key-up")
+
         // Each decode times words on its own 80 ms grid, so the same word's start differs between decodes; a short word
         // beside a boundary must still land in exactly one chunk.
         let jitteredRuntime = GappedWordsPCM(frame: 1_280)

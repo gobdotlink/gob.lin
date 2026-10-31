@@ -27,7 +27,7 @@ public enum DevelopmentSeverity: String { case info, warning, error }
 public enum DevelopmentEventName: String {
     case appStarted, shutdownRequested, appStopped, failure, recovered, timings
     case permissionSnapshot, permissionRetry, secureInputChanged, hotkeyStarting, hotkeyReady, hotkeyStopped, hotkeyBegin, hotkeyFinish, hotkeyCancel
-    case processingStarted, processingFinished, rewriteStarted, rewriteFinished, insertionStarted, insertionFinished
+    case processingStarted, processingFinished, rewriteStarted, rewriteFinished, rewriteCancelled, insertionStarted, insertionFinished
     case previewRequested, devicesEnumerated, deviceEnumerationFailed, deviceSelection, deviceResolved, deviceFallback, inputFormat
     case tapInstalling, tapInstalled, engineStarting, engineStarted, firstBuffer, configurationChanged
     case previewFailed, previewStopping, previewStopped
@@ -74,6 +74,10 @@ public struct DevelopmentDetails {
     public var nearbyCharacters: Int?
     public var nearbyElements: Int?
     public var nearbyMilliseconds: Double?
+    /// Closing capture at key-up: waiting for the last input buffer, finishing the file, and the buffer's length.
+    public var sealMilliseconds: Double?
+    public var fileMilliseconds: Double?
+    public var bufferMilliseconds: Double?
     public init(reason: DevelopmentReason? = nil) { self.reason = reason }
 
     fileprivate var fields: [String: Any] {
@@ -83,6 +87,9 @@ public struct DevelopmentDetails {
         fields["nearbyCharacters"] = nearbyCharacters
         fields["nearbyElements"] = nearbyElements
         if let nearbyMilliseconds, nearbyMilliseconds.isFinite { fields["nearbyMilliseconds"] = nearbyMilliseconds.rounded() }
+        for (name, value) in [("sealMilliseconds", sealMilliseconds), ("fileMilliseconds", fileMilliseconds), ("bufferMilliseconds", bufferMilliseconds)] {
+            if let value, value.isFinite { fields[name] = (value * 10).rounded() / 10 }
+        }
         fields["selectedDevice"] = selectedDevice?.token
         fields["resolvedDevice"] = resolvedDevice?.token
         fields["deviceCount"] = deviceCount
