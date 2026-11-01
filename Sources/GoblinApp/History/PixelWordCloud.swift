@@ -15,6 +15,8 @@ struct PixelWordCloud: View {
     @Environment(\.colorScheme) private var scheme
     @State private var width: CGFloat = 0
     @State private var layout: CloudLayout?
+    /// What the current layout was packed from.
+    @State private var drawn: Request?
     @State private var hover: Hover?
 
     private struct Request: Equatable { var words: [InsightWord]; var columns: Int; var seed: UInt64 }
@@ -59,7 +61,8 @@ struct PixelWordCloud: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: CloudLayout.height, maxHeight: CloudLayout.height, alignment: .topLeading)
+        // A zero minimum, so a picture packed for a wider row never holds the row open.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: CloudLayout.height, maxHeight: CloudLayout.height, alignment: .topLeading)
         .contentShape(Rectangle())
         .onContinuousHover { phase in
             guard case .active(let point) = phase, let index = layout?.word(at: point) else { hover = nil; return }
@@ -69,8 +72,15 @@ struct PixelWordCloud: View {
         .task(id: Request(words: words, columns: Int(width / cell), seed: seed)) {
             let columns = Int(width / cell), words = words, seed = seed
             guard columns > 60 else { return }
+            // A classic scroll bar showing or hiding moves the width by 15 pt. Packing is chaotic, so re-packing for
+            // that would redraw a different cloud; keep the picture while it still fits with at most 16 pt to spare.
+            if let drawn, drawn.words == words, drawn.seed == seed, (0...8).contains(columns - drawn.columns) { return }
             hover = nil
-            layout = await Task.detached(priority: .userInitiated) { CloudLayout(words: words, columns: columns, seed: seed) }.value
+            let next = await Task.detached(priority: .userInitiated) { CloudLayout(words: words, columns: columns, seed: seed) }.value
+            // Detached work outlives its cancelled task; a layout for an old width must not replace a newer one.
+            guard !Task.isCancelled else { return }
+            layout = next
+            drawn = Request(words: words, columns: columns, seed: seed)
         }
     }
 

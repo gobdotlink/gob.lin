@@ -303,7 +303,8 @@ struct InsightsView: View {
 
     @MainActor private func loadDetails() async {
         let requestedPeriod = period
-        details = nil
+        // Keep the current details on screen while they reload. Blanking them on every dictation collapsed the page,
+        // which hid a classic scroll bar and changed the width the cloud is packed to.
         detailsError = nil
         do {
             guard let store = history.store else { throw HistoryError.database("History is unavailable, so there's nothing to count yet.") }
