@@ -40,6 +40,8 @@ final class AppModel: ObservableObject {
     private var subscriptions: Set<AnyCancellable> = []
     private var insertionTask: Task<Void, Never>?
     private let processingQueue = DictationProcessingQueue()
+    /// Counts insertions, so a take can tell whether an earlier one pasted after it read its field.
+    private var insertions = 0
     private var dictationSessions: [UUID: DictationSession] = [:]
     private let capture = AudioCaptureService.shared
     private let captureDirectory: URL?
@@ -640,7 +642,20 @@ final class AppModel: ObservableObject {
                         await self?.cleanup(text, session: session, reportsOutcome: false)
                     }))
                 }
-                if let release = await active.releaseCleanup?.value {
+                var release = await active.releaseCleanup?.value
+                // An earlier take that pasted after this one read its field leaves that reading stale, and every
+                // cleanup built on it, as does moving to another field when text goes to the current one: read the
+                // field again now that it's this take's turn.
+                let moved = session.destination == .currentField && session.contextField?.isStillFocused() == false
+                if let read = session.contextInsertions, read != self.insertions || moved {
+                    for draft in drafts + [release].compactMap({ $0 }) { draft.task.cancel() }
+                    drafts.removeAll()
+                    release = nil
+                    session.completionContext = nil
+                    session.contextInsertions = nil
+                    session.contextField = nil
+                }
+                if let release {
                     if drafts.contains(where: { DraftTranscriptMatch(draft: $0.text, final: release.text) == .same }) { release.task.cancel() }
                     else { drafts.append(release) }
                 } else { startDraftCleanup(await active.live.speculativeText()) }
@@ -896,6 +911,7 @@ final class AppModel: ObservableObject {
                     dictionary.offerTerms(from: project)
                 }
             }
+            session.contextInsertions = insertions
             let context = await session.currentContext()
             var read = DevelopmentDetails()
             read.succeeded = context != nil
@@ -967,6 +983,7 @@ final class AppModel: ObservableObject {
                         self?.diagnostics.developmentLog.record(.pasteSent, area: .insertion, operation: session.id)
                         showChip()
                     })
+                    insertions += 1
                     insertionAnchor = insertion.takeLastAnchor()
                     var details = DevelopmentDetails()
                     if case .failure(let failure) = insertion.outcome {

@@ -20,6 +20,10 @@ final class DictationSession {
     var dictionaryProject: DetectedProject?
     /// The project and landing-field context, settled once per take so a draft cleanup and the final one share them.
     var completionContext: Task<DictationContext?, Never>?
+    /// How many insertions had happened when that context read the field, or nil before it has.
+    var contextInsertions: Int?
+    /// The field that context was read from, or nil if none was.
+    var contextField: FocusedText?
     var projectDetection: Task<DetectedProject?, Never>?
     var dictionaryContext: DictionaryScope { DictionaryScope(application: dictionaryScope, project: dictionaryProject?.name) }
 
@@ -63,7 +67,8 @@ final class DictationSession {
     /// It stays on this Mac unless cleanup is allowed to send it.
     func currentContext() async -> DictationContext? {
         if let reading = nearbyReading { nearby = await Self.value(of: reading, within: .milliseconds(150)) }
-        guard let field = landingField() else { return nil }
+        contextField = landingField()
+        guard let field = contextField else { return nil }
         // Typing into the focused field picks it after cleanup, so text that may reach the provider must come from the
         // field dictation started in, which the nearby read recorded.
         if destination == .currentField, nearbyReading != nil, !(nearby.map { CFEqual($0.field, field.element) } ?? false) { return nil }

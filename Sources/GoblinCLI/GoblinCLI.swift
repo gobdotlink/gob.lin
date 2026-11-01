@@ -87,7 +87,8 @@ struct GoblinCLI {
                 for option in ["--dictionary", "--app", "--project"] {
                     if let index = replayArguments.firstIndex(of: option) { replayArguments.removeSubrange(index...min(index + 1, replayArguments.count - 1)) }
                 }
-                try await LiveReplay.run(replayArguments, engine: runtime.engine, options: options)
+                try await LiveReplay.run(replayArguments, engine: runtime.engine, options: options,
+                                         previewAvailable: model.capabilities.livePreview)
             } else if arguments.first == "benchmark" {
                 try await SpeechBenchmark.run(Array(arguments.dropFirst()), engine: runtime.engine, options: options)
             } else {

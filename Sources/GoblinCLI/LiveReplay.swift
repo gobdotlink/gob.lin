@@ -9,7 +9,8 @@ import GoblinEngines
 enum LiveReplay {
     static let usage = "Usage: goblin live-replay <audio-file>... [--speed <x>] [--frame-ms <ms>] [--in-flight-ms <ms>] [--stop-ms <ms>] [--texts] [--decode-timing]"
 
-    static func run(_ arguments: [String], engine: any PCMSpeechEngine, options: RecognitionOptions) async throws {
+    static func run(_ arguments: [String], engine: any PCMSpeechEngine, options: RecognitionOptions,
+                    previewAvailable: Bool) async throws {
         var files: [URL] = []
         // At key-up the last `inFlight` ms of audio are still on their way, and capture takes `stop` ms to close.
         var speed = 1.0, frameMilliseconds = 64.0, inFlightMilliseconds = 100.0, stopMilliseconds = 120.0, texts = false, decodeTiming = false
@@ -60,7 +61,8 @@ enum LiveReplay {
         let recovery = RecordedAudioPipeline(engine: engine, options: options)
         for file in files {
             let samples = try AudioConverter().resampleAudioFile(file)
-            let live = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { engine }, options: options)
+            let live = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { engine }, options: options,
+                                      previewAvailable: previewAvailable)
             let early = Task { () -> (text: String, at: ContinuousClock.Instant)? in
                 var latest: (text: String, at: ContinuousClock.Instant)?
                 for await text in live.settledTexts { latest = (text, ContinuousClock.now) }

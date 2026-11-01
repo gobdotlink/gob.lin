@@ -278,7 +278,7 @@ final class TextInsertionService: ObservableObject {
                     lastAnchor = anchor(target: target, expected: value, selection: NSRange(location: range.location, length: 0),
                                         text: text, quirks: quirks)
                 }
-                finishVerifiedPaste(restoring: snapshot)
+                finishVerifiedPaste(restoring: snapshot, ownedCount: ownedCount)
                 return
             }
             try? await Task.sleep(for: .milliseconds(50))
@@ -301,7 +301,7 @@ final class TextInsertionService: ObservableObject {
                                     text: text, quirks: quirks)
                 // The field held nothing else, so it was empty; emptied again, it reads as a line break.
                 if range.length == (value as NSString).length { lastAnchor?.normalizesEmptyLineBreak = quirks.emptyEditorLineBreak }
-                finishVerifiedPaste(restoring: snapshot)
+                finishVerifiedPaste(restoring: snapshot, ownedCount: ownedCount)
                 return true
             }
             try? await Task.sleep(for: .milliseconds(50))
@@ -309,7 +309,12 @@ final class TextInsertionService: ObservableObject {
         return false
     }
 
-    private func finishVerifiedPaste(restoring snapshot: ClipboardSnapshot) {
+    private func finishVerifiedPaste(restoring snapshot: ClipboardSnapshot, ownedCount: Int) {
+        // Confirming the paste reads the target, which can take a while; anything copied meanwhile is newer than the snapshot.
+        guard pasteboard.changeCount == ownedCount else {
+            setStatus("Paste verified in the focused app · another app changed the clipboard, so it was left alone", outcome: .success)
+            return
+        }
         if snapshot.restore(to: pasteboard) {
             recovery = nil
             hasRecoveryClipboard = false
