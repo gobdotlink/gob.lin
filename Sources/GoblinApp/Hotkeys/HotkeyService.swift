@@ -212,7 +212,7 @@ final class HotkeyService: ObservableObject {
         recording = state.recording
         processingCount = state.processingCount
         configureTap()
-        setCarbonEscape(recording != nil && secureInput && shortcut.keyCode != nil)
+        setCarbonEscape(recording != nil && secureInput)
         updateStatus()
         for action in actions {
             if let onAction { onAction(action) }
@@ -224,19 +224,19 @@ final class HotkeyService: ObservableObject {
         let current = IsSecureEventInputEnabled()
         guard current != secureInput else { return }
         secureInput = current
-        if current && (shortcut.keyCode == nil || (!carbonPressed && state.recording != .handsFree)) { suspendRecording() }
+        if current && (!shortcut.worksUnderSecureInput || (!carbonPressed && state.recording != .handsFree)) { suspendRecording() }
         configureTap()
-        setCarbonEscape(recording != nil && current && shortcut.keyCode != nil)
+        setCarbonEscape(recording != nil && current)
         updateStatus()
     }
 
     private func configureTap() {
-        tap?.configure(recording: recording != nil, suspended: recorderActive || (secureInput && shortcut.keyCode == nil), keyedFallback: secureInput)
+        tap?.configure(recording: recording != nil, suspended: recorderActive || (secureInput && !shortcut.worksUnderSecureInput), keyedFallback: secureInput)
     }
 
     private func updateStatus() {
         if secureInput, let carbonIssue { status = carbonIssue }
-        else if secureInput { status = shortcut.keyCode == nil ? "Secure Input: choose a keyed shortcut" : "Secure Input: using keyed fallback" }
+        else if secureInput { status = !shortcut.worksUnderSecureInput ? "Secure Input: talk key paused" : "Secure Input: using keyed fallback" }
         else if recording != nil { status = "Recording" }
         else if processingCount > 0 { status = "Processing \(processingCount) dictation(s)" }
         else if tap != nil { status = engineConnected ? "Shortcut ready" : "Shortcut ready · prepare a speech model" }
@@ -278,7 +278,7 @@ final class HotkeyService: ObservableObject {
     }
 
     private func registerCarbonShortcut() {
-        guard monitorSystem, carbonShortcut == nil, !recorderActive, let code = shortcut.keyCode,
+        guard monitorSystem, carbonShortcut == nil, !recorderActive, shortcut.worksUnderSecureInput, let code = shortcut.keyCode,
               permissions.snapshot.accessibility else { return }
         let id = EventHotKeyID(signature: 0x474F424C, id: 1)
         let result = RegisterEventHotKey(UInt32(code), shortcut.carbonModifiers, id, GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &carbonShortcut)
@@ -291,7 +291,9 @@ final class HotkeyService: ObservableObject {
         if let carbonShortcut { UnregisterEventHotKey(carbonShortcut); self.carbonShortcut = nil }
     }
 
-    private func setCarbonEscape(_ enabled: Bool) {
+    private func setCarbonEscape(_ wanted: Bool) {
+        // A keyed shortcut without fn is what Carbon delivers; an Esc talk key keeps Esc for itself.
+        let enabled = wanted && shortcut.worksUnderSecureInput && shortcut.keyCode != 53
         if !enabled, let carbonEscape { UnregisterEventHotKey(carbonEscape); self.carbonEscape = nil }
         if !enabled, let carbonModifiedEscape { UnregisterEventHotKey(carbonModifiedEscape); self.carbonModifiedEscape = nil }
         if enabled, carbonEscape == nil {

@@ -183,7 +183,9 @@ private struct GeneralSettingsView: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize().tint(GoblinBrand.moss)
             }
-            LabeledContent("Cancel a take") { KeyCap("esc") }
+            LabeledContent("Cancel a take") {
+                if hotkeys.shortcut.keyCode == 53 { Text("× on the overlay").foregroundStyle(.secondary) } else { KeyCap("esc") }
+            }
             StatusRow(keyLight, Text(keyStatus))
         } header: { CapsHeader("Talk key") }
         Section {

@@ -129,7 +129,8 @@ private struct OverlayBubble: View {
             HStack(spacing: 10) {
                 Meter(levels: model.levels, idle: true)
                 Text("Warming up the mic…").font(.system(size: 14))
-                DarkKey("esc").padding(.leading, 2)
+                if model.talkKey.keyCode != 53 { DarkKey("esc").padding(.leading, 2) }
+                else { cancelButton }
             }
         case .listening:
             VStack(alignment: .leading, spacing: 5) {
@@ -150,10 +151,7 @@ private struct OverlayBubble: View {
                         .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).fixedSize()
                         .accessibilityElement(children: .ignore).accessibilityLabel("Tap \(model.talkKey.title) to finish")
                     }
-                    Button(action: model.cancel) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }
-                        .buttonStyle(OverlayIconButtonStyle())
-                        .accessibilityLabel("Cancel dictation")
-                        .help("Cancel dictation (Esc)")
+                    cancelButton
                 }
                 .frame(height: 24)
                 if let notice = model.microphoneNotice {
@@ -261,11 +259,18 @@ private struct OverlayBubble: View {
         }
     }
 
+    private var cancelButton: some View {
+        Button(action: model.cancel) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }
+            .buttonStyle(OverlayIconButtonStyle())
+            .accessibilityLabel("Cancel dictation")
+            .help(model.talkKey.keyCode == 53 ? "Cancel dictation" : "Cancel dictation (Esc)")
+    }
+
     /// One cap per key, as the popover draws the talk key: fn, Right Option, or ⌥ then Space.
     private var talkKeys: [String] {
         let shortcut = model.talkKey
-        if shortcut.modifier == .fn { return ["fn"] }
-        return shortcut.keyCode == nil ? [shortcut.keyLabel] : shortcut.keys.map(\.symbol)
+        if shortcut == .fn { return ["fn"] }
+        return shortcut.keyCode == nil && shortcut.keys.count == 1 ? [shortcut.keyLabel] : shortcut.keys.map(\.symbol)
     }
 
     private var audioDetail: String {

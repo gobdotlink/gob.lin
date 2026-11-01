@@ -4,5 +4,5 @@ cd "$(dirname "$0")/.."
 check_directory=$(mktemp -d)
 trap 'rm -rf "$check_directory"' EXIT
 cp scripts/checks/hotkeys.swift "$check_directory/main.swift"
-swiftc Sources/GoblinCore/HotkeyStateMachine.swift "$check_directory/main.swift" -o "$check_directory/check"
+swiftc Sources/GoblinCore/HotkeyStateMachine.swift Sources/GoblinApp/Hotkeys/HotkeyShortcut.swift scripts/checks/shortcuts.swift "$check_directory/main.swift" -o "$check_directory/check"
 "$check_directory/check"

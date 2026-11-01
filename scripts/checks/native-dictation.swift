@@ -11,7 +11,7 @@ struct NativeDictationCheck {
     @MainActor private static var targetFocusLost = false
     private static let checkShortcut = HotkeyShortcut(keyCode: 50,
         modifiers: CGEventFlags.maskControl.union(.maskAlternate).union(.maskShift).rawValue,
-        modifier: nil, keyLabel: "Grave")
+        keyLabel: "Grave")
     @MainActor static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)

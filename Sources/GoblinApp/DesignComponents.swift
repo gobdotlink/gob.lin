@@ -135,7 +135,7 @@ struct TalkKeyCaps: View {
         let keys = shortcut.keys
         HStack(spacing: 6) {
             ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
-                BigKeyCap(symbol: key.symbol, word: key.word, globe: shortcut.modifier == .fn, light: index == 0 ? light : nil)
+                BigKeyCap(symbol: key.symbol, word: key.word, globe: key.symbol == "fn", light: index == 0 ? light : nil)
             }
         }
         .accessibilityElement(children: .ignore).accessibilityLabel(shortcut.title)

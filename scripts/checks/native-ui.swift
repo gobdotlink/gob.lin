@@ -15,7 +15,7 @@ import SwiftUI
 @MainActor enum Probe {
     nonisolated static let results = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("results", isDirectory: true)
     static let shortcut = HotkeyShortcut(keyCode: 50, modifiers: CGEventFlags.maskControl.union(.maskAlternate).union(.maskShift).rawValue,
-                                         modifier: nil, keyLabel: "Grave")
+                                         keyLabel: "Grave")
     static var model: AppModel!
     static var suite = ""
 }

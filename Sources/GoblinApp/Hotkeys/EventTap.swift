@@ -91,27 +91,25 @@ final class HotkeyEventTap: @unchecked Sendable {
         guard !stopped, !suspended else { return Unmanaged.passUnretained(event) }
         if event.getIntegerValueField(.eventSourceUserData) == 0x474F424C { return Unmanaged.passUnretained(event) }
         let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        // The talk key goes first, so a deliberately chosen Esc starts and stops dictation instead of cancelling it.
+        if code == shortcut.keyCode, !keyedFallback {
+            if type == .keyDown, shortcut.matchesKey(code, flags: event.flags.rawValue) {
+                if !held, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { held = true; input(.press) }
+                return nil
+            }
+            if type == .keyUp, held { held = false; input(.release); return nil }
+        }
         if code == 53, recording {
             if type == .keyDown { input(.escape) }
             return nil
         }
-        if shortcut.keyCode != nil, keyedFallback { return Unmanaged.passUnretained(event) }
-        if let registered = shortcut.keyCode {
-            if code == registered {
-                if type == .keyDown, shortcut.matches(flags: event.flags) {
-                    if !held, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { held = true; input(.press) }
-                    return nil
-                }
-                if type == .keyUp, held { held = false; input(.release); return nil }
-            }
-            return Unmanaged.passUnretained(event)
-        }
+        if shortcut.keyCode != nil { return Unmanaged.passUnretained(event) }
         if type == .flagsChanged {
-            let down = shortcut.modifierIsDown(flags: event.flags)
-            if down && !held, shortcut.isPrimaryModifierKey(code) { held = true; input(.press) }
-            if !down && held {
-                if shortcut.primaryModifierIsDown(flags: event.flags) { input(.chord) }
-                else { held = false; input(.release) }
+            switch shortcut.modifierChange(code: code, flags: event.flags.rawValue, held: held) {
+            case .press: held = true; input(.press)
+            case .release: held = false; input(.release)
+            case .chord: input(.chord)
+            case nil: break
             }
             // Modifier events keep flowing so unrelated combinations keep their native behavior.
             return Unmanaged.passUnretained(event)

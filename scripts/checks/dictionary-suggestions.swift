@@ -17,7 +17,7 @@ struct DictionarySuggestionsCheck {
     }
 
     private static let checkShortcut = HotkeyShortcut(keyCode: 50,
-        modifiers: CGEventFlags.maskControl.union(.maskAlternate).union(.maskShift).rawValue, modifier: nil, keyLabel: "Grave")
+        modifiers: CGEventFlags.maskControl.union(.maskAlternate).union(.maskShift).rawValue, keyLabel: "Grave")
 
     @MainActor static func main() {
         let app = NSApplication.shared
