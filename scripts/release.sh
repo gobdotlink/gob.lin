@@ -80,6 +80,7 @@ git tag -a "v$version" -m "Release v$version"
 git push --atomic origin main "v$version"
 # A draft keeps incomplete asset uploads out of the app's update channel.
 gh release create "v$version" "$archive" "$archive.sha256" --repo "$repository" \
-    --verify-tag --target "$revision" --title "v$version" --generate-notes --draft
+    --verify-tag --target "$revision" --title "v$version" --generate-notes --draft \
+    --notes "New to gob.lin? Follow the [install steps](https://github.com/akalikin/gob.lin#install): this build is not notarized, so the first launch needs **Open Anyway**."
 gh release edit "v$version" --repo "$repository" --draft=false --latest
 gh release view "v$version" --repo "$repository" --json url --jq .url

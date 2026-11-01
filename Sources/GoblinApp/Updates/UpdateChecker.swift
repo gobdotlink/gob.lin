@@ -4,7 +4,7 @@ import GoblinCore
 
 enum UpdateFailure: Error, LocalizedError {
     case authentication, noReleases, http(Int), invalidRelease, invalidArchive, signature, incompatible
-    case notPackaged, busy, command, checksum
+    case notPackaged, notInstalled, busy, command, checksum
 
     var errorDescription: String? {
         switch self {
@@ -15,7 +15,8 @@ enum UpdateFailure: Error, LocalizedError {
         case .invalidArchive: "The update archive is invalid. The installed app has not changed."
         case .signature: "The update does not match this app’s signing identity. Install a trusted release manually when changing certificates."
         case .incompatible: "This release requires a newer macOS version or a different Mac architecture."
-        case .notPackaged: "Run a certificate-signed copy of gob.lin from a writable Applications folder to install updates."
+        case .notPackaged: "Run a certificate-signed copy of gob.lin to install updates."
+        case .notInstalled: "I can’t update myself from this folder. Move gob.lin to Applications, open it from there, and try again."
         case .busy: "Finish dictation, retry unsaved history, and restore any recovery clipboard before updating."
         case .command: "The update could not be prepared. The installed app has not changed."
         case .checksum: "The update download failed its integrity check. Try again."

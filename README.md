@@ -2,6 +2,24 @@
 
 A native macOS dictation app with a menu bar interface, configurable shortcuts, and local transcript history.
 
+## Install
+
+gob.lin needs a Mac with Apple silicon and macOS 26 or later.
+
+1. Download `gob.lin-VERSION.zip` from the [latest release](https://github.com/akalikin/gob.lin/releases/latest) and open it.
+2. Drag `gob.lin.app` into **Applications** before opening it. A copy opened from
+   Downloads cannot update itself.
+3. Open gob.lin from Applications. Builds are not notarized yet, so macOS refuses
+   to open it the first time. Close the message, open **System Settings → Privacy &
+   Security**, scroll to **Security**, and choose **Open Anyway**. You only do this once.
+4. gob.lin lives in the menu bar, with no Dock icon. Its first run asks for
+   microphone and Accessibility access.
+
+gob.lin checks for updates at launch and every hour, and installs one when you
+choose **Install & relaunch**. Updates keep your settings, history and permissions.
+When releases move to notarized Developer ID builds, you will need to download
+and install that version once by hand, and grant the permissions again.
+
 ## Project
 
 The roadmap and acceptance criteria live in [gob.lin v0.1 — minimal app on Linear](https://linear.app/goblink/project/goblin-v01-minimal-app-5d9bf4e3bece).

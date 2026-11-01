@@ -9,7 +9,7 @@ enum UpdateInstaller {
         guard bundle.pathExtension == "app", !bundle.pathComponents.contains("AppTranslocation"),
               try bundle.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true,
               manager.isWritableFile(atPath: bundle.path),
-              manager.isWritableFile(atPath: bundle.deletingLastPathComponent().path) else { throw UpdateFailure.notPackaged }
+              manager.isWritableFile(atPath: bundle.deletingLastPathComponent().path) else { throw UpdateFailure.notInstalled }
         let directory = bundle.deletingLastPathComponent().appendingPathComponent(".goblin-update-\(UUID().uuidString)")
         try manager.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         return directory
