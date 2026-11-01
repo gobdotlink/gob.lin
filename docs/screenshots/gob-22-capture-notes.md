@@ -11,9 +11,9 @@ All ten Settings sections were visually inspected. Source bindings were checked 
 | General | [Shortcuts, feedback sounds, trailing space, permission button](gob-22-settings-general.png) | Shared HotkeyService/TextInsertionService; isolated defaultAppStorage |
 | Audio | [System-default picker, level meter, preview disabled pending permission](gob-22-settings-audio.png) | Shared AudioPreviewModel and PermissionModel; `audio.inputDeviceUID` |
 | Model | [Candidate visible and picker disabled while benchmark is pending](gob-22-settings-model.png) | Production benchmark placeholder; no adapter supplied |
-| Dictionary | [Three rows, aliases, Edit/Delete, Add/Import, footer](gob-22-settings-dictionary.png) | Shared DictionaryModel loaded from temporary versioned JSON |
+| Dictionary | Three rows, aliases, Edit/Delete, Add/Import, footer | Shared DictionaryModel loaded from temporary versioned JSON |
 | Post-processing | [Disabled cleanup, example endpoint/model, empty key, Light, Save](gob-22-settings-rewrite.png) | RewriteSettingsStore using injected defaults; inspectKeychain=false |
-| Tone | [Three choices and previews, Formal selected](gob-22-settings-tone.png) | DictationTone.preferenceKey in isolated defaultAppStorage |
+| Tone | Three choices and previews, Formal selected | DictationTone.preferenceKey in isolated defaultAppStorage |
 | History | [Keep latest 500, 30 days, deletion explanation, Apply](gob-22-settings-history.png) | Shared HistoryModel.retention initialized from isolated JSON preferences |
 | Overlay | [Bottom position, complete explanation and Preview control](gob-22-settings-overlay.png) | `overlayPosition` in isolated defaultAppStorage; shared controller |
 | Diagnostics | [Pending-model warning, environment, stage timings, recent error, Copy](gob-22-settings-diagnostics.png) | Same shared DiagnosticsModel used by the menu; synthetic 180 ms ASR / 12 ms rewrite |
