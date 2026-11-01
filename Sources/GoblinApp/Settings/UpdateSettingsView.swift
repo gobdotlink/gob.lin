@@ -23,11 +23,11 @@ struct UpdateSettingsView: View {
                         }
                     } label: {
                         Text("GitHub token")
-                        Text("For private releases: sign in with gh, or save a token with Contents read access to akalikin/gob.lin.")
+                        Text("For private releases: sign in with gh, or save a token with Contents read access to gobdotlink/gob.lin.")
                     }
                 }
                 LabeledContent("Release notes") {
-                    Link("Open on GitHub", destination: URL(string: "https://github.com/akalikin/gob.lin/releases")!)
+                    Link("Open on GitHub", destination: URL(string: "https://github.com/gobdotlink/gob.lin/releases")!)
                         .foregroundStyle(GoblinBrand.mossText)
                 }
             } header: { CapsHeader("Updates") }

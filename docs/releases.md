@@ -7,8 +7,8 @@ scheduled publisher, or update service to operate.
 
 ## Install and authenticate
 
-The current repository, `akalikin/gob.lin`, is private. A user needs repository
-access and either `gh auth login --hostname github.com` or a fine-grained GitHub
+Releases of `gobdotlink/gob.lin` need no authentication once the repository is public.
+While it is private, a user needs repository access and either `gh auth login --hostname github.com` or a fine-grained GitHub
 token restricted to this repository with **Contents: read**. Settings → About
 accepts and removes a token; it is saved in gob.lin preferences separately from rewrite keys.
 Existing GitHub CLI authentication takes precedence. The app looks for `gh` in
@@ -18,7 +18,7 @@ Public releases can also be checked without authentication.
 For a first install:
 
 ```sh
-gh release download --repo akalikin/gob.lin --pattern 'gob.lin-*.zip' --dir /tmp/goblin-release
+gh release download --repo gobdotlink/gob.lin --pattern 'gob.lin-*.zip' --dir /tmp/goblin-release
 ditto -xk /tmp/goblin-release/gob.lin-0.1.1.zip /tmp/goblin-release
 # Quit any existing gob.lin first; copy the extracted gob.lin.app to Applications.
 ```
@@ -104,7 +104,7 @@ annotated tag for that exact release commit. If push fails, no release is publis
 resolve the remote state before retrying. Never move an already published tag.
 If an upload fails, the release remains a draft: verify the tag and artifact, upload
 the missing ZIP/checksum with `gh release upload`, then publish that draft with
-`gh release edit vVERSION --repo akalikin/gob.lin --draft=false --latest`.
+`gh release edit vVERSION --repo gobdotlink/gob.lin --draft=false --latest`.
 Do not bump to another version merely to recover an unpublished draft.
 
 ```sh

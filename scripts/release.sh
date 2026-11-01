@@ -7,7 +7,7 @@ if [ "${1:-}" = --help ]; then
 fi
 if [ "$#" -ne 1 ]; then printf 'Usage: scripts/release.sh <major.minor.patch>\n' >&2; exit 2; fi
 version=$1
-repository=akalikin/gob.lin
+repository=gobdotlink/gob.lin
 fail() { printf 'release: %s\n' "$*" >&2; exit 1; }
 command -v gh >/dev/null || fail 'Install GitHub CLI and run gh auth login first.'
 command -v python3 >/dev/null || fail 'Python 3 is required for version validation.'
@@ -81,6 +81,6 @@ git push --atomic origin main "v$version"
 # A draft keeps incomplete asset uploads out of the app's update channel.
 gh release create "v$version" "$archive" "$archive.sha256" --repo "$repository" \
     --verify-tag --target "$revision" --title "v$version" --generate-notes --draft \
-    --notes "New to gob.lin? Follow the [install steps](https://github.com/akalikin/gob.lin#install): this build is not notarized, so the first launch needs **Open Anyway**."
+    --notes "New to gob.lin? Follow the [install steps](https://github.com/gobdotlink/gob.lin#install): this build is not notarized, so the first launch needs **Open Anyway**."
 gh release edit "v$version" --repo "$repository" --draft=false --latest
 gh release view "v$version" --repo "$repository" --json url --jq .url

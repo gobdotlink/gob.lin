@@ -6,7 +6,7 @@ A native macOS dictation app with a menu bar interface, configurable shortcuts, 
 
 gob.lin needs a Mac with Apple silicon and macOS 26 or later.
 
-1. Download `gob.lin-VERSION.zip` from the [latest release](https://github.com/akalikin/gob.lin/releases/latest) and open it.
+1. Download `gob.lin-VERSION.zip` from the [latest release](https://github.com/gobdotlink/gob.lin/releases/latest) and open it.
 2. Drag `gob.lin.app` into **Applications** before opening it. A copy opened from
    Downloads cannot update itself.
 3. Open gob.lin from Applications. Builds are not notarized yet, so macOS refuses

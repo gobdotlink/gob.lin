@@ -8,7 +8,7 @@ enum UpdateFailure: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .authentication: "GitHub access is unavailable. Sign in with gh or save a token with Contents read access to akalikin/gob.lin."
+        case .authentication: "GitHub access is unavailable. Sign in with gh or save a token with Contents read access to gobdotlink/gob.lin."
         case .noReleases: "No release found. If you have repository access, no release may have been published yet."
         case .http(let status): "GitHub returned HTTP \(status). Try again later."
         case .invalidRelease: "The release is missing its versioned gob.lin ZIP."
@@ -48,7 +48,7 @@ final class UpdateChecker: ObservableObject {
     enum Phase: Equatable {
         case idle, checking, upToDate, available(String), downloading, installing, failed(String)
     }
-    static let repository = "akalikin/gob.lin"
+    static let repository = "gobdotlink/gob.lin"
     // ponytail: same preferences compromise as RewriteKeyStore; move back to Keychain with the certificate.
     private static let tokenKey = "updateGitHubToken"
     @Published private(set) var phase: Phase = .idle

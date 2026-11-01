@@ -106,8 +106,8 @@ Unseen clips (fresh + holdout 2): 96 name clips, 96 ordinary clips. Names are un
   so an unknown name next to “lunch” does not let “lunch” become “Luna”. It was the only rule with zero damage on
   every split and glossary, and it recovers 9–12 more names than the 0.90 gate.
 - **Confidence guard** also allows replacing real words that Parakeet heard with confidence below 0.8 (“posters” for
-  Postgres). It finds 7 more names, but some voices heard “manage” below 0.8, so “They manage to…” became “They Panorama
-  to…”. Confidence alone cannot protect ordinary words.
+  Postgres). It finds 7 more names, but some voices heard “manage” below 0.8, so “manage” in “They manage to…” became a
+  product name. Confidence alone cannot protect ordinary words.
 - **FluidAudio main** (unreleased; includes the CTC padding fix `e05ab92`) changed no decisions on these clips but cut
   the 120-term correction from 194 to 147 ms.
 - **Decoder-time bias** adds the Nemotron matcher's bonus to the TDT joint's top-64 candidates (prototype patch outside
@@ -144,7 +144,7 @@ OpenRouter and “Type save” → “TypeSafe Watcher” (from hints).
 
 - Qwen alone, given only the 16 relevant terms, recovered 86/96 names without touching ordinary sentences. Its context
   judgement fixes real-word mishearings the spelling guard must reject, and it refused “lunch” → Luna and “manage” →
-  Panorama.
+  the product name.
 - Qwen cannot hear: it never recovered “Calican”/“Halikan” → Kalikin, which the CTC correction does. The two stages are
   complementary, which is why the combination is best.
 - A long list costs Qwen 12 names (86 → 74) and about 100 ms; the guarded combination loses 7 (92 → 85).
