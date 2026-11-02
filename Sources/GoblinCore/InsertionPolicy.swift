@@ -56,4 +56,16 @@ public enum InsertionPolicy {
         let rest = NSRange(location: found.location + 1, length: value.length - found.location - 1)
         return value.range(of: inserted, options: .literal, range: rest).location == NSNotFound ? found : nil
     }
+
+    /// Whether the app bundle at `url` is built on Electron. Some apps rename Electron's framework (the ChatGPT app,
+    /// which includes Codex, ships it as "Codex Framework"), so its archive and its Info.plist marker count too.
+    public static func isElectronApp(at url: URL) -> Bool {
+        let contents = url.appendingPathComponent("Contents", isDirectory: true)
+        let files = FileManager.default
+        if files.fileExists(atPath: contents.appendingPathComponent("Frameworks/Electron Framework.framework").path)
+            || files.fileExists(atPath: contents.appendingPathComponent("Resources/app.asar").path) { return true }
+        guard let data = try? Data(contentsOf: contents.appendingPathComponent("Info.plist")),
+              let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return false }
+        return info["ElectronAsarIntegrity"] != nil
+    }
 }

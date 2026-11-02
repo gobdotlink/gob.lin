@@ -490,7 +490,7 @@ struct AppInsertionQuirks {
         let pasteOnly: Set<String> = ["com.apple.Terminal", "com.mitchellh.ghostty", "com.google.Chrome",
                                       "company.thebrowser.Browser", "company.thebrowser.dia", "com.t3tools.t3code"]
         // Electron editors report Accessibility text writes as applied without changing the text.
-        let electron = url.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("Contents/Frameworks/Electron Framework.framework").path) } ?? false
+        let electron = url.map(InsertionPolicy.isElectronApp(at:)) ?? false
         let remote: Set<String> = ["com.microsoft.rdc.macos", "com.realvnc.vncviewer", "com.teamviewer.TeamViewer", "com.anydesk.AnyDesk"]
         let credentialManagers: Set<String> = ["com.1password.1password", "com.agilebits.onepassword7",
                                                "com.bitwarden.desktop", "com.dashlane.Dashlane",

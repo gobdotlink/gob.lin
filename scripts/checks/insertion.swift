@@ -32,4 +32,30 @@ expect(canRestore(observed: "transcript hello "), "a caret reported in another t
 expect(!canRestore(observed: "hello transcript! "), "a rewritten paste is not evidence")
 expect(InsertionPolicy.forwardedRange(of: "transcript ", in: "transcript ") != nil, "a page forwards the paste into an empty field")
 expect(InsertionPolicy.forwardedRange(of: "transcript ", in: "transcript transcript ") == nil, "a second copy is not evidence")
+// Electron apps paste instead of trusting an Accessibility write, including ones that rename Electron's framework.
+let bundles = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-electron-\(UUID().uuidString)")
+defer { try? FileManager.default.removeItem(at: bundles) }
+func bundle(_ name: String, frameworks: [String] = [], asar: Bool = false, info: [String: Any]? = [:]) throws -> URL {
+    let app = bundles.appendingPathComponent("\(name).app"), contents = app.appendingPathComponent("Contents")
+    for framework in frameworks {
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Frameworks/\(framework).framework"), withIntermediateDirectories: true)
+    }
+    try FileManager.default.createDirectory(at: contents.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+    if asar { try Data().write(to: contents.appendingPathComponent("Resources/app.asar")) }
+    if let info {
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
+    }
+    return app
+}
+let editor = try bundle("Editor", frameworks: ["Electron Framework"])
+let renamed = try bundle("Renamed", frameworks: ["Codex Framework"],
+    info: ["CFBundleIdentifier": "com.example.renamed", "ElectronAsarIntegrity": ["Resources/app.asar": ["algorithm": "SHA256"]]])
+let archive = try bundle("Archive", asar: true)
+let native = try bundle("Native", frameworks: ["Sparkle"], info: ["CFBundleIdentifier": "com.example.native"])
+let bare = try bundle("Bare", info: nil)
+expect(InsertionPolicy.isElectronApp(at: editor), "Electron's framework marks an Electron app")
+expect(InsertionPolicy.isElectronApp(at: renamed), "a renamed framework is found by Electron's Info.plist marker")
+expect(InsertionPolicy.isElectronApp(at: archive), "an app archive marks an Electron app")
+expect(!InsertionPolicy.isElectronApp(at: native), "a native app keeps Accessibility writes")
+expect(!InsertionPolicy.isElectronApp(at: bare), "a bundle without an Info.plist isn't Electron")
 print("Insertion safety checks passed")

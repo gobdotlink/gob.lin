@@ -22,7 +22,7 @@ New pastes while the unverified transcript still owns the clipboard carry forwar
 | --- | --- |
 | Notes and standard Cocoa editors | Accessibility insertion where supported; otherwise verified paste |
 | Terminal / Ghostty | Paste only, avoiding repeated direct typing; terminal AX content often cannot confirm consumption |
-| Paseo / VS Code / Cursor / Slack | Paste handles Electron editing; exact AX evidence is used only when exposed |
+| Paseo / VS Code / Cursor / Slack / ChatGPT (Codex) | Paste handles Electron editing; exact AX evidence is used only when exposed. Electron is recognised by its framework, its `app.asar` archive or the `ElectronAsarIntegrity` Info.plist key, so apps that rename the framework (the ChatGPT app ships it as Codex Framework) paste too |
 | T3 Code | Paste while focused, with exact empty-paragraph normalization; unchanged empty original editors also support verified background value insertion; a paste made while the conversation has focus is confirmed in the message box T3 moves it to |
 | Dia / Chrome / Arc | Paste preserves browser input handling; address bars may normalize trailing whitespace and therefore require explicit recovery |
 | Remote desktop / VNC / AnyDesk / TeamViewer | Paste only; local AX cannot confirm remote consumption, so automatic recovery is disabled |
