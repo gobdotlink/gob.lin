@@ -189,10 +189,11 @@ final class HotkeyService: ObservableObject {
         case .release:
             releasePending = true
             holdTimer?.invalidate()
-            // A small hold-back absorbs repeat release/press pairs, never clipboard restoration.
+            // A small hold-back absorbs repeat release/press pairs, never clipboard restoration. Remappers and macro
+            // keys send them within a few milliseconds; every dictation waits this long before capture closes.
             releaseTask?.cancel()
             releaseTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(40))
+                try? await Task.sleep(for: .milliseconds(15))
                 guard !Task.isCancelled, let self else { return }
                 self.holdTimer?.invalidate()
                 self.apply(self.state.release(at: now))

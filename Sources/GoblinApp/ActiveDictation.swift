@@ -19,6 +19,9 @@ final class ActiveDictation {
     var sounds: FeedbackSounds?
     var startTask: Task<Void, Never>?
     var stopTask: Task<CapturedAudio, Error>?
+    /// Capture's close and the final transcript, started at key-up off the main actor; see `AppModel.finishDictation`.
+    var captureStop: Task<CapturedAudio, Error>?
+    var finalTranscript: Task<LiveEnding, Error>?
     var cancelTask: Task<Void, Never>?
     var frameTask: Task<Void, Never>?
     var eventTask: Task<Void, Never>?

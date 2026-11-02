@@ -39,6 +39,7 @@ public actor LiveTranscriber {
     private var origin: Int64 = 0
     private var received: Int64 = 0
     private var lastScheduled: Int64 = 0
+    private var lastScheduledAt = ContinuousClock.now
     private var settled = ""
     private var committed: [Word] = []
     private var previous: [Word] = []
@@ -69,7 +70,7 @@ public actor LiveTranscriber {
     private var previewStopped = false
     public private(set) var requiresFinalRecovery = false
     public private(set) var computeMilliseconds = 0.0
-    private var chunksUsable: Bool { draftable && chunking && received - chunkStart <= Int64(maximumSamples) }
+    private var chunksUsable: Bool { chunking && received - chunkStart <= Int64(maximumSamples) }
 
     public init(engine: Task<any PCMSpeechEngine, Error>, maximumWindowSamples: Int = 240_000,
                 options: RecognitionOptions = .init(), previewAvailable: Bool = true) {
@@ -82,6 +83,7 @@ public actor LiveTranscriber {
             recoveryReason = .modelPreviewUnavailable
             requiresFinalRecovery = true
             draftable = false
+            chunking = false
             continuation.yield(.init(committedText: "", tentativeText: "", recoveryReason: .modelPreviewUnavailable))
         }
     }
@@ -90,11 +92,13 @@ public actor LiveTranscriber {
         guard !cancelled, !finishing, !unavailable else { return }
         guard samplePosition >= received else {
             draftable = false
+            chunking = false
             degrade(.inputDiscontinuity, needsOriginal: true)
             return
         }
         if samplePosition != received {
             draftable = false
+            chunking = false
             history.removeAll()
             historyOrigin = samplePosition
             samples.removeAll()
@@ -107,6 +111,7 @@ public actor LiveTranscriber {
         }
         guard frame.allSatisfy({ $0.isFinite && abs($0) <= 1 }) else {
             draftable = false
+            chunking = false
             received += Int64(frame.count)
             history.removeAll()
             historyOrigin = received
@@ -119,6 +124,7 @@ public actor LiveTranscriber {
         // Keep the in-flight snapshot valid, but allow at most three seconds of pending audio.
         guard frame.count <= maximumSamples + 48_000 - samples.count else {
             draftable = false
+            chunking = false
             degrade(.decodeUnavailable, needsOriginal: true)
             return
         }
@@ -137,7 +143,7 @@ public actor LiveTranscriber {
 
     /// Closes the open chunk at `boundary`, a point between words, and decodes it with the speech before it as context.
     private func closeChunk(at boundary: Int64, pause: Bool, heard: Bool) {
-        guard chunking, draftable, boundary > chunkStart else { return }
+        guard chunking, boundary > chunkStart else { return }
         // Up to a second after the boundary is heard as right context, so the chunk's last words aren't read as the end of
         // an utterance (a stray full stop, or a clipped word).
         let through = min(received, boundary + 16_000)
@@ -157,15 +163,21 @@ public actor LiveTranscriber {
         }
     }
 
-    /// Once the open chunk reaches two thirds of a window, it closes at the widest gap between committed words after its
-    /// first quarter window.
+    /// Once the open chunk reaches two thirds of a window, it closes at the widest gap of at least 150 ms between words
+    /// after its first quarter window. The latest preview's words count as well as committed ones: in fast speech whose
+    /// previews keep changing, few words commit, and they sit back to back, so only the latest decode shows the pauses.
+    /// Within two seconds of a full window, a gap of one model frame (80 ms) will do, rather than stop chunking when the
+    /// window fills; words with no gap between them are never split. A boundary leaves room in the window for the second
+    /// of speech its decode hears after it.
     private func closeLongChunk() {
         guard chunking, received - chunkStart >= Int64(maximumSamples) * 2 / 3 else { return }
-        let words = committed.filter { $0.start >= chunkStart }
+        let words = (committed + previous).filter { $0.start >= chunkStart }.sorted { $0.start < $1.start }
+        let minimumGap: Int64 = received - chunkStart >= Int64(maximumSamples) - 32_000 ? 1_280 : 2_400
+        let latest = chunkStart + Int64(maximumSamples) - 16_000
         var best: (gap: Int64, boundary: Int64)?
         for (word, next) in zip(words, words.dropFirst()) where word.end >= chunkStart + Int64(maximumSamples) / 4 {
-            let gap = next.start - word.end
-            if gap >= 2_400, gap >= best?.gap ?? 0 { best = (gap, word.end + gap / 2) }
+            let gap = next.start - word.end, boundary = word.end + gap / 2
+            if gap >= minimumGap, boundary <= latest, gap >= best?.gap ?? 0 { best = (gap, boundary) }
         }
         if let best { closeChunk(at: best.boundary, pause: false, heard: true) }
     }
@@ -231,8 +243,20 @@ public actor LiveTranscriber {
     /// repeated words at seams on real dictation. Nil without word timings.
     private static func decode(_ window: (audio: [Float], origin: Int64), from start: Int64, before end: Int64? = nil,
                                runtime: any PCMSpeechEngine, options: RecognitionOptions) async throws -> (text: String, presence: SpeechPresence?)? {
-        let result = try await runtime.transcribe(samples: window.audio, options: options)
+        var window = window
+        var result = try await runtime.transcribe(samples: window.audio, options: options)
         if result.speechPresence == .notDetected { return ("", .notDetected) }
+        // Parakeet v3 can decode a whole window with speech in it to nothing, depending on exactly where the audio ends
+        // (FluidAudio #909, whose own retries skip quiet audio). Ending it a quarter second later in silence decodes it
+        // again, instead of the take falling back to recognizing its whole recording. Making room for the silence may
+        // only trim audio before this chunk's words, which start 100 ms before `start`, and half a second of their onset.
+        let drop = max(0, window.audio.count + blankRetrySamples - runtime.maximumWindowSamples)
+        if result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           drop == 0 || window.origin + Int64(drop) <= start - 1_600 - 8_000 {
+            window = (Array(window.audio.dropFirst(drop)) + [Float](repeating: 0, count: blankRetrySamples), window.origin + Int64(drop))
+            result = try await runtime.transcribe(samples: window.audio, options: options)
+            if result.speechPresence == .notDetected { return ("", .notDetected) }
+        }
         // A window holding only this chunk needs no timings.
         if window.origin >= start, end == nil { return (result.text.trimmingCharacters(in: .whitespacesAndNewlines), result.speechPresence) }
         guard let words = words(result, origin: window.origin) else { return nil }
@@ -250,8 +274,9 @@ public actor LiveTranscriber {
         await inference?.value
         try checkCancellation()
         defer { continuation.finish() }
-        if samples.count > maximumSamples { degrade(.decodeUnavailable, needsOriginal: true) }
         if chunksUsable, let ending = try await finishChunks() { return ending }
+        // Only the preview window's own decode below is limited to a window; chunks keep their own audio.
+        if samples.count > maximumSamples { degrade(.decodeUnavailable, needsOriginal: true) }
         guard !samples.isEmpty else {
             return requiresFinalRecovery ? LiveEnding(nil) : LiveEnding(TranscriptionResult(text: committedText))
         }
@@ -346,9 +371,14 @@ public actor LiveTranscriber {
         guard !cancelled, !finishing, !previewStopped, !unavailable, inference == nil, !samples.isEmpty,
               received - lastScheduled >= (previousText.isEmpty ? 6_400 : 9_600) else { return }
         if samples.count > maximumSamples {
-            // A skipped boundary starts a separate preview; original audio owns final continuity.
+            // A skipped boundary starts a separate preview; original audio owns final continuity. At speaking pace, with
+            // audio arriving no faster than real time since the last preview, the window keeps a third free: trimmed to a
+            // full window, the next preview is past the limit again and clears what this one heard, so in fast speech
+            // previews never commit a word or settle a pause again. A backlog that arrives faster than that still trims to
+            // a full window, so the hard ceiling stops it.
             degrade(.windowLimit, needsOriginal: true)
-            discard(before: received - Int64(maximumSamples))
+            let keepingUp = Double(received - lastScheduled) <= Self.milliseconds(since: lastScheduledAt) * 16 * 1.5
+            discard(before: received - Int64(maximumSamples) * (keepingUp ? 2 : 3) / 3)
             previewHasGap = true
             draftable = false
             settled = ""
@@ -361,6 +391,7 @@ public actor LiveTranscriber {
         let snapshotEnd = received
         let snapshotGeneration = generation
         lastScheduled = received
+        lastScheduledAt = .now
         let engine = engine
         let options = options
         inference = Task { [weak self] in
@@ -432,6 +463,7 @@ public actor LiveTranscriber {
                 // Re-decode retained audio instead of permanently latching a stale suffix.
                 committed.removeAll { $0.end > snapshotOrigin }
                 previous = words
+                closeLongChunk()
                 previousText = text
                 tentative = text
                 degrade(.overlapMismatch, needsOriginal: true)
@@ -503,6 +535,7 @@ public actor LiveTranscriber {
             inference?.cancel()
             samples.removeAll()
             draftable = false
+            chunking = false
         }
         publish()
     }
@@ -546,6 +579,9 @@ public actor LiveTranscriber {
               text(words) == result.text.split(whereSeparator: \.isWhitespace).joined(separator: " ") else { return nil }
         return words
     }
+
+    /// Silence appended when a window decodes to nothing; see `decode`.
+    private static let blankRetrySamples = 4_000
 
     private static func text(_ words: [Word]) -> String { words.map(\.text).joined(separator: " ") }
     private static func join(_ prefix: String, _ tail: String) -> String {

@@ -209,6 +209,7 @@ final class AudioInputUnit: @unchecked Sendable {
     private let chunk: AVAudioPCMBuffer
     private let slice: UnsafeMutableAudioBufferListPointer
     private let target: AVAudioFrameCount
+    private let hostTicksPerFrame: Double
     private var chunkTime = AudioTimeStamp()
     private var delivered = false
     private var processor: CaptureProcessor?
@@ -243,6 +244,7 @@ final class AudioInputUnit: @unchecked Sendable {
         self.device = device; self.unit = unit; self.format = format; self.chunk = chunk
         slice = AudioBufferList.allocate(maximumBuffers: Int(format.channelCount))
         target = AVAudioFrameCount(format.sampleRate / 10)
+        hostTicksPerFrame = Double(AVAudioTime.hostTime(forSeconds: 1)) / format.sampleRate
         var callback = AURenderCallbackStruct(inputProc: { refCon, flags, time, bus, frames, _ in
             Unmanaged<AudioInputUnit>.fromOpaque(refCon).takeUnretainedValue().render(flags, time, bus, frames)
         }, inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
@@ -329,8 +331,10 @@ final class AudioInputUnit: @unchecked Sendable {
             processor.inputBroke(); return status
         }
         chunk.frameLength += frames
-        // Hand over about 100 ms at a time, like an engine tap: stop and backlog bounds downstream assume it.
-        if chunk.frameLength + frames > target { deliver(to: processor) }
+        // Hand over about 100 ms at a time, like an engine tap: backlog bounds downstream assume it. A waiting stop takes
+        // the batch at the first cycle past its cutoff rather than holding the take for the rest of it.
+        let cycleEnd = time.pointee.mFlags.contains(.hostTimeValid) ? time.pointee.mHostTime + UInt64(Double(frames) * hostTicksPerFrame) : 0
+        if chunk.frameLength + frames > target || processor.stopWaits(through: cycleEnd) { deliver(to: processor) }
         return noErr
     }
 

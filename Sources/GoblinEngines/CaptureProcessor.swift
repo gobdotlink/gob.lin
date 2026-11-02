@@ -1,6 +1,7 @@
 import AVFoundation
 import Darwin
 import Foundation
+import Synchronization
 
 // Audio callbacks only copy into a bounded ingress. Converter, ring, file and event handler belong to queue.
 final class CaptureProcessor: @unchecked Sendable {
@@ -32,6 +33,8 @@ final class CaptureProcessor: @unchecked Sendable {
     private var gapSince: ContinuousClock.Instant?
     private var pendingStop: (id: UUID, cutoff: UInt64, deadline: DispatchTime,
                               reply: CheckedContinuation<Void, Never>, timer: DispatchSourceTimer)?
+    /// The pending stop's cutoff, or 0, for the render thread to read without the lock; see `stopWaits(through:)`.
+    private let waitingCutoff = Atomic<UInt64>(0)
     private var nativeRate: Double
     private var monoFormat: AVAudioFormat
     private let outputFormat: AVAudioFormat
@@ -135,8 +138,10 @@ final class CaptureProcessor: @unchecked Sendable {
             }
         }
         if nonzero { hasNonzeroInput = true; zeroSince = nil } else if zeroSince == nil { zeroSince = now }
-        inputBufferDuration = Double(frames) / nativeRate
-        let durationTicks = AVAudioTime.hostTime(forSeconds: inputBufferDuration)
+        let bufferSeconds = Double(frames) / nativeRate
+        // A stop takes a partial batch; the next stop's deadline still allows a whole one.
+        if pendingStop == nil { inputBufferDuration = bufferSeconds }
+        let durationTicks = AVAudioTime.hostTime(forSeconds: bufferSeconds)
         let sampleTicks = max(1, AVAudioTime.hostTime(forSeconds: 1 / nativeRate))
         if let time, time.isHostTimeValid, time.isSampleTimeValid, time.sampleRate == nativeRate, time.hostTime > 0 {
             let (end, overflow) = time.hostTime.addingReportingOverflow(durationTicks)
@@ -216,14 +221,24 @@ final class CaptureProcessor: @unchecked Sendable {
                         }
                     }
                     pendingStop = (id, cutoff, deadline, reply, timer)
+                    waitingCutoff.store(cutoff, ordering: .releasing)
                     timer.resume()
                 }
             }
         } onCancel: { self.interrupt(.noCallbacks) }
     }
 
+    /// For the render thread, after each cycle: whether a stop is waiting for input that `end` covers. The input unit then
+    /// hands over its partial batch, so a stop waits for at most one device cycle instead of the rest of a ~100 ms batch.
+    /// Lock-free and allocation-free.
+    func stopWaits(through end: UInt64) -> Bool {
+        let cutoff = waitingCutoff.load(ordering: .acquiring)
+        return cutoff != 0 && end >= cutoff
+    }
+
     private func closeIngressLocked() {
         accepting = false
+        waitingCutoff.store(0, ordering: .releasing)
         if let pendingStop {
             self.pendingStop = nil
             pendingStop.timer.cancel()

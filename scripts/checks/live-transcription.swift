@@ -378,7 +378,9 @@ struct LiveTranscriptionCheck {
         verify(await slowRuntime.calls <= 35, "Overflow started repeated catch-up inference")
         verify(await slowRuntime.largestWindow <= 240_000, "Pending audio reached the engine beyond its limit")
 
-        let ceilingRuntime = SlowUntimedPCM(delay: .milliseconds(100))
+        // A decode that can't finish while the backlog grows: the ceiling stops it at 18 s of pending audio however fast this
+        // machine feeds frames. With a 100 ms decode, a slower machine fed less per decode and never reached the ceiling.
+        let ceilingRuntime = SlowUntimedPCM(delay: .seconds(30))
         let ceiling = LiveTranscriber(engine: Task<any PCMSpeechEngine, Error> { ceilingRuntime })
         let ceilingValues = Values()
         let ceilingCollector = Task { for await value in ceiling.updates { await ceilingValues.add(value) } }

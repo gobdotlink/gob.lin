@@ -576,19 +576,40 @@ final class AppModel: ObservableObject {
                 await self?.cleanup(text, session: session, reportsOutcome: false)
             })
         }
+        // Capture closes and the final transcript starts off the main actor. The overlay's change to Transcribing renders
+        // there meanwhile, and capture's close used to wait behind it twice, about 45 ms, before decoding could start.
+        // A take whose capture is still opening keeps the stop task's own path.
+        if let captureID = active.captureID, !active.session.cancelled {
+            let live = active.live, capture = self.capture, frames = active.frameTask
+            let closing = Task.detached { () async throws -> CapturedAudio in
+                await live.stopPreview()
+                return try await capture.stop(sessionID: captureID)
+            }
+            active.captureStop = closing
+            // Capture's terminal event ends the frame stream, so the transcriber has every frame once its consumer returns.
+            active.finalTranscript = Task.detached { () async throws -> LiveEnding in
+                _ = try await closing.value
+                await frames?.value
+                return try await live.finishWithDraft()
+            }
+        }
         active.stopTask = Task { @MainActor [weak self] in
-            await active.live.stopPreview()
+            if active.captureStop == nil { await active.live.stopPreview() }
             await active.startTask?.value
             guard let self else { throw CancellationError() }
             defer {
                 active.captureMilliseconds = Self.milliseconds(since: active.session.captureStarted)
                 active.finishEvents()
             }
-            try active.session.checkCancellation()
+            // A close already under way is always collected: once it has finished, the capture service no longer owns its
+            // recording, so a cancelled take deletes it through `active.audio` when it completes.
+            if active.captureStop == nil { try active.session.checkCancellation() }
             guard let captureID = active.captureID else { throw active.failure ?? AudioCaptureFailure(.startFailed) }
             let audio: CapturedAudio
-            do { audio = try await self.capture.stop(sessionID: captureID) }
-            catch {
+            do {
+                if let closing = active.captureStop { audio = try await closing.value }
+                else { audio = try await self.capture.stop(sessionID: captureID) }
+            } catch {
                 active.sounds?.end(sessionID: active.session.id, playStop: false)
                 await active.audioReduction?.finish()
                 throw error
@@ -661,7 +682,10 @@ final class AppModel: ObservableObject {
                 } else { startDraftCleanup(await active.live.speculativeText()) }
                 // The clipboard is saved while the text is prepared, so pasting only rereads it if it changed.
                 self.insertion.prepareClipboard()
-                let ending = try await active.live.finishWithDraft()
+                let ending: LiveEnding
+                if let final = active.finalTranscript {
+                    ending = try await withTaskCancellationHandler { try await final.value } onCancel: { final.cancel() }
+                } else { ending = try await active.live.finishWithDraft() }
                 await active.textTask?.value
                 try active.session.checkCancellation()
                 var timings = DictationTimings(captureMilliseconds: active.captureMilliseconds,
@@ -723,6 +747,8 @@ final class AppModel: ObservableObject {
         guard !active.session.cancelled else { return }
         processingQueue.cancel(active.session)
         active.startTask?.cancel()
+        // A close already under way is settled by the capture service's cancel below; its transcript isn't needed.
+        active.finalTranscript?.cancel()
         active.sounds?.end(sessionID: active.session.id, playStop: false)
         active.readiness.cancel()
         if let overlayID = active.session.overlayID { overlay.hide(session: overlayID) }
