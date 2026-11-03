@@ -192,6 +192,9 @@ final class OverlayController {
                 level: Double? = nil, previewUnavailable: Bool = false, session: UUID) {
         if session != sessionID { return }
         if phase == .hidden { hide(session: session); return }
+        // A take's result stays put: late progress, such as a draft cleanup outliving a failed take, would otherwise
+        // replace it and cancel its hide, leaving the overlay up.
+        if phase.hasWords, !model.phase.hasWords, model.phase != .arming { return }
         hideTask?.cancel()
         if model.phase == .listening, phase != .listening, model.audioSeconds == nil, let started = model.listeningStarted {
             model.audioSeconds = Date().timeIntervalSince(started)
