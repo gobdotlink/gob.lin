@@ -176,6 +176,7 @@ final class AppModel: ObservableObject {
                 Task { @MainActor in self?.applyWarmMicrophone() }
             }.store(in: &subscriptions)
         }
+        overlay.model.applicationName = { DictionaryApps.name($0) }
         overlay.model.perform = { [weak self] action in
             guard let self else { return }
             switch action {
@@ -186,6 +187,12 @@ final class AppModel: ObservableObject {
                 self.microphones.pick(uid)
                 self.overlay.hide()
             case .dismiss: self.overlay.hide()
+            case .addTerm(let suggestion):
+                self.dictionary.accept(suggestion)
+                self.overlay.confirmAdded(suggestion)
+            case .dismissTerm(let suggestion):
+                self.dictionary.dismiss(suggestion)
+                self.overlay.hide()
             }
         }
         permissions.onboardingContent = { [weak self] in self.map { AnyView(OnboardingView(model: $0)) } ?? AnyView(EmptyView()) }
@@ -1055,8 +1062,10 @@ final class AppModel: ObservableObject {
             editWatcher.start(entryID: entry.id, anchor: anchor) { [weak self] observation in
                 Task { @MainActor in
                     await self?.history.applyEditObservation(observation)
-                    if observation.outcome == .edited, let edited = observation.editedText {
-                        self?.dictionary.offerCorrection(dictated: dictated, edited: edited, scope: scope)
+                    if observation.outcome == .edited, let edited = observation.editedText,
+                       let suggestion = self?.dictionary.offerCorrection(dictated: dictated, edited: edited, scope: scope).first,
+                       self?.defaults.object(forKey: "overlay.termSuggestions") as? Bool ?? true {
+                        self?.overlay.showSuggestion(suggestion)
                     }
                 }
             }
@@ -1137,7 +1146,7 @@ final class AppModel: ObservableObject {
             case .arming, .listening: state = .recording
             case .transcribing, .polishing: state = .transcribing
             case .error, .readyToPaste: state = .warning
-            case .hidden, .inserted, .milestone, .newMicrophone: state = .idle
+            case .hidden, .inserted, .milestone, .newMicrophone, .termSuggestion, .termAdded: state = .idle
             }
         }
         if mascotState != state { mascotState = state }

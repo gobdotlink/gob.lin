@@ -203,7 +203,8 @@ public enum TermSuggestions {
         var result: [TermSuggestion] = []
         for candidate in candidates {
             guard (try? DictionaryRepository.validated([DictionaryEntry(spelling: candidate.spelling, aliases: candidate.aliases)])) != nil,
-                  candidate.spelling.filter(\.isLetter).count >= 3, looksLikeTerm(candidate.spelling, isKnownWord: isKnownWord),
+                  candidate.spelling.filter(\.isLetter).count >= 3,
+                  looksLikeTerm(candidate.spelling, isKnownWord: isKnownWord) || fixesMishearing(candidate, isKnownWord: isKnownWord),
                   !dismissed.contains(candidate.id) else { continue }
             let key = dictionaryKey(candidate.spelling)
             // A known single word as an alias would replace that word everywhere ("cloud" → "Claude").
@@ -260,6 +261,16 @@ public enum TermSuggestions {
         case .author: 4
         case .folder: 5
         }
+    }
+
+    /// A correction from a word the spell checker doesn't know to a different single word, such as "anasia" →
+    /// "panacea": the recognizer missed a term, even one that is also an ordinary word. A known word fixed into
+    /// another ("the" → "a"), a phrase ("wanna" → "going to") or a punctuation fix ("dont" → "don't") isn't.
+    static func fixesMishearing(_ candidate: TermSuggestion, isKnownWord: (String) -> Bool) -> Bool {
+        guard case .correction(let heard) = candidate.reason, !candidate.spelling.contains(where: \.isWhitespace) else { return false }
+        let letters = { (text: String) in dictionaryKey(text).filter { $0.isLetter || $0.isNumber } }
+        guard letters(heard) != letters(candidate.spelling) else { return false }
+        return heard.split(whereSeparator: \.isWhitespace).contains { word in word.contains(where: \.isLetter) && !isKnownWord(String(word)) }
     }
 
     static func looksLikeTerm(_ spelling: String, isKnownWord: (String) -> Bool) -> Bool {

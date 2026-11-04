@@ -61,6 +61,8 @@ private struct OverlayGoblin: View {
         case .inserted: .closed
         case .milestone: .cackle
         case .readyToPaste, .newMicrophone: .side
+        case .termSuggestion: .look
+        case .termAdded: .closed
         case .error(let notice): NoticeCopy(notice).face
         }
     }
@@ -86,6 +88,7 @@ private struct OverlayBubble: View {
         switch model.visiblePhase {
         case .arming: true
         case .inserted(let result): result.notice == nil
+        case .termAdded: true
         default: false
         }
     }
@@ -110,6 +113,8 @@ private struct OverlayBubble: View {
                     .accessibilityHidden(true)
             }
             .foregroundStyle(.white.opacity(0.94))
+            .contentShape(shape)
+            .onHover { model.hoverChanged($0) }
             .accessibilityElement(children: .contain)
     }
 
@@ -236,7 +241,29 @@ private struct OverlayBubble: View {
                     Text("Audio › new microphone").lineLimit(1)
                     Spacer(minLength: 8)
                     Button("Not Now") { model.perform(.dismiss) }.buttonStyle(OverlayPillStyle())
-                    Button("Use It") { model.perform(.useMicrophone(uid: uid)) }.buttonStyle(OverlayPillStyle())
+                    Button("Use It") { model.perform(.useMicrophone(uid: uid)) }.buttonStyle(OverlayPillStyle(prominent: true))
+                }
+            }
+        case .termSuggestion(let suggestion):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "character.book.closed.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon).padding(.top, 1)
+                    Text("Add \(Text("“\(suggestion.spelling)”").fontWeight(.semibold)) to the dictionary?")
+                        .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Subline {
+                    Text(suggestionDetail(suggestion)).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button("Not Now") { model.perform(.dismissTerm(suggestion)) }.buttonStyle(OverlayPillStyle())
+                    Button("Add") { model.perform(.addTerm(suggestion)) }.buttonStyle(OverlayPillStyle(prominent: true))
+                }
+            }
+        case .termAdded(let suggestion):
+            HStack(spacing: 9) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon)
+                Text("Added \(Text(suggestion.spelling).fontWeight(.semibold))").font(.system(size: 13.5))
+                if let place = placeName(suggestion) {
+                    Text("for \(place)").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
                 }
             }
         case .error(let notice):
@@ -271,6 +298,19 @@ private struct OverlayBubble: View {
         let shortcut = model.talkKey
         if shortcut == .fn { return ["fn"] }
         return shortcut.keyCode == nil && shortcut.keys.count == 1 ? [shortcut.keyLabel] : shortcut.keys.map(\.symbol)
+    }
+
+    /// "You fixed “anasia” · panacea-app": why, then where the word would apply.
+    private func suggestionDetail(_ suggestion: TermSuggestion) -> String {
+        let why: String
+        if case .correction(let heard) = suggestion.reason { why = "You fixed “\(heard)”" } else { why = "From your fix" }
+        return [why, placeName(suggestion) ?? "everywhere"].joined(separator: " · ")
+    }
+
+    /// The project's last path part, or the app's name; nil when the word applies everywhere.
+    private func placeName(_ suggestion: TermSuggestion) -> String? {
+        if let project = suggestion.projects.first { return project.split(separator: "/").last.map(String.init) ?? project }
+        return suggestion.apps.first.map(model.applicationName)
     }
 
     private var audioDetail: String {
@@ -497,11 +537,16 @@ private struct BubbleTail: Shape {
     }
 }
 
+/// A pill button on the dark bubble. The prominent one is the bubble's single primary action, in moss.
 private struct OverlayPillStyle: ButtonStyle {
+    var prominent = false
+
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
+        configuration.label.font(.system(size: 12, weight: prominent ? .semibold : .medium)).foregroundStyle(.white)
             .padding(.horizontal, 11).frame(height: 24)
-            .background(.white.opacity(configuration.isPressed ? 0.22 : 0.14), in: Capsule())
+            .background(prominent ? AnyShapeStyle(GoblinBrand.moss.opacity(configuration.isPressed ? 0.8 : 1))
+                                  : AnyShapeStyle(.white.opacity(configuration.isPressed ? 0.22 : 0.14)), in: Capsule())
+            .contentShape(Capsule())
     }
 }
 

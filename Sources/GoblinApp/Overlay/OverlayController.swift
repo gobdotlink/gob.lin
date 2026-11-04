@@ -11,6 +11,10 @@ enum OverlayPhase: Equatable {
     case milestone(words: Int)
     /// Asks once whether a microphone seen for the first time should be used.
     case newMicrophone(name: String, uid: String)
+    /// A word learned from the user's fix, offered with Add and Not Now.
+    case termSuggestion(TermSuggestion)
+    /// The confirmation after Add.
+    case termAdded(TermSuggestion)
     case error(OverlayNotice)
 
     var caption: String {
@@ -24,6 +28,8 @@ enum OverlayPhase: Equatable {
         case .readyToPaste: "Ready to paste"
         case .milestone: "Milestone"
         case .newMicrophone: "New microphone"
+        case .termSuggestion: "New word"
+        case .termAdded: "Word added"
         case .error: "Needs attention"
         }
     }
@@ -50,7 +56,10 @@ struct OverlayNotice: Equatable {
 }
 
 /// Buttons the overlay can offer; the app decides where each one goes.
-enum OverlayAction { case setup, audioSettings, cleanupSettings, useMicrophone(uid: String), dismiss }
+enum OverlayAction {
+    case setup, audioSettings, cleanupSettings, useMicrophone(uid: String), dismiss
+    case addTerm(TermSuggestion), dismissTerm(TermSuggestion)
+}
 
 enum OverlayPosition: String, CaseIterable {
     case bottom, top
@@ -103,6 +112,10 @@ final class OverlayModel: ObservableObject {
     var cancel: () -> Void = {}
     var perform: (OverlayAction) -> Void = { _ in }
     var sizeChanged: (CGSize) -> Void = { _ in }
+    /// An app's display name from its bundle identifier, for words scoped to an app.
+    var applicationName: (String) -> String = { $0 }
+    /// The pointer entered or left the bubble; lingering phases wait while it's over them.
+    var hoverChanged: (Bool) -> Void = { _ in }
     private var mouthChanged = Date.distantPast
 
     private func updateMouth() {
@@ -159,6 +172,7 @@ final class OverlayController {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.contentView = NSHostingView(rootView: DictationOverlay(model: model))
+        model.hoverChanged = { [weak self] hovering in self?.hoverChanged(hovering) }
         displayObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.reposition() }
@@ -168,7 +182,10 @@ final class OverlayController {
     @discardableResult
     func begin(onCancel: @escaping () -> Void) -> UUID {
         // An unanswered question comes back after the take instead of being lost to it.
-        if case .newMicrophone = model.phase { completionNotices.append(model.phase) }
+        switch model.phase {
+        case .newMicrophone, .termSuggestion: completionNotices.append(model.phase)
+        default: break
+        }
         hideTask?.cancel()
         orderOutTask?.cancel()
         sessionID = UUID()
@@ -237,6 +254,39 @@ final class OverlayController {
         }
     }
 
+    /// Offer a word learned from a fix. Waits for any dictation on screen, like other late results.
+    func showSuggestion(_ suggestion: TermSuggestion) {
+        showCompletion(.termSuggestion(suggestion), session: UUID())
+    }
+
+    /// Swap the offer for a short confirmation once the word is added.
+    func confirmAdded(_ suggestion: TermSuggestion) {
+        guard case .termSuggestion = model.phase else { return }
+        let session = sessionID
+        update(.termAdded(suggestion), session: session)
+        hide(after: 1.5, session: session)
+    }
+
+    private static let suggestionSeconds = 8.0
+
+    /// How long a late result stays: questions need time to read and answer.
+    private static func lingers(_ phase: OverlayPhase) -> Double {
+        switch phase {
+        case .newMicrophone: 12
+        case .termSuggestion: suggestionSeconds
+        default: 3
+        }
+    }
+
+    /// Hovering holds a question on screen; leaving gives a few more seconds to come back.
+    private func hoverChanged(_ hovering: Bool) {
+        switch model.phase {
+        case .newMicrophone, .termSuggestion:
+            if hovering { hideTask?.cancel() } else { hide(after: 3, session: sessionID) }
+        default: return
+        }
+    }
+
     /// Older results wait for the current recording's overlay instead of replacing its words.
     func showCompletion(_ phase: OverlayPhase, session: UUID) {
         if session != sessionID, model.phase != .hidden {
@@ -249,8 +299,7 @@ final class OverlayController {
         }
         let current = session == sessionID ? session : begin(onCancel: {})
         update(phase, session: current)
-        // A question needs time to read and answer; ignoring it leaves the microphone below the line.
-        if case .newMicrophone = phase { hide(after: 12, session: current) } else { hide(after: 3, session: current) }
+        hide(after: Self.lingers(phase), session: current)
     }
 
     /// In 140 ms, out 120 ms, ease-out. Reduce Motion keeps the fade and drops the movement in the view.

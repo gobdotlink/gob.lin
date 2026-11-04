@@ -4,6 +4,7 @@ struct OverlaySettingsView: View {
     let overlay: OverlayController
     @AppStorage("overlayPosition") private var position = OverlayPosition.bottom.rawValue
     @AppStorage("overlay.milestones") private var milestones = true
+    @AppStorage("overlay.termSuggestions") private var termSuggestions = true
 
     var body: some View {
         Section {
@@ -27,6 +28,10 @@ struct OverlaySettingsView: View {
             Toggle(isOn: $milestones) {
                 Text("Celebrate milestones")
                 Text("A one-time note at 1,000, 10,000, 100,000 and a million words.")
+            }
+            Toggle(isOn: $termSuggestions) {
+                Text("Offer words from your fixes")
+                Text("When you fix a word I misheard, I ask right away whether to add it to the dictionary.")
             }
         } header: { Text("Moments") }
         .onChange(of: position) { _, value in overlay.position = OverlayPosition(rawValue: value) ?? .bottom }

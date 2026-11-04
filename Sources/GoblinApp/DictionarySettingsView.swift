@@ -78,13 +78,19 @@ final class DictionaryModel: ObservableObject {
         }
     }
 
-    /// Offers the terms the user fixed after a dictation into `scope`.
-    func offerCorrection(dictated: String, edited: String, scope: DictionaryScope) {
-        guard suggestsTerms else { return }
+    /// Offers the terms the user fixed after a dictation into `scope`, and returns the ones that survived review, so the
+    /// overlay can offer them on the spot.
+    @discardableResult
+    func offerCorrection(dictated: String, edited: String, scope: DictionaryScope) -> [TermSuggestion] {
+        guard suggestsTerms else { return [] }
         let found = TermSuggestions.fromCorrection(dictated: dictated, edited: edited, scope: scope)
-        guard !found.isEmpty else { return }
+        guard !found.isEmpty else { return [] }
         correctionCandidates = Array((found + correctionCandidates).prefix(24))
         reviewSuggestions()
+        // Review may swap in an existing entry's spelling or widen the place, so match on the spelling alone.
+        return suggestions.filter { suggestion in
+            found.contains { $0.spelling.caseInsensitiveCompare(suggestion.spelling) == .orderedSame }
+        }
     }
 
     func accept(_ suggestion: TermSuggestion) { _ = persist(entries.accepting(suggestion)) }

@@ -10,6 +10,7 @@ cp -R Sources/GoblinApp/Assets "$temporary/Assets"
 swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx26.0 \
     -I "$binary_directory/Modules" -I Sources/CSQLite \
     Sources/GoblinApp/GoblinBrand.swift \
+    Sources/GoblinApp/Hotkeys/HotkeyShortcut.swift \
     Sources/GoblinApp/Overlay/OverlayController.swift \
     Sources/GoblinApp/Overlay/DictationOverlay.swift \
     scripts/checks/mascot.swift "$binary_directory"/GoblinCore.build/*.swift.o -lsqlite3 \

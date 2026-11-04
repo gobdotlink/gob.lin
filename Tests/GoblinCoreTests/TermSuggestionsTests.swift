@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GoblinCore
 
-private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media"]
+private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a"]
 private func isKnown(_ word: String) -> Bool { known.contains(word.lowercased()) }
 private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry] = [], dismissed: Set<String> = []) -> [TermSuggestion] {
     TermSuggestions.review(candidates, entries: entries, dismissed: dismissed, isKnownWord: isKnown)
@@ -84,4 +84,20 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     // Corrections come first.
     let correction = TermSuggestion(spelling: "Kalikin", projects: ["gob.lin"], reason: .correction(heard: "calicut"))
     #expect(review(candidates + [correction]).first == correction)
+}
+
+@Test func correctionsOfUnknownWordsKeepOrdinarySpellings() {
+    let scope = DictionaryScope(application: "com.t3tools.t3code", project: "panacea-app")
+    func corrected(_ dictated: String, _ edited: String) -> [TermSuggestion] {
+        review(TermSuggestions.fromCorrection(dictated: dictated, edited: edited, scope: scope))
+    }
+    // "panacea" is a dictionary word, but the recognizer heard a non-word, so it is a missed term.
+    let kept = corrected("with the anasia local review skill", "with the panacea local review skill")
+    #expect(kept.map { ($0.spelling, $0.aliases, $0.projects) } .first ?? ("", [], []) == ("panacea", ["anasia"], ["panacea-app"]))
+    // Known words fixed into known words, phrases and punctuation fixes stay out.
+    #expect(corrected("use the window", "use the sources").isEmpty)
+    #expect(corrected("we wanna go", "we going to go").isEmpty)
+    #expect(corrected("we dont go", "we don't go").isEmpty)
+    // Without a correction behind it, a known word is still not a term.
+    #expect(review([TermSuggestion(spelling: "panacea", projects: ["panacea-app"], reason: .folder)]).isEmpty)
 }
