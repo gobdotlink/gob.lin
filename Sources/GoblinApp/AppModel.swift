@@ -1062,10 +1062,12 @@ final class AppModel: ObservableObject {
             editWatcher.start(entryID: entry.id, anchor: anchor) { [weak self] observation in
                 Task { @MainActor in
                     await self?.history.applyEditObservation(observation)
-                    if observation.outcome == .edited, let edited = observation.editedText,
-                       let suggestion = self?.dictionary.offerCorrection(dictated: dictated, edited: edited, scope: scope).first,
-                       self?.defaults.object(forKey: "overlay.termSuggestions") as? Bool ?? true {
-                        self?.overlay.showSuggestion(suggestion)
+                    if observation.outcome == .edited, let edited = observation.editedText, let self {
+                        let offers = self.dictionary.offerCorrection(dictated: dictated, edited: edited, scope: scope)
+                        // One at a time: the overlay queues each offer behind the one on screen.
+                        if self.defaults.object(forKey: "overlay.termSuggestions") as? Bool ?? true {
+                            offers.forEach(self.overlay.showSuggestion)
+                        }
                     }
                 }
             }

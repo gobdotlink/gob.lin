@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GoblinCore
 
-private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a"]
+private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted"]
 private func isKnown(_ word: String) -> Bool { known.contains(word.lowercased()) }
 private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry] = [], dismissed: Set<String> = []) -> [TermSuggestion] {
     TermSuggestions.review(candidates, entries: entries, dismissed: dismissed, isKnownWord: isKnown)
@@ -100,4 +100,22 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     #expect(corrected("we dont go", "we don't go").isEmpty)
     // Without a correction behind it, a known word is still not a term.
     #expect(review([TermSuggestion(spelling: "panacea", projects: ["panacea-app"], reason: .folder)]).isEmpty)
+}
+
+@Test func correctionsBetweenSoundAlikeWordsAreTerms() {
+    let scope = DictionaryScope(application: "com.t3tools.t3code", project: "panacea-app")
+    func corrected(_ dictated: String, _ edited: String) -> [TermSuggestion] {
+        review(TermSuggestions.fromCorrection(dictated: dictated, edited: edited, scope: scope))
+    }
+    // Both fixes in one edit are kept. A known word as an alias would rewrite it everywhere, so only the spelling is.
+    let kept = corrected("like a codec sub but not a clawed sub", "like a codex sub but not a claude sub")
+    #expect(kept.map(\.spelling) == ["codex", "claude"])
+    #expect(kept.map(\.aliases) == [[], []])
+    #expect(corrected("the soul model", "the sol model").map(\.spelling) == ["sol"])
+    // Other forms of a word, everyday words, contractions and phrases are grammar, not mishearings.
+    #expect(corrected("one candidate", "one candidates").isEmpty)
+    #expect(corrected("we sourcing them", "we sourced them").isEmpty)
+    #expect(corrected("better then that", "better than that").isEmpty)
+    #expect(corrected("there going", "they're going").isEmpty)
+    #expect(corrected("we want to go", "we wanted go").isEmpty)
 }

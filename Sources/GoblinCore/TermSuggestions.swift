@@ -263,14 +263,30 @@ public enum TermSuggestions {
         }
     }
 
-    /// A correction from a word the spell checker doesn't know to a different single word, such as "anasia" →
-    /// "panacea": the recognizer missed a term, even one that is also an ordinary word. A known word fixed into
-    /// another ("the" → "a"), a phrase ("wanna" → "going to") or a punctuation fix ("dont" → "don't") isn't.
+    /// A correction to a different single word that the recognizer got wrong: from a word the spell checker doesn't
+    /// know ("anasia" → "panacea"), or from a real word that sounds like an uncommon one ("clawed" → "claude"). A known
+    /// word fixed into an unrelated or everyday one ("the" → "a", "then" → "than"), a phrase ("wanna" → "going to"),
+    /// another form of the word ("candidate" → "candidates") or a punctuation fix ("dont" → "don't") isn't.
     static func fixesMishearing(_ candidate: TermSuggestion, isKnownWord: (String) -> Bool) -> Bool {
         guard case .correction(let heard) = candidate.reason, !candidate.spelling.contains(where: \.isWhitespace) else { return false }
         let letters = { (text: String) in dictionaryKey(text).filter { $0.isLetter || $0.isNumber } }
-        guard letters(heard) != letters(candidate.spelling) else { return false }
-        return heard.split(whereSeparator: \.isWhitespace).contains { word in word.contains(where: \.isLetter) && !isKnownWord(String(word)) }
+        let from = letters(heard), to = letters(candidate.spelling)
+        guard from != to else { return false }
+        let words = heard.split(whereSeparator: \.isWhitespace)
+        if words.contains(where: { word in word.contains(where: \.isLetter) && !isKnownWord(String(word)) }) { return true }
+        return words.count == 1 && candidate.spelling.allSatisfy(\.isLetter) && !DictionaryCorrector.commonEnglish.contains(to)
+            && soundsAlike(from, to)
+    }
+
+    private static let wordEndings: Set<String> = ["", "e", "s", "es", "d", "ed", "ing", "er", "ly", "y", "ies", "ied", "ion"]
+
+    /// Two lowercased words close enough to be misheard for each other: the same first letter, at most half the letters
+    /// changed, and not two forms of one word.
+    static func soundsAlike(_ first: String, _ second: String) -> Bool {
+        guard first.first == second.first, let distance = EditObservation.graphemeDistance(first, second),
+              distance * 2 <= max(first.count, second.count) else { return false }
+        let stem = first.commonPrefix(with: second).count
+        return !wordEndings.isSuperset(of: [String(first.dropFirst(stem)), String(second.dropFirst(stem))])
     }
 
     static func looksLikeTerm(_ spelling: String, isKnownWord: (String) -> Bool) -> Bool {
