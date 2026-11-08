@@ -7,13 +7,11 @@ scheduled publisher, or update service to operate.
 
 ## Install and authenticate
 
-Releases of `gobdotlink/gob.lin` need no authentication once the repository is public.
-While it is private, a user needs repository access and either `gh auth login --hostname github.com` or a fine-grained GitHub
-token restricted to this repository with **Contents: read**. Settings → About
-accepts and removes a token; it is saved in gob.lin preferences separately from rewrite keys.
-Existing GitHub CLI authentication takes precedence. The app looks for `gh` in
+Releases of `gobdotlink/gob.lin` are public and need no authentication.
+If the GitHub CLI is signed in, the app uses that authentication; otherwise it uses a
+token saved in Settings → About, and with neither it checks anonymously. The token is
+saved in gob.lin preferences separately from rewrite keys. The app looks for `gh` in
 `/opt/homebrew/bin` and `/usr/local/bin`, so launching from Finder works too.
-Public releases can also be checked without authentication.
 
 For a first install:
 

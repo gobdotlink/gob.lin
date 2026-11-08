@@ -39,7 +39,7 @@ A normally completed response may legitimately contain no text for sound-only in
 
 Prompt verification on 14 October 2026: 18/18 short synthetic cases passed through the production `TranscriptPostprocessor` with saved Cerebras / Qwen 3.8 27B settings, reasoning Off and temperature 0. They covered hesitations, stutters, intentional repetition, slang/swearing, meaningful conversational words, instruction-like speech, contextual vocabulary, name preservation, German “um”, filler-only empty output, cleanup-level differences, and coding commands/issue IDs/paragraphs. Median full processing time was 0.258 s, maximum 0.353 s in this small run. Some fixtures overlap prompt examples, so this is a regression check, not an independent quality benchmark. The [synthetic fixture set](../Tests/RewriteCleanupFixtures/cases.json) also includes five additional tone/longer-sentence cases; their live run was blocked by Keychain access in the temporary helper, and they are not counted as passing. `swift test` passed 21 offline safety/settings tests, including destructive-empty-output guards; smoke checks passed.
 
-Provider research for [GOB-15](https://linear.app/goblink/issue/GOB-15/post-processing-llm-rewrite-with-a-predefined-prompt), checked 14 October 2026:
+Provider research, checked 14 October 2026:
 
 | Candidate | USD / million input / output tokens | Published speed and latency | Preset decision |
 | --- | --- | --- | --- |

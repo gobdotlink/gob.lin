@@ -22,8 +22,6 @@ and install that version once by hand, and grant the permissions again.
 
 ## Project
 
-The roadmap and acceptance criteria live in [gob.lin v0.1 — minimal app on Linear](https://linear.app/goblink/project/goblin-v01-minimal-app-5d9bf4e3bece).
-
 The foundation includes the native menu bar app, Swift packages, command-line
 companion, Xcode project, stable local signing, and a macOS build workflow.
 
@@ -105,9 +103,9 @@ scripts/smoke.sh                   # package, CLI, and bundle metadata checks
 ## Releases and updates
 
 gob.lin checks GitHub Releases at launch and hourly, and offers **Install & relaunch**
-in the menu and **Settings → About**. Private releases use existing `gh` authentication
-or a GitHub token saved in gob.lin preferences. Updates must match the installed app's signing
-identity; recording and unsaved history block installation.
+in the menu and **Settings → About**. Checking and installing need no GitHub account.
+Updates must match the installed app's signing identity; recording and unsaved history
+block installation.
 
 When AI cleanup is enabled, gob.lin loads the selected provider’s key at launch,
 including after an update relaunch. Provider keys and the update token are saved
@@ -266,8 +264,6 @@ Learning from corrections, context integration, per-app styles, snippets, file t
 2. **M1 Dictation loop:** hotkey → capture → recognition → insertion.
 3. **M2 Core features:** overlay, live text, dictionary, rewriting, tone, history, settings, and branding.
 4. **M3 Dogfood-ready:** CLI evaluations, diagnostics, distribution, updates, and open-source readiness.
-
-The starting tickets are [GOB-5: project skeleton](https://linear.app/goblink/issue/GOB-5/project-skeleton-swift-packages-menu-bar-app-stable-signing-licence) and [GOB-6: speech engine spike](https://linear.app/goblink/issue/GOB-6).
 
 ## License
 
