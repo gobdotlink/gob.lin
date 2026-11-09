@@ -177,6 +177,7 @@ final class AppModel: ObservableObject {
             }.store(in: &subscriptions)
         }
         overlay.model.applicationName = { DictionaryApps.name($0) }
+        dictionary.loadProjectUses = { [history] in (try? await history.store?.dictionaryProjectUses()) ?? [] }
         overlay.model.perform = { [weak self] action in
             guard let self else { return }
             switch action {

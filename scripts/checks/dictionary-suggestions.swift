@@ -110,12 +110,14 @@ struct DictionarySuggestionsCheck {
         }
         try render(page(model, defaults: defaults), size: CGSize(width: 650, height: 1300), to: results.appendingPathComponent("dictionary-page-correction.png"))
 
-        // 3. Accept the fix, dismiss a folder, and check Add Term's starting scope.
+        // 3. Accept the fix, dismiss a folder, and check the project is listed.
         model.dictionary.accept(fix)
         guard let term = model.dictionary.entries.first(where: { $0.spelling == "Qorblaxx" }), term.projects == ["quixlo"], term.apps.isEmpty else {
             throw CheckFailure("Accepting didn't add a project term: \(model.dictionary.entries)")
         }
-        guard model.dictionary.newEntry().projects == ["quixlo"] else { throw CheckFailure("Add Term isn't scoped to the project") }
+        guard model.dictionary.places.apps.contains(where: { $0.projects.contains { $0.name == "quixlo" } }) else {
+            throw CheckFailure("The project isn't listed under its app")
+        }
         if let folder = model.dictionary.suggestions.first(where: { $0.spelling == "Fluxomatic" }) {
             model.dictionary.dismiss(folder)
             guard !model.dictionary.suggestions.contains(folder),

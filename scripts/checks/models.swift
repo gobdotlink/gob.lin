@@ -744,11 +744,11 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try repository.save([DictionaryEntry(spelling: "CodeRabbit", aliases: ["code rabbit"]),
                              DictionaryEntry(spelling: "Postgres"), DictionaryEntry(spelling: "Kalikin")])
         let model = DictionaryModel(repository: repository, defaults: defaults)
-        @MainActor func shoot(_ name: String, dark: Bool, accessible: Bool = false, height: CGFloat = 700) async throws {
+        @MainActor func shoot(_ name: String, dark: Bool, accessible: Bool = false, height: CGFloat = 700, place: DictionaryPlace = .everywhere) async throws {
             app.appearance = NSAppearance(named: accessible
                 ? (dark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua)
                 : (dark ? .darkAqua : .aqua))
-            let host = NSHostingView(rootView: Form { DictionarySettingsView(model: model, service: service, defaults: defaults) }
+            let host = NSHostingView(rootView: Form { DictionarySettingsView(model: model, service: service, defaults: defaults, place: place) }
                 .formStyle(PlateFormStyle()).preferredColorScheme(dark ? .dark : .light)
                 .defaultScrollAnchor(.top)
                 .environment(\._colorSchemeContrast, accessible ? .increased : .standard)
@@ -778,7 +778,9 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
         try expect(model.put(DictionaryEntry(spelling: "GPT 6.1 Sol", aliases: ["GPT six point one soul"],
                                              apps: ["com.apple.Terminal"], projects: ["gob.lin"])), "Could not create project-scoped fixture")
         model.lastContext = ("Terminal", "com.apple.Terminal", DetectedProject(name: "gob.lin", source: .repository))
-        for dark in [false, true] { try await shoot("dictionary-projects-\(dark ? "dark" : "light")", dark: dark, height: 1000) }
+        for dark in [false, true] {
+            try await shoot("dictionary-projects-\(dark ? "dark" : "light")", dark: dark, height: 1000, place: .project("gob.lin", app: "com.apple.Terminal"))
+        }
         let projectHost = NSHostingView(rootView: Form { DictionaryProjectScopeEditor(projects: .constant(["gob.lin"]), suggestions: ["gob.lin", "harbor"]) }
             .formStyle(.grouped).frame(width: 460, height: 220))
         projectHost.frame = NSRect(x: 0, y: 0, width: 460, height: 220)
@@ -813,6 +815,31 @@ private final class DownloadFixtureProtocol: URLProtocol, @unchecked Sendable {
             try await shoot("dictionary-cutoff-\(dark ? "dark" : "light")", dark: dark, height: 2000)
             try await shoot("dictionary-accessible-\(dark ? "dark" : "light")", dark: dark, accessible: true, height: 2000)
         }
+        for entry in model.entries { model.delete(entry) }
+        // A dictionary big enough to scroll, across every kind of place.
+        for number in 1...40 { try expect(model.put(DictionaryEntry(spelling: String(format: "Word%03d", number))), "Could not create everywhere fixture") }
+        for number in 1...8 { try expect(model.put(DictionaryEntry(spelling: "AppTerm\(number)", apps: ["com.apple.Terminal"])), "Could not create app fixture") }
+        for number in 1...40 {
+            let aliases = number % 5 == 0 ? ["project word \(number)", "prodject \(number)", "pro term \(number)"] : []
+            try expect(model.put(DictionaryEntry(spelling: "ProjectTerm\(number)", aliases: aliases, projects: ["gob.lin"])), "Could not create project fixture")
+        }
+        for number in 1...12 { try expect(model.put(DictionaryEntry(spelling: "EvalTerm\(number)", projects: ["evals"])), "Could not create unassigned fixture") }
+        model.lastContext = ("Terminal", "com.apple.Terminal", DetectedProject(name: "gob.lin", source: .repository))
+        for dark in [false, true] {
+            try await shoot("dictionary-browser-\(dark ? "dark" : "light")", dark: dark, height: 1000, place: .project("gob.lin", app: "com.apple.Terminal"))
+        }
+        try await shoot("dictionary-browser-accessible", dark: false, accessible: true, height: 1000)
+        let words = DictionaryPlace.project("gob.lin", app: "com.apple.Terminal").activeWords(in: model.entries)
+        try expect(words.used.count == DictionaryScope.activeLimit && words.missed.count == 56, "Unexpected active words: \(words.used.count), \(words.missed.count)")
+        app.appearance = NSAppearance(named: .aqua)
+        let activeHost = NSHostingView(rootView: DictionaryActiveWords(used: words.used, missed: words.missed) {
+            $0.projects.isEmpty ? ($0.apps.isEmpty ? "Everywhere" : "Terminal") : "gob.lin"
+        }.background(GoblinBrand.plate).frame(width: 320, height: 420))
+        activeHost.frame = NSRect(x: 0, y: 0, width: 320, height: 420)
+        activeHost.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(500))
+        try snapshot(activeHost, to: directory.appendingPathComponent("dictionary-active-words.png"))
+        model.lastContext = nil
         for entry in model.entries { model.delete(entry) }
         try await shoot("dictionary-empty", dark: false)
         await service.shutdown()
