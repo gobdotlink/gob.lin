@@ -9,7 +9,7 @@ struct InsightsView: View {
     @State private var detailsError: String?
     /// 0 is this week; −1 the week before.
     @State private var weekOffset = 0
-    @State private var period = InsightPeriod.today
+    @State private var period = InsightPeriod.week
     @State private var refreshID = UUID()
     @State private var error: String?
 
@@ -19,9 +19,7 @@ struct InsightsView: View {
         var cloud: InsightWordCloud
     }
 
-    private var selectedDetails: PeriodDetails? { details?.period == period ? details : nil }
-
-    private var periodTitle: String {
+    private func title(_ period: InsightPeriod) -> String {
         switch period {
         case .today: "Today"
         case .week: "This Week"
@@ -29,7 +27,7 @@ struct InsightsView: View {
         }
     }
 
-    private var periodDescription: String {
+    private func description(_ period: InsightPeriod) -> String {
         switch period {
         case .today: "today"
         case .week: "this week"
@@ -46,18 +44,27 @@ struct InsightsView: View {
 
     var body: some View {
         Form {
-            if let error {
+            if let failure = error ?? detailsError {
                 Section {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     Button("Try Again") { refresh() }
                 }
-            } else if let insights {
-                sections(insights)
+            } else if let insights, let details {
+                sections(insights, details)
             } else {
                 Section { Text("Loading local history…").foregroundStyle(.secondary) }
             }
         }
         .formStyle(PlateFormStyle())
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Picker("Period", selection: $period) {
+                    ForEach([InsightPeriod.today, .week, .allTime], id: \.self) { Text(title($0)).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                .tint(GoblinBrand.moss)
+            }
+        }
         .task(id: Request(week: weekOffset, revision: history.revision, refresh: refreshID)) { await load() }
         .task(id: Request(week: 0, revision: history.revision, refresh: refreshID, period: period)) { await loadDetails() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
@@ -66,81 +73,58 @@ struct InsightsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in refresh() }
     }
 
-    @ViewBuilder private func sections(_ data: HistoryInsights) -> some View {
-        Section("This week") {
-            hero(data)
-            stats(data)
+    /// `all` holds what doesn't narrow to a period: the stepped week, streaks and the entry count.
+    @ViewBuilder private func sections(_ all: HistoryInsights, _ shown: PeriodDetails) -> some View {
+        Section(title(shown.period)) {
+            hero(shown)
+            stats(shown, all: all)
         }
         Section {
-            ActivityRow(days: data.week, calendar: data.calendar)
+            ActivityRow(chart: activity(all, shown))
         } header: {
             HStack {
                 Text("Activity")
                 Spacer()
-                weekStepper(data)
+                activityRange(all, period: shown.period)
             }
         }
-        Section {
-            cloudRow
-        } header: {
-            HStack {
-                Text("What you talked about")
-                Spacer()
-                Picker("Word cloud and apps period", selection: $period) {
-                    Text("Today").tag(InsightPeriod.today)
-                    Text("This Week").tag(InsightPeriod.week)
-                    Text("All Time").tag(InsightPeriod.allTime)
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.small)
-                .tint(GoblinBrand.moss)
-                .font(.system(size: 11.5)).textCase(nil).tracking(0).foregroundStyle(.primary)
-                .padding(.trailing, 14)
-            }
+        Section("What you talked about") {
+            cloudRow(shown)
         }
-        Section {
-            if let data = selectedDetails?.insights {
-                if data.applications.isEmpty { Text("No words typed \(periodDescription) yet.").foregroundStyle(.secondary) }
-                ForEach(data.applications) { app in appRow(app, total: data.totalWords) }
-            } else if detailsError != nil {
-                Text("App totals are unavailable.").foregroundStyle(.secondary)
-            } else {
-                Text("Counting apps…").foregroundStyle(.secondary)
-            }
-        } header: {
-            HStack {
-                Text("Where I typed")
-                Spacer()
-                Text(periodTitle).textCase(nil).tracking(0).padding(.trailing, 14)
-            }
+        Section("Where I typed") {
+            if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
+            ForEach(shown.insights.applications) { app in appRow(app, total: shown.insights.totalWords) }
         }
         Section {
             DisclosureGroup("How I count") {
-                Text("Based on \(data.entryCount.formatted()) saved History entries. Deleting entries and retention lower these totals. Words come from each entry's saved final text, so re-transcriptions and rewrites count again.")
-                Text("Talking time is this week's recorded audio, silence included. Speaking pace divides this week's words by that time; entries without usable audio are left out.")
-                Text("The word cloud and app graphs use the selected period. App percentages use that period's total words. The cloud shows the nouns you said most and counts \"chart\" and \"charts\" as one word.")
-                Text("Days and hours use when each dictation started, in \(data.calendar.timeZone.identifier). Weeks begin on \(weekStart(data).formatted(.dateTime.weekday(.wide))). A streak needs words on consecutive days and can end today or yesterday.")
+                Text("Based on \(all.entryCount.formatted()) saved History entries. Deleting entries and retention lower these totals. Words come from each entry's saved final text, so re-transcriptions and rewrites count again.")
+                Text("Typing saved is how long the words would take to type at \(HistoryInsights.typingWordsPerMinute.formatted()) words a minute, less the time you spent talking. Talking time is recorded audio, silence included. Speaking pace divides words by that time. Both leave out entries without usable audio.")
+                Text("The period at the top sets everything except Streak, which always counts back from today. App percentages use that period's total words. The cloud shows the nouns you said most and counts \"chart\" and \"charts\" as one word.")
+                Text("Days and hours use when each dictation started, in \(all.calendar.timeZone.identifier). Weeks begin on \(weekStart(all).formatted(.dateTime.weekday(.wide))). A streak needs words on consecutive days and can end today or yesterday.")
                 Text("Everything is counted on this Mac. Insights never send transcripts or statistics anywhere.")
             }
         }
     }
 
-    // MARK: This week
+    // MARK: Summary
 
-    private func hero(_ data: HistoryInsights) -> some View {
-        HStack(alignment: .bottom, spacing: 16) {
+    private func hero(_ shown: PeriodDetails) -> some View {
+        let data = shown.insights
+        let minutes = Int(data.typingSecondsSaved / 60)
+        return HStack(alignment: .bottom, spacing: 16) {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(data.weekWords.formatted()).font(.system(size: 48, weight: .semibold)).monospacedDigit()
-                    Text(data.weekWords == 1 ? "word" : "words").font(.system(size: 20, weight: .medium)).foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 32) {
+                    figure("Typing saved", value: minutes == 0 && data.typingSecondsSaved > 0 ? "<1" : minutes.formatted(), unit: minutes > 1 || data.typingSecondsSaved == 0 ? "minutes" : "minute")
+                    figure("Words", value: data.totalWords.formatted(), unit: data.totalWords == 1 ? "word" : "words")
                 }
-                Text(talkSentence(data)).font(.system(size: 15, weight: .medium)).padding(.top, 8)
-                Text(sinceSentence(data)).foregroundStyle(.secondary).padding(.top, 2)
+                Text(talkSentence(shown)).font(.system(size: 15, weight: .medium)).padding(.top, 8)
+                Text(sinceSentence(shown)).foregroundStyle(.secondary).padding(.top, 2)
             }
             .padding(.vertical, 10)
             Spacer(minLength: 0)
             // The goblin works at the plate's divider while you talk; asleep when there's nothing to type.
             Group {
-                if data.weekWords > 0 {
+                if data.totalWords > 0 {
                     PixelSprite(sprite: .look, scale: 2)
                         .overlay(alignment: .bottomTrailing) { PixelSprite(sprite: .quill, scale: 2).offset(x: 16, y: -2) }
                 } else {
@@ -154,16 +138,28 @@ struct InsightsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func stats(_ data: HistoryInsights) -> some View {
+    private func figure(_ title: String, value: String, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(value).font(.system(size: 48, weight: .semibold)).monospacedDigit().minimumScaleFactor(0.6)
+                Text(unit).font(.system(size: 20, weight: .medium)).foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+        }
+    }
+
+    private func stats(_ shown: PeriodDetails, all: HistoryInsights) -> some View {
         let days = { (count: Int) in count == 1 ? "day" : "days" }
+        let dictations = shown.cloud.entryCount
         return HStack(alignment: .top, spacing: 16) {
-            stat("Today", value: data.todayWords.formatted(), unit: data.todayWords == 1 ? "word" : "words")
+            stat("Dictations", value: dictations.formatted(), unit: dictations == 1 ? "take" : "takes")
             Divider().padding(.vertical, -9)
-            stat("Speaking pace", value: data.weekWordsPerMinute.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "—", unit: "wpm")
+            stat("Speaking pace", value: shown.insights.wordsPerMinute.map { $0.formatted(.number.precision(.fractionLength(0))) } ?? "—", unit: "wpm")
             Divider().padding(.vertical, -9)
-            stat("Streak", value: data.currentStreak.formatted(),
-                 unit: data.currentStreak > 0 ? "\(days(data.currentStreak)) in a row" : "days",
-                 detail: "Longest: \(data.longestStreak.formatted()) \(days(data.longestStreak))")
+            stat("Streak", value: all.currentStreak.formatted(),
+                 unit: all.currentStreak > 0 ? "\(days(all.currentStreak)) in a row" : "days",
+                 detail: "Longest: \(all.longestStreak.formatted()) \(days(all.longestStreak))")
         }
         .padding(.leading, 6)
     }
@@ -182,18 +178,34 @@ struct InsightsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func talkSentence(_ data: HistoryInsights) -> String {
-        guard data.weekWords > 0 else { return "Quiet week so far. I'm ready when you are." }
-        guard data.weekAudioSeconds > 0 else { return "I did all the typing." }
-        let talked = data.weekAudioSeconds < 60 ? "under a minute"
-            : Duration.seconds(data.weekAudioSeconds).formatted(.units(allowed: [.hours, .minutes], width: .wide))
+    private func talkSentence(_ shown: PeriodDetails) -> String {
+        let data = shown.insights
+        guard data.totalWords > 0 else {
+            switch shown.period {
+            case .today: return "Quiet day so far. I'm ready when you are."
+            case .week: return "Quiet week so far. I'm ready when you are."
+            case .allTime: return "Nothing yet. I'm ready when you are."
+            }
+        }
+        guard data.audioSeconds > 0 else { return "I did all the typing." }
+        let talked = data.audioSeconds < 60 ? "under a minute"
+            : Duration.seconds(data.audioSeconds).formatted(.units(allowed: [.hours, .minutes], width: .wide))
         return "You talked for \(talked). I did all the typing."
     }
 
-    private func sinceSentence(_ data: HistoryInsights) -> String {
-        let start = weekStart(data)
-        return data.calendar.isDateInToday(start) ? "That's today so far."
-            : "That's this week, \(start.formatted(.dateTime.weekday(.wide))) to today."
+    private func sinceSentence(_ shown: PeriodDetails) -> String {
+        let data = shown.insights
+        switch shown.period {
+        case .today:
+            return "That's today so far."
+        case .week:
+            let start = weekStart(data)
+            return data.calendar.isDateInToday(start) ? "That's today so far."
+                : "That's this week, \(start.formatted(.dateTime.weekday(.wide))) to today."
+        case .allTime:
+            guard let first = data.firstEntryDate else { return "That's everything I've kept." }
+            return "That's everything I've kept since \(first.formatted(.dateTime.day().month(.wide).year()))."
+        }
     }
 
     private func weekStart(_ data: HistoryInsights) -> Date {
@@ -201,6 +213,27 @@ struct InsightsView: View {
     }
 
     // MARK: Activity
+
+    private func activity(_ all: HistoryInsights, _ shown: PeriodDetails) -> ActivityChart {
+        let data = shown.insights
+        switch shown.period {
+        case .today:
+            let today = data.week.first { data.calendar.isDateInToday($0.date) }
+            return .today(today?.hours ?? Array(repeating: 0, count: 24), calendar: data.calendar)
+        case .week:
+            return .week(all.week, calendar: all.calendar)
+        case .allTime:
+            return .allTime(months: data.months, weekdayHours: data.weekdayHours, calendar: data.calendar)
+        }
+    }
+
+    @ViewBuilder private func activityRange(_ all: HistoryInsights, period: InsightPeriod) -> some View {
+        if period == .week {
+            weekStepper(all)
+        } else if period == .today {
+            Text(Date().formatted(.dateTime.day().month(.abbreviated))).textCase(nil).tracking(0).padding(.trailing, 14)
+        }
+    }
 
     private func weekStepper(_ data: HistoryInsights) -> some View {
         let first = data.week.first?.date ?? Date(), last = data.week.last?.date ?? first
@@ -225,33 +258,26 @@ struct InsightsView: View {
 
     // MARK: Word cloud
 
-    @ViewBuilder private var cloudRow: some View {
-        let cloud = selectedDetails?.cloud
-        let words = cloud?.words ?? []
-        let entries = cloud?.entryCount ?? 0
-        if let detailsError {
-            Label(detailsError, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-            Button("Try Again") { refresh() }
-        } else if cloud != nil, words.isEmpty {
+    @ViewBuilder private func cloudRow(_ shown: PeriodDetails) -> some View {
+        let entries = shown.cloud.entryCount
+        if shown.cloud.words.isEmpty {
             HStack(spacing: 10) {
                 PixelSprite(sprite: .zz, scale: 2)
-                Text("Nothing yet \(periodDescription). I'm napping.").foregroundStyle(.secondary)
+                Text("Nothing yet \(description(shown.period)). I'm napping.").foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 120)
-        } else if cloud != nil {
+        } else {
             VStack(spacing: 4) {
-                PixelWordCloud(words: words, seed: cloudSeed, period: periodDescription)
-                Text("From \(entries.formatted()) \(entries == 1 ? "dictation" : "dictations") \(periodDescription). Hover a word to see how often you said it.")
+                PixelWordCloud(words: shown.cloud.words, seed: cloudSeed(shown.period), period: description(shown.period))
+                Text("From \(entries.formatted()) \(entries == 1 ? "dictation" : "dictations") \(description(shown.period)). Hover a word to see how often you said it.")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit()
                     .frame(maxWidth: .infinity)
             }
-        } else {
-            Text("Reading words \(periodDescription)…").foregroundStyle(.secondary)
         }
     }
 
     /// One picture per day and period, so the cloud doesn't reshuffle on every visit.
-    private var cloudSeed: UInt64 {
+    private func cloudSeed(_ period: InsightPeriod) -> UInt64 {
         UInt64(Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0) &* 3 + UInt64(period.rawValue)
     }
 
@@ -303,8 +329,8 @@ struct InsightsView: View {
 
     @MainActor private func loadDetails() async {
         let requestedPeriod = period
-        // Keep the current details on screen while they reload. Blanking them on every dictation collapsed the page,
-        // which hid a classic scroll bar and changed the width the cloud is packed to.
+        // Keep the current details on screen, under their own period, until the new ones land. Blanking them
+        // collapsed the page, which hid a classic scroll bar and changed the width the cloud is packed to.
         detailsError = nil
         do {
             guard let store = history.store else { throw HistoryError.database("History is unavailable, so there's nothing to count yet.") }
@@ -323,11 +349,79 @@ struct InsightsView: View {
     }
 }
 
-/// Words per day beside When you talk. Both share one width, so the hour squares stay square and the
+/// What the Activity plate draws for a period. Without rows, the bars take the whole plate.
+private struct ActivityChart {
+    struct Bar {
+        var label: String
+        /// How a sentence names this bar: "Tuesday", "9 AM", "October".
+        var name: String
+        /// The full name for hovering and VoiceOver.
+        var detail: String
+        var words: Int
+        var current = false
+        var future = false
+    }
+
+    struct Row {
+        var label: String
+        var name: String
+        var detail: String
+        var hours: [Int]
+        var current = false
+    }
+
+    var title: String
+    var empty: String
+    var bars: [Bar]
+    var rows: [Row] = []
+    /// The words the dashed average is taken over; empty draws none.
+    var averaged: [Int] = []
+
+    static func today(_ hours: [Int], calendar: Calendar) -> ActivityChart {
+        let now = calendar.component(.hour, from: Date())
+        return ActivityChart(title: "Words per hour", empty: "Nothing yet today.", bars: hours.indices.map {
+            Bar(label: $0 % 6 == 0 ? hourName($0) : "", name: hourName($0), detail: hourName($0),
+                words: hours[$0], current: $0 == now, future: $0 > now)
+        })
+    }
+
+    static func week(_ days: [InsightDay], calendar: Calendar) -> ActivityChart {
+        let startOfToday = calendar.startOfDay(for: Date())
+        func label(_ day: InsightDay) -> String { day.date.formatted(.dateTime.weekday(.abbreviated)) }
+        func name(_ day: InsightDay) -> String { calendar.isDateInToday(day.date) ? "Today" : day.date.formatted(.dateTime.weekday(.wide)) }
+        return ActivityChart(title: "Words per day", empty: "Nothing that week.", bars: days.map {
+            Bar(label: label($0), name: name($0), detail: $0.date.formatted(.dateTime.weekday(.wide).day().month(.wide)),
+                words: $0.words, current: calendar.isDateInToday($0.date), future: $0.date > startOfToday)
+        }, rows: days.map {
+            Row(label: label($0), name: name($0), detail: $0.date.formatted(date: .complete, time: .omitted),
+                hours: $0.hours, current: calendar.isDateInToday($0.date))
+        }, averaged: days.filter { $0.date <= startOfToday }.map(\.words))
+    }
+
+    static func allTime(months: [InsightWords], weekdayHours: [[Int]], calendar: Calendar) -> ActivityChart {
+        ActivityChart(title: "Last 12 months", empty: "Nothing in that time.", bars: months.map {
+            Bar(label: $0.date.formatted(.dateTime.month(.abbreviated)), name: $0.date.formatted(.dateTime.month(.wide)),
+                detail: $0.date.formatted(.dateTime.month(.wide).year()), words: $0.words,
+                current: calendar.isDate($0.date, equalTo: Date(), toGranularity: .month))
+        }, rows: weekdayHours.indices.map {
+            let symbol = (calendar.firstWeekday - 1 + $0) % 7
+            let plural = calendar.weekdaySymbols[symbol] + "s"
+            return Row(label: calendar.shortWeekdaySymbols[symbol], name: plural, detail: plural, hours: weekdayHours[$0])
+        }, averaged: months.drop { $0.words == 0 }.map(\.words))
+    }
+
+    /// The hour on a fixed date in GMT, which has every hour; today's date skips one when the clocks go forward.
+    static func hourName(_ hour: Int) -> String {
+        var style = Date.FormatStyle(date: .omitted, time: .shortened)
+        style.timeZone = .gmt
+        return Date(timeIntervalSinceReferenceDate: Double(hour) * 3600).formatted(style)
+    }
+}
+
+/// The bars beside When you talk. Both share one width, so the hour squares stay square and the
 /// bars stand exactly as tall as the grid.
 private struct ActivityRow: View {
-    let days: [InsightDay]
-    let calendar: Calendar
+    let chart: ActivityChart
     @State private var width: CGFloat = 0
 
     private static let labelWidth: CGFloat = 26
@@ -335,32 +429,36 @@ private struct ActivityRow: View {
     /// The divider and the space either side of it.
     private static let middle: CGFloat = 33
 
-    /// Today, when the week shown contains it: full moss, a bold label and its count.
-    private var today: Int? { days.firstIndex { calendar.isDateInToday($0.date) } }
+    /// The bar for now, when the chart contains it: full moss, a bold label and its count.
+    private var current: Int? { chart.bars.firstIndex(where: \.current) }
 
     var body: some View {
         let half = max(0, (width - Self.middle) / 2)
         let cell = max(6, ((half - Self.labelWidth - 24 * Self.gap) / 24).rounded(.down))
+        let height = 7 * cell + 6 * Self.gap
         HStack(alignment: .top, spacing: 16) {
-            bars(width: half, height: 7 * cell + 6 * Self.gap).frame(maxWidth: .infinity, alignment: .leading)
-            Divider().padding(.vertical, -9)
-            grid(cell: cell).frame(maxWidth: .infinity, alignment: .leading)
+            bars(width: chart.rows.isEmpty ? width : half, height: height).frame(maxWidth: .infinity, alignment: .leading)
+            if !chart.rows.isEmpty {
+                Divider().padding(.vertical, -9)
+                grid(cell: cell).frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.vertical, 6)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
-    // MARK: Words per day
+    // MARK: Bars
 
     private func bars(width: CGFloat, height: CGFloat) -> some View {
-        let top = max(1, days.map(\.words).max() ?? 0)
-        let startOfToday = calendar.startOfDay(for: Date())
-        let elapsed = days.filter { $0.date <= startOfToday }
-        let average = elapsed.isEmpty ? 0 : Double(elapsed.reduce(0) { $0 + $1.words }) / Double(elapsed.count)
-        let peak = days.indices.max { days[$0].words < days[$1].words }.flatMap { days[$0].words > 0 ? $0 : nil }
+        let bars = chart.bars
+        let top = max(1, bars.map(\.words).max() ?? 0)
+        let average = chart.averaged.isEmpty ? 0 : Double(chart.averaged.reduce(0, +)) / Double(chart.averaged.count)
+        let peak = bars.indices.max { bars[$0].words < bars[$1].words }.flatMap { bars[$0].words > 0 ? $0 : nil }
+        // Narrow columns can't hold two counts side by side, so the peak keeps its own.
+        let crowded = bars.count > 7 && current != nil && peak != nil && abs(current! - peak!) == 1
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
-                heading("Words per day", detail: peak.map { "\(dayName($0)) was the big one: \(days[$0].words.formatted())." } ?? "Nothing that week.")
+                heading(chart.title, detail: peak.map { "\(bars[$0].name) was the big one: \(bars[$0].words.formatted())." } ?? chart.empty)
                 Spacer(minLength: 0)
                 if average > 0 {
                     HStack(spacing: 5) {
@@ -371,9 +469,9 @@ private struct ActivityRow: View {
                 }
             }
             HStack(spacing: 0) {
-                ForEach(days.indices, id: \.self) { index in
-                    column(index, top: top, barWidth: (width / 7 * 0.54).rounded(), height: height,
-                           labelled: index == today || index == peak, future: days[index].date > startOfToday)
+                ForEach(bars.indices, id: \.self) { index in
+                    column(index, top: top, barWidth: (width / CGFloat(bars.count) * 0.54).rounded(), height: height,
+                           labelled: index == peak || (index == current && !crowded))
                 }
             }
             .frame(height: height)
@@ -385,10 +483,11 @@ private struct ActivityRow: View {
             }
             .padding(.top, 22)
             HStack(spacing: 0) {
-                ForEach(days.indices, id: \.self) { index in
-                    Text(days[index].date.formatted(.dateTime.weekday(.abbreviated)))
-                        .font(.system(size: 10.5, weight: index == today ? .semibold : .regular))
-                        .foregroundStyle(index == today ? .primary : .secondary)
+                ForEach(bars.indices, id: \.self) { index in
+                    Text(bars[index].label)
+                        .font(.system(size: 10.5, weight: index == current ? .semibold : .regular))
+                        .foregroundStyle(index == current ? .primary : .secondary)
+                        .fixedSize()
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -396,14 +495,14 @@ private struct ActivityRow: View {
         }
     }
 
-    private func column(_ index: Int, top: Int, barWidth: CGFloat, height: CGFloat, labelled: Bool, future: Bool) -> some View {
-        let day = days[index]
-        let barHeight = day.words > 0 ? max(4, height * CGFloat(day.words) / CGFloat(top)) : 0
+    private func column(_ index: Int, top: Int, barWidth: CGFloat, height: CGFloat, labelled: Bool) -> some View {
+        let bar = chart.bars[index]
+        let barHeight = bar.words > 0 ? max(4, height * CGFloat(bar.words) / CGFloat(top)) : 0
         return ZStack(alignment: .bottom) {
             RoundedRectangle(cornerRadius: 6, style: .continuous).fill(.primary.opacity(0.045))
             if barHeight > 0 {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(GoblinBrand.moss.opacity(index == today ? 1 : 0.55))
+                    .fill(GoblinBrand.moss.opacity(index == current ? 1 : 0.55))
                     .frame(height: barHeight)
             }
         }
@@ -412,53 +511,54 @@ private struct ActivityRow: View {
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             if labelled {
-                Text(day.words.formatted()).font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                Text(bar.words.formatted()).font(.system(size: 11, weight: .semibold)).monospacedDigit()
                     .fixedSize().offset(y: -(max(barHeight, 4) + 5))
             }
         }
-        .opacity(future ? 0.5 : 1)
-        .help("\(day.date.formatted(.dateTime.weekday(.wide).day().month(.wide))) · \(day.words.formatted()) words")
+        .opacity(bar.future ? 0.5 : 1)
+        .help("\(bar.detail) · \(bar.words.formatted()) words")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
-        .accessibilityValue("\(day.words) words")
+        .accessibilityLabel(bar.detail)
+        .accessibilityValue("\(bar.words) words")
     }
 
     // MARK: When you talk
 
     private func grid(cell: CGFloat) -> some View {
-        let top = max(1, days.flatMap(\.hours).max() ?? 0)
-        let totals = (0..<24).map { hour in days.reduce(0) { $0 + $1.hours[hour] } }
+        let rows = chart.rows
+        let top = max(1, rows.flatMap(\.hours).max() ?? 0)
+        let totals = (0..<24).map { hour in rows.reduce(0) { $0 + $1.hours[hour] } }
         let busiest = totals.indices.max { totals[$0] < totals[$1] }.flatMap { totals[$0] > 0 ? $0 : nil }
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 8) {
-                heading("When you talk", detail: busiest.map { "Busiest around \(hourName($0))." } ?? "No words that week.")
+                heading("When you talk", detail: busiest.map { "Busiest around \(ActivityChart.hourName($0))." } ?? chart.empty)
                 Spacer(minLength: 0)
                 Text("Each square is one hour").font(.system(size: 10.5)).foregroundStyle(.secondary).padding(.top, 3)
             }
             VStack(alignment: .leading, spacing: Self.gap) {
-                ForEach(days.indices, id: \.self) { index in
-                    let day = days[index]
+                ForEach(rows.indices, id: \.self) { index in
+                    let row = rows[index]
                     HStack(spacing: Self.gap) {
-                        Text(day.date.formatted(.dateTime.weekday(.abbreviated)))
-                            .font(.system(size: 10, weight: index == today ? .semibold : .regular))
-                            .foregroundStyle(index == today ? .primary : .secondary)
+                        Text(row.label)
+                            .font(.system(size: 10, weight: row.current ? .semibold : .regular))
+                            .foregroundStyle(row.current ? .primary : .secondary)
                             .frame(width: Self.labelWidth, alignment: .leading)
                         ForEach(0..<24, id: \.self) { hour in
                             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                .fill(shade(day.hours[hour], top: top))
+                                .fill(shade(row.hours[hour], top: top))
                                 .frame(width: cell, height: cell)
-                                .help("\(dayName(index)) \(hourName(hour)) · \(day.hours[hour] > 0 ? "\(day.hours[hour].formatted()) words" : "quiet")")
+                                .help("\(row.name) \(ActivityChart.hourName(hour)) · \(row.hours[hour] > 0 ? "\(row.hours[hour].formatted()) words" : "quiet")")
                         }
                     }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
-                    .accessibilityValue(hourSummary(day))
+                    .accessibilityLabel(row.detail)
+                    .accessibilityValue(hourSummary(row))
                 }
             }
             .padding(.top, 22)
             HStack(spacing: 0) {
                 ForEach([0, 6, 12, 18], id: \.self) { hour in
-                    Text(hourName(hour)).frame(width: 6 * (cell + Self.gap), alignment: .leading)
+                    Text(ActivityChart.hourName(hour)).frame(width: 6 * (cell + Self.gap), alignment: .leading)
                 }
             }
             .font(.system(size: 10.5)).foregroundStyle(.tertiary).monospacedDigit()
@@ -466,7 +566,7 @@ private struct ActivityRow: View {
         }
     }
 
-    /// Four steps of moss by share of the week's busiest hour; an empty hour is a faint square.
+    /// Four steps of moss by share of the busiest hour; an empty hour is a faint square.
     private func shade(_ words: Int, top: Int) -> Color {
         guard words > 0 else { return .primary.opacity(0.045) }
         let level = min(3, Int(Double(words) / Double(top) * 4 - 0.0001))
@@ -480,22 +580,11 @@ private struct ActivityRow: View {
         }
     }
 
-    private func dayName(_ index: Int) -> String {
-        calendar.isDateInToday(days[index].date) ? "Today" : days[index].date.formatted(.dateTime.weekday(.wide))
-    }
-
     /// Every active hour with its count, so VoiceOver hears what hovering shows.
-    private func hourSummary(_ day: InsightDay) -> String {
-        let active = day.hours.indices.filter { day.hours[$0] > 0 }
+    private func hourSummary(_ row: ActivityChart.Row) -> String {
+        let active = row.hours.indices.filter { row.hours[$0] > 0 }
         guard !active.isEmpty else { return "No words" }
-        return active.map { "\(hourName($0)), \(day.hours[$0].formatted()) \(day.hours[$0] == 1 ? "word" : "words")" }.joined(separator: "; ")
-    }
-
-    /// The hour on a fixed date in GMT, which has every hour; today's date skips one when the clocks go forward.
-    private func hourName(_ hour: Int) -> String {
-        var style = Date.FormatStyle(date: .omitted, time: .shortened)
-        style.timeZone = .gmt
-        return Date(timeIntervalSinceReferenceDate: Double(hour) * 3600).formatted(style)
+        return active.map { "\(ActivityChart.hourName($0)), \(row.hours[$0].formatted()) \(row.hours[$0] == 1 ? "word" : "words")" }.joined(separator: "; ")
     }
 }
 

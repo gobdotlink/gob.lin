@@ -209,6 +209,33 @@ struct HistoryInsightsTests {
         #expect(emptyCloud.entryCount == 0 && emptyCloud.words.isEmpty)
     }
 
+    @Test func typingSavedComparesTypingTimeWithTalkingTime() {
+        let now = date("2026-10-14T12:00:00Z")
+        var aggregate = HistoryInsightsAccumulator(now: now, week: now, calendar: calendar())
+        aggregate.add(date: now, words: 400, duration: 120, bundle: nil, name: nil)
+        aggregate.add(date: now, words: 400, duration: nil, bundle: nil, name: nil)
+        // 400 timed words take ten minutes to type and took two to say. Untimed words are left out.
+        #expect(aggregate.finish().typingSecondsSaved == 480)
+        var slow = HistoryInsightsAccumulator(now: now, week: now, calendar: calendar())
+        slow.add(date: now, words: 1, duration: 600, bundle: nil, name: nil)
+        #expect(slow.finish().typingSecondsSaved == 0)
+    }
+
+    @Test func allTimeChartsCoverTwelveMonthsAndWeekdayHours() {
+        let now = date("2026-10-14T12:00:00Z") // A Wednesday; these weeks start on Monday.
+        var aggregate = HistoryInsightsAccumulator(now: now, week: now, calendar: calendar())
+        aggregate.add(date: date("2025-10-31T09:00:00Z"), words: 7, duration: nil, bundle: nil, name: nil)
+        aggregate.add(date: date("2025-11-03T09:00:00Z"), words: 2, duration: nil, bundle: nil, name: nil)
+        aggregate.add(date: date("2026-10-12T09:00:00Z"), words: 3, duration: nil, bundle: nil, name: nil)
+        aggregate.add(date: now, words: 5, duration: nil, bundle: nil, name: nil)
+        let result = aggregate.finish()
+        #expect(result.months.count == 12)
+        #expect(result.months.first?.date == date("2025-11-01T00:00:00Z") && result.months.first?.words == 2)
+        #expect(result.months.last?.date == date("2026-10-01T00:00:00Z") && result.months.last?.words == 8)
+        #expect(result.weekdayHours.count == 7 && result.weekdayHours.allSatisfy { $0.count == 24 })
+        #expect(result.weekdayHours[0][9] == 5 && result.weekdayHours[2][12] == 5 && result.weekdayHours[4][9] == 7)
+    }
+
     @Test func periodBoundariesRespectLocalCalendarAndDaylightSaving() {
         let now = date("2026-11-04T12:00:00Z")
         let cal = calendar("America/Los_Angeles")

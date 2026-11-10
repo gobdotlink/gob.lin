@@ -55,7 +55,19 @@ public struct HistoryInsights: Sendable {
     /// When the oldest entry with words started, so the week stepper knows where History ends.
     public var firstEntryDate: Date?
     public var applications: [InsightApplication] = []
+    /// The twelve calendar months ending with this one, oldest first.
+    public var months: [InsightWords] = []
+    /// Words by weekday and hour: seven rows of 24, the calendar's first weekday first.
+    public var weekdayHours = Array(repeating: Array(repeating: 0, count: 24), count: 7)
     public var calendar: Calendar
+
+    /// A typical typing speed, which the time saved is measured against.
+    public static let typingWordsPerMinute = 40.0
+
+    /// How long the timed words would have taken to type, less the time spent saying them.
+    public var typingSecondsSaved: Double {
+        max(0, Double(timedWords) / Self.typingWordsPerMinute * 60 - audioSeconds)
+    }
 
     public var wordsPerMinute: Double? { Self.pace(words: timedWords, seconds: audioSeconds) }
     public var weekWordsPerMinute: Double? { Self.pace(words: weekTimedWords, seconds: weekAudioSeconds) }
@@ -77,6 +89,7 @@ struct HistoryInsightsAccumulator {
     private let shownWeek: DateInterval
     private var dailyWords: [Date: Int] = [:]
     private var weekHours: [Date: [Int]] = [:]
+    private var monthWords: [Date: Int] = [:]
     private var applications: [String: InsightApplication] = [:]
 
     init(now: Date, week: Date, calendar: Calendar) {
@@ -95,6 +108,9 @@ struct HistoryInsightsAccumulator {
         let day = calendar.startOfDay(for: date)
         dailyWords[day, default: 0] += words
         if day == today { result.todayWords += words }
+        if let month = calendar.dateInterval(of: .month, for: date)?.start { monthWords[month, default: 0] += words }
+        let weekday = (calendar.component(.weekday, from: date) - calendar.firstWeekday + 7) % 7
+        result.weekdayHours[weekday][calendar.component(.hour, from: date)] += words
         let thisWeek = date >= weekStart
         if thisWeek { result.weekWords += words }
         if date >= shownWeek.start, date < shownWeek.end {
@@ -133,6 +149,11 @@ struct HistoryInsightsAccumulator {
             calendar.date(byAdding: .day, value: offset, to: shownWeek.start).map {
                 let day = calendar.startOfDay(for: $0)
                 return InsightDay(date: day, hours: weekHours[day] ?? Array(repeating: 0, count: 24))
+            }
+        }
+        result.months = (-11...0).compactMap { offset in
+            calendar.date(byAdding: .month, value: offset, to: today).flatMap { calendar.dateInterval(of: .month, for: $0)?.start }.map {
+                InsightWords(date: $0, words: monthWords[$0, default: 0])
             }
         }
         let activeDays = dailyWords.keys.sorted()

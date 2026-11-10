@@ -168,17 +168,18 @@ entries. It never uses your recordings or history folder.
 ## Insights
 
 Open Insights from the popover’s weekly words summary or the shared window’s sidebar
-for today’s, this calendar week’s, and total saved words, weighted dictation WPM, current/longest daily streaks,
-a seven-day word chart, a selectable day’s hourly timeline, and words by app.
+for typing time saved, words, weighted dictation WPM, current/longest daily streaks,
+activity charts, a word cloud, and words by app.
 Calculations stay local and use all retained History entries, independent of search
 or pagination. Deletion and retention reduce totals; starred entries still count.
-The word cloud and "Where I typed" graphs share a Today / This Week / All Time
-selector. App counts and percentages use only words saved in the selected period.
+A Today / This Week / All Time selector at the top sets the period for everything
+except streaks. App counts and percentages use only words saved in the selected period.
 
 Words use History’s saved final-text whitespace count. Reprocessing creates another
 entry and counts again. WPM uses final words divided by recorded audio minutes
 (including silence) only where words and a positive duration are available; missing
-duration never becomes a guessed speed. Days use the entry start in the Mac’s current
+duration never becomes a guessed speed. Typing saved compares those same words at
+40 words a minute, a typical typing speed, with the audio time. Days use the entry start in the Mac’s current
 calendar/time zone; a current streak can end today or yesterday.
 
 ## CLI evaluation
