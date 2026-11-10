@@ -97,6 +97,13 @@ public actor HistoryStore {
             .map { try decode($0[0]) }
     }
 
+    /// Each app and project dictated into, for listing project words under their apps.
+    public func dictionaryProjectUses() throws -> [DictionaryProjectUse] {
+        let application = "json_extract(metadata, '$.dictionaryBundleIdentifier')", project = "json_extract(metadata, '$.dictionaryProject')"
+        return try database.query("SELECT DISTINCT \(application), \(project) FROM entries WHERE \(application) IS NOT NULL AND \(project) IS NOT NULL")
+            .compactMap { row in row[0].flatMap { app in row[1].map { DictionaryProjectUse(application: app, project: $0) } } }
+    }
+
     /// Sizes of History's smart lists and per-app lists, busiest app first.
     public func counts() throws -> HistoryCounts {
         let totals = try database.query("SELECT COUNT(*), COALESCE(SUM(starred), 0), COALESCE(SUM(json_extract(metadata, '$.processingWarning') IS NOT NULL), 0), COALESCE(SUM(json_extract(metadata, '$.audioDuration')), 0) FROM entries").first ?? []

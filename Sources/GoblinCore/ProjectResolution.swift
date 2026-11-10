@@ -4,7 +4,7 @@ import Foundation
 /// A project detected where dictation started, and how it was found.
 public struct DetectedProject: Equatable, Sendable {
     public enum Source: String, Sendable {
-        case repository, t3Database, t3Interface, paseoWorkspaces, paseoInterface
+        case repository, t3Database, t3Interface, paseoWorkspaces, paseoInterface, slackWindow, codexDatabase, claudeSession
     }
 
     public let name: String
@@ -20,6 +20,9 @@ public struct DetectedProject: Equatable, Sendable {
 public enum ProjectResolution {
     public static let t3CodeBundlePrefix = "com.t3tools.t3code"
     public static let paseoBundle = "sh.paseo.desktop"
+    public static let slackBundle = "com.tinyspeck.slackmacgap"
+    public static let codexBundle = "com.openai.codex"
+    public static let claudeBundle = "com.anthropic.claudefordesktop"
 
     public static var t3Database: URL {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".t3/userdata/statev2.sqlite")
@@ -148,6 +151,144 @@ public enum ProjectResolution {
         guard rows.count >= 3, let common = counts.values.max(), common >= 2 else { return nil }
         let unique = rows.filter { counts[$0.style] == 1 }
         return unique.count == 1 ? unique[0].project : nil
+    }
+
+    // MARK: Slack
+
+    /// Slack's list of signed-in workspaces. The App Store build keeps its own in a container, which macOS asks
+    /// permission to read, so that build relies on the window title alone.
+    public static var slackState: URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/Slack/storage/root-state.json")
+    }
+
+    private struct SlackState: Decodable {
+        struct Workspace: Decodable { let name: String }
+        let workspaces: [String: Workspace]
+    }
+
+    /// Signed-in Slack workspace names, for scoping terms and reading window titles.
+    public static func slackWorkspaceNames(state: URL = slackState) -> [String] {
+        guard let data = try? Data(contentsOf: state), let decoded = try? JSONDecoder().decode(SlackState.self, from: data) else { return [] }
+        return decoded.workspaces.values.map(\.name).filter { !$0.isEmpty }.sorted()
+    }
+
+    /// The workspace in a Slack window title: "general (Channel) - Acme - 2 new items - Slack". With `known` names, the
+    /// rightmost one that fills whole parts of the title, so a channel or workspace name may itself contain " - ".
+    public static func slackWorkspace(fromTitle title: String, known: [String]) -> String? {
+        let suffix = " - Slack"
+        guard title.hasSuffix(suffix) else { return nil }
+        let body = String(title.dropLast(suffix.count))
+        guard known.isEmpty else {
+            let padded = " - " + body + " - "
+            var best: (name: String, start: String.Index)?
+            for name in known {
+                guard let range = padded.range(of: " - " + name + " - ", options: .backwards) else { continue }
+                if best == nil || range.lowerBound > best!.start || (range.lowerBound == best!.start && name.count > best!.name.count) {
+                    best = (name, range.lowerBound)
+                }
+            }
+            return best?.name
+        }
+        var parts = body.components(separatedBy: " - ")
+        if parts.last?.range(of: #"^\d+ new items?$"#, options: .regularExpression) != nil { parts.removeLast() }
+        guard parts.count >= 2, let workspace = parts.last, !workspace.isEmpty else { return nil }
+        return workspace
+    }
+
+    // MARK: Codex
+
+    public static var codexDirectory: URL { URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex") }
+
+    private struct CodexState: Decodable {
+        struct Project: Decodable { let name: String?; let rootPaths: [String]? }
+        let projects: [String: Project]?
+        enum CodingKeys: String, CodingKey { case projects = "local-projects" }
+    }
+
+    /// The thread database; its file name carries a schema version.
+    private static func codexDatabase(directory: URL) -> URL? {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        let newest = names.compactMap { name -> (version: Int, name: String)? in
+            guard name.hasPrefix("state_"), name.hasSuffix(".sqlite"), let version = Int(name.dropFirst(6).dropLast(7)) else { return nil }
+            return (version, name)
+        }.max { $0.version < $1.version }
+        return newest.map { directory.appendingPathComponent($0.name) }
+    }
+
+    private static func codexNamedProjects(directory: URL) -> [CodexState.Project] {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(".codex-global-state.json")),
+              let state = try? JSONDecoder().decode(CodexState.self, from: data) else { return [] }
+        return Array((state.projects ?? [:]).values)
+    }
+
+    /// The repository name in a git remote, so every worktree of one repository is the same project.
+    static func repositoryName(fromRemote remote: String) -> String? {
+        let trimmed = remote.trimmingCharacters(in: CharacterSet(charactersIn: "/").union(.whitespacesAndNewlines))
+        let last = trimmed.split(whereSeparator: { $0 == "/" || $0 == ":" }).last.map(String.init) ?? ""
+        let name = last.hasSuffix(".git") ? String(last.dropLast(4)) : last
+        return name.isEmpty ? nil : name
+    }
+
+    /// The project of the thread a Codex window is titled after: Codex's page address doesn't name the thread. Threads
+    /// can share a title, so an answer needs all of them to be in one project.
+    public static func codexProject(threadTitle: String, directory: URL = codexDirectory) -> (name: String, root: URL?)? {
+        guard let database = codexDatabase(directory: directory) else { return nil }
+        let rows = query(database, """
+            SELECT DISTINCT cwd || char(10) || coalesce(git_origin_url, '') FROM threads
+            WHERE archived = 0 AND ? IN (name, title)
+            """, binding: threadTitle)
+        let named = codexNamedProjects(directory: directory)
+        var found: (name: String, root: URL?)?
+        for row in rows {
+            let parts = row.components(separatedBy: "\n")
+            guard parts.count == 2 else { return nil }
+            let folder = URL(fileURLWithPath: parts[0])
+            let root = repositoryRoot(containing: folder)
+            guard let name = repositoryName(fromRemote: parts[1])
+                ?? named.first(where: { $0.rootPaths?.contains(parts[0]) == true })?.name ?? root?.lastPathComponent else { return nil }
+            if let found, DictionaryScope.projectKey(found.name) != DictionaryScope.projectKey(name) { return nil }
+            found = found ?? (name, root)
+        }
+        return found
+    }
+
+    /// Codex's named projects and the repositories of its threads, for suggestions.
+    public static func codexProjectNames(directory: URL = codexDirectory) -> [String] {
+        let remotes = codexDatabase(directory: directory).map {
+            query($0, "SELECT DISTINCT git_origin_url FROM threads WHERE archived = 0 AND git_origin_url IS NOT NULL", binding: nil)
+        } ?? []
+        return remotes.compactMap(repositoryName(fromRemote:)) + codexNamedProjects(directory: directory).compactMap(\.name)
+    }
+
+    // MARK: Claude
+
+    public static var claudeSessions: URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/Claude/claude-code-sessions")
+    }
+
+    /// The local Code session in a Claude page address: a path component `local_<uuid>`. Chats have none.
+    public static func claudeSessionID(fromAddress address: String) -> String? {
+        (URL(string: address)?.path ?? address).split(separator: "/").map(String.init)
+            .first { $0.hasPrefix("local_") && UUID(uuidString: String($0.dropFirst(6))) != nil }
+    }
+
+    private struct ClaudeSession: Decodable { let cwd: String?; let originCwd: String? }
+
+    /// The project of a local Claude Code session, from `<account>/<organization>/<session>.json`. The folder a session
+    /// started in comes first, because `cwd` can be a worktree. A session in the home folder has no project.
+    public static func claudeProject(sessionID: String, directory: URL = claudeSessions, home: String = NSHomeDirectory()) -> (name: String, root: URL?)? {
+        guard !sessionID.contains("/") else { return nil }
+        let fileManager = FileManager.default
+        let children = { (url: URL) in (try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [] }
+        for organization in children(directory).flatMap(children) {
+            guard let data = try? Data(contentsOf: organization.appendingPathComponent(sessionID + ".json")) else { continue }
+            guard let session = try? JSONDecoder().decode(ClaudeSession.self, from: data),
+                  let path = [session.originCwd, session.cwd].compactMap({ $0 }).first(where: { !$0.isEmpty }) else { return nil }
+            let folder = URL(fileURLWithPath: path).standardizedFileURL
+            if let root = repositoryRoot(containing: folder) { return (root.lastPathComponent, root) }
+            return folder.path == URL(fileURLWithPath: home).standardizedFileURL.path ? nil : (folder.lastPathComponent, nil)
+        }
+        return nil
     }
 
     // MARK: Interface text

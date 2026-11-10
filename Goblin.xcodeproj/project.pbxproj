@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		FFAAE760044A06AD2F82F252 /* DictionaryApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFA17B3B123891CB73FEB7A5 /* DictionaryApps.swift */; };
+		A2677BD1A8F7B6DC5117D085 /* DictionaryBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D710B61841162BE81AF6FDFF /* DictionaryBrowser.swift */; };
 		E46E35435DC1B195DD560A47 /* ProjectDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A6268F2F75902C35EC4251 /* ProjectDetector.swift */; };
 		04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */; };
 		0FC039959BF7AD5EE416140E /* SpeechModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3FEC9638FA6353F8324835A /* SpeechModelService.swift */; };
@@ -77,6 +78,7 @@
 		51AB615CEA151D8A5A244DCD /* AudioSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsView.swift; sourceTree = "<group>"; };
 		20E5852A6521C1E6DD417238 /* MicrophonesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophonesModel.swift; sourceTree = "<group>"; };
 		EFA17B3B123891CB73FEB7A5 /* DictionaryApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryApps.swift; sourceTree = "<group>"; };
+		D710B61841162BE81AF6FDFF /* DictionaryBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryBrowser.swift; sourceTree = "<group>"; };
 		C9A6268F2F75902C35EC4251 /* ProjectDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetector.swift; sourceTree = "<group>"; };
 		5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySettingsView.swift; sourceTree = "<group>"; };
 		5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationSession.swift; sourceTree = "<group>"; };
@@ -257,6 +259,7 @@
 				E33741D23CEF99390DFA8769 /* DesignComponents.swift */,
 				5B97C70FB8CDF62EED1E5526 /* DictationSession.swift */,
 				EFA17B3B123891CB73FEB7A5 /* DictionaryApps.swift */,
+				D710B61841162BE81AF6FDFF /* DictionaryBrowser.swift */,
 				C9A6268F2F75902C35EC4251 /* ProjectDetector.swift */,
 				5AA1870FC89E1C74D1665B49 /* DictionarySettingsView.swift */,
 				97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */,
@@ -396,6 +399,7 @@
 				1C988146D9FB6911FC8B58EC /* DictationOverlay.swift in Sources */,
 				D762EA37F9BE0EFAFE1BF66B /* DictationSession.swift in Sources */,
 				FFAAE760044A06AD2F82F252 /* DictionaryApps.swift in Sources */,
+				A2677BD1A8F7B6DC5117D085 /* DictionaryBrowser.swift in Sources */,
 				E46E35435DC1B195DD560A47 /* ProjectDetector.swift in Sources */,
 				04AF5635D5A602F79C15CD07 /* DictionarySettingsView.swift in Sources */,
 				5FFE7394E4A1EC402B37C343 /* DirectInsertionVerification.swift in Sources */,

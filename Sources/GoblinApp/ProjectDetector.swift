@@ -4,8 +4,8 @@ import GoblinCore
 
 /// Finds the project open in the app where dictation starts, for project-scoped dictionary terms.
 /// Runs off the main thread with node and time limits, so it never delays recording. Results read from the interface
-/// or a repository walk are cached briefly by page address or document; T3 Code and Paseo storage is read each time,
-/// so renamed projects apply at once.
+/// or a repository walk are cached briefly by page address or document; other apps' storage is read each time, so
+/// renamed projects apply at once.
 actor ProjectDetector {
     private static let cacheLifetime: Duration = .seconds(300)
     /// Every accessibility call: each element has its own timeout, and the deadline can't interrupt a call in progress.
@@ -28,6 +28,22 @@ actor ProjectDetector {
             if let root = ProjectResolution.repositoryRoot(containing: url) {
                 return remember(DetectedProject(name: root.lastPathComponent, source: .repository, root: root), key: bundle + "|" + url.path)
             }
+        }
+        if bundle == ProjectResolution.slackBundle {
+            return Self.string(window, kAXTitleAttribute)
+                .flatMap { ProjectResolution.slackWorkspace(fromTitle: $0, known: ProjectResolution.slackWorkspaceNames()) }
+                .map { DetectedProject(name: $0, source: .slackWindow) }
+        }
+        if bundle == ProjectResolution.codexBundle {
+            return Self.string(window, kAXTitleAttribute).flatMap { ProjectResolution.codexProject(threadTitle: $0) }
+                .map { DetectedProject(name: $0.name, source: .codexDatabase, root: $0.root) }
+        }
+        if bundle == ProjectResolution.claudeBundle {
+            // The window holds an app shell and the claude.ai page; only the page names the session.
+            guard let web = Self.webArea(in: window, deadline: deadline, accepting: { ProjectResolution.claudeSessionID(fromAddress: $0) != nil }),
+                  let session = Self.string(web, "AXURL").flatMap(ProjectResolution.claudeSessionID(fromAddress:)) else { return nil }
+            return ProjectResolution.claudeProject(sessionID: session)
+                .map { DetectedProject(name: $0.name, source: .claudeSession, root: $0.root) }
         }
         guard isT3 || isPaseo, let web = Self.webArea(in: window, deadline: deadline),
               let address = Self.string(web, "AXURL") else { return nil }
@@ -88,14 +104,15 @@ actor ProjectDetector {
         attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
     }
 
-    /// The first web area in a window, breadth-first and shallow.
-    private static func webArea(in window: AXUIElement, deadline: ContinuousClock.Instant) -> AXUIElement? {
+    /// The first web area in a window whose address `accepting` allows, breadth-first and shallow.
+    private static func webArea(in window: AXUIElement, deadline: ContinuousClock.Instant,
+                                accepting: (String) -> Bool = { _ in true }) -> AXUIElement? {
         var queue: [(AXUIElement, Int)] = [(window, 0)]
         var index = 0
         while index < queue.count, index < 400, ContinuousClock.now < deadline, !Task.isCancelled {
             let (element, depth) = queue[index]
             index += 1
-            if string(element, kAXRoleAttribute) == "AXWebArea" { return element }
+            if string(element, kAXRoleAttribute) == "AXWebArea", accepting(string(element, "AXURL") ?? "") { return element }
             if depth < 10 { queue += children(element).prefix(50).map { ($0, depth + 1) } }
         }
         return nil
