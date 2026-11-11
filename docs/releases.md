@@ -21,38 +21,48 @@ ditto -xk /tmp/goblin-release/gob.lin-0.1.1.zip /tmp/goblin-release
 # Quit any existing gob.lin first; copy the extracted gob.lin.app to Applications.
 ```
 
-Use the actual downloaded version in the extraction command. Release ZIPs target
-the architecture of the publishing Mac (Apple Silicon for the current release host).
+Use the actual downloaded version in the extraction command. Release ZIPs are built
+on the Release workflow's Apple silicon runner and run on Apple silicon only.
 The updater rejects a bundle that cannot run on the receiving Mac or macOS version.
 
 ## Signing
 
-`scripts/build.sh` keeps using its stable certificate and designated requirement.
-The same identity must sign every release for an existing installation. A signed
-update is checked against the installed app's designated requirement, including its
-certificate, before any replacement. ZIP size, optional GitHub SHA-256 digest,
-bundle ID, executable name, release version, architecture and minimum macOS are
-checked too. Unsigned, ad-hoc, tampered, mismatched and incompatible updates fail
-without replacing the app. Archive entries cannot escape the expected bundle or
-introduce symlinks. Dependency resource bundles ship inside the archive.
+Releases are signed with a Developer ID Application certificate, notarized by Apple
+and stapled, so a downloaded copy opens without **Open Anyway**. Developer ID builds
+use Apple's default designated requirement, which names the team rather than one
+certificate: a renewed certificate from the same team still updates existing
+installations and keeps their privacy grants. A signed update is checked against
+the installed app's designated requirement before any replacement. ZIP size,
+optional GitHub SHA-256 digest, bundle ID, executable name, release version,
+architecture and minimum macOS are checked too. Unsigned, ad-hoc, tampered,
+mismatched and incompatible updates fail without replacing the app. Archive entries
+cannot escape the expected bundle or introduce symlinks. Dependency resource bundles
+ship inside the archive.
 
-The dedicated local certificate supports trusted internal development installs.
-Keep its private key and reuse it on the release host; do not commit or upload it.
-A different developer's newly generated certificate cannot update this installation.
-For broad public distribution, use a consistent Developer ID identity via
-`GOBLIN_SIGNING_IDENTITY`, notarize and staple the app, then archive that exact
-stapled bundle. The current release command does **not** notarize. Do not present
-locally signed builds as notarized public downloads. Changing signing identity
-requires a manual trusted install and may require granting macOS permissions again.
-Neither the updater nor release scripts remove quarantine or reset privacy grants.
+The dedicated local certificate from `scripts/setup-signing.sh` is for development.
+Its builds pin that certificate, are not notarized and cannot update a Developer ID
+installation, or be updated by one. Installations from before notarized releases
+use the local certificate, so they need one manual install of a notarized release
+and fresh microphone and Accessibility grants. Neither the updater nor release
+scripts remove quarantine or reset privacy grants.
+
+`scripts/package-app.sh` notarizes whenever the app is signed with Developer ID:
+it submits the ZIP with `notarytool`, staples the ticket to the app, checks it with
+`spctl`, then archives that stapled bundle. Notarization reads credentials from a
+`notarytool` keychain profile, `goblin-notary` unless `GOBLIN_NOTARY_PROFILE` names
+another. The Release workflow creates it on its runner. To package a notarized build
+on a Mac, create it once with an app-specific password from the Apple Account:
+
+```sh
+xcrun notarytool store-credentials goblin-notary --apple-id APPLE_ID --team-id TEAM_ID
+```
 
 ## Publish a release
 
 After merging a change to main, decide whether to release it. Implementing or
-merging a feature does not publish it automatically. On the release Mac, install
-Xcode 26.3+, Python 3 and `gh`, authenticate with repository write access, and ensure
-the signing certificate is available in the login keychain. From a clean main
-checkout matching origin/main:
+merging a feature does not publish it automatically. Any maintainer with write
+access can release; no signing material is needed on their Mac. Install Xcode 26.3+
+and Python 3, then from a clean main checkout matching origin/main:
 
 ```sh
 scripts/release.sh 0.1.1
@@ -61,18 +71,29 @@ scripts/release.sh 0.1.1
 Choose a strictly increasing stable `major.minor.patch` version without a `v` prefix.
 The command:
 
-1. Validates the branch, clean tree, remote main, authentication, new tag and version.
+1. Validates the branch, clean tree, remote main, new tag and version.
 2. Updates `Resources/Info.plist` and `GoblinMetadata.swift`, incrementing the build number.
 3. Runs smoke checks, Swift tests, updater checks and the repository privacy scan.
-4. Commits `Release v…`, builds that clean commit, signs the app and creates
-   `dist/gob.lin-VERSION.zip` plus its `.sha256` file.
-5. Creates an annotated tag and atomically pushes main and the tag.
-6. Creates a draft GitHub release, uploads both files, and publishes it as latest
-   with generated release notes only after uploads succeed.
+4. Commits `Release v…`, creates an annotated tag and atomically pushes main and the tag.
 
-`scripts/package-app.sh [output-directory]` builds and archives without committing,
-pushing, tagging or publishing. `dist/` is ignored. The release command is the
-publisher; CI only validates builds and updater safety and needs no signing secrets.
+The tag starts the Release workflow (`.github/workflows/release.yml`) on a macOS runner.
+It checks the tag is on main, matches `Info.plist` and is newer than the latest release,
+compiles, then loads the Developer ID certificate into a temporary keychain. It signs, notarizes and staples the app with
+`scripts/package-app.sh`, and stops unless Gatekeeper accepts the result. It then creates
+a draft release, uploads `gob.lin-VERSION.zip` and its `.sha256`, and publishes it as
+latest with generated notes only after uploads succeed.
+
+The workflow's secrets live in the repository's `release` environment, which accepts
+`v*` tags only: `DEVELOPER_ID_P12` (base64), `DEVELOPER_ID_P12_PASSWORD`,
+`NOTARY_APPLE_ID`, `NOTARY_TEAM_ID` and `NOTARY_PASSWORD` (an app-specific password).
+Pull requests, including from forks, never receive them. Never put these values in
+the repository, workflow files or logs. When the certificate is renewed or the
+password revoked, replace the secrets; updates keep working because releases pin
+the team, not the certificate.
+
+`scripts/package-app.sh [output-directory]` builds, notarizes Developer ID builds and
+archives without committing, pushing, tagging or publishing. `dist/` is ignored. The
+Build workflow only validates builds and updater safety and has no signing secrets.
 
 ## Update behavior
 
@@ -95,15 +116,23 @@ History, recordings, model files, settings and credentials stay outside the bund
 
 ## Failures and validation
 
-Before a version commit, failed checks restore the two version files. After the
-commit, failures leave the release commit intact for inspection. If packaging
-fails, fix the cause and rerun `scripts/package-app.sh`; then create/push the
-annotated tag for that exact release commit. If push fails, no release is published;
-resolve the remote state before retrying. Never move an already published tag.
-If an upload fails, the release remains a draft: verify the tag and artifact, upload
-the missing ZIP/checksum with `gh release upload`, then publish that draft with
-`gh release edit vVERSION --repo gobdotlink/gob.lin --draft=false --latest`.
-Do not bump to another version merely to recover an unpublished draft.
+Before a version commit, failed checks restore the two version files. If push
+fails, nothing is tagged remotely or published, but the release commit and tag stay
+in your checkout, so rerunning the command fails. After a transient failure, push
+them with `git push --atomic origin main vVERSION`. If main moved on GitHub, drop
+them with `git tag -d vVERSION`, `git fetch origin` and `git reset --keep origin/main`,
+which stops rather than overwrite uncommitted edits, then run the command again.
+Never move an already pushed tag.
+
+If the Release workflow fails, nothing is published. For a missing or wrong secret,
+or a transient Apple or GitHub failure, fix it and re-run the failed workflow. The
+workflow refuses a tag that is not newer than the latest release, so a superseded
+tag never replaces a newer release. A rejected notarization prints the submission
+ID; `xcrun notarytool log SUBMISSION_ID --keychain-profile goblin-notary` on a Mac
+with the profile says why. If the cause needs a code change, release the fix as the
+next version. If an upload fails, the release remains a draft: re-run the workflow
+after deleting the draft, or upload the missing files with `gh release upload` and
+publish it with `gh release edit vVERSION --repo gobdotlink/gob.lin --draft=false --latest`.
 
 ```sh
 swift test

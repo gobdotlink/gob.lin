@@ -50,11 +50,21 @@ for resource in "$binary_directory"/*.bundle; do
     cp -R "$resource" "$app/Contents/Resources/"
 done
 
-# Pin to the certificate public identity, not the changing executable hash.
-requirement="designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\""
-codesign --force --options runtime --timestamp=none \
-    --entitlements Resources/Goblin.entitlements --sign "$certificate" \
-    --requirements "=$requirement" "$app"
+# Match without a pipe: under pipefail, an early-exiting grep can make a match look like a miss.
+case "$identities" in
+    *"$certificate \"Developer ID Application: "*) developer_id=true ;;
+    *) developer_id=false ;;
+esac
+if "$developer_id"; then
+    # Apple's default requirement pins the team, so a renewed certificate still updates installs
+    # and keeps privacy grants. Notarization needs a secure timestamp, which needs the network.
+    signing=(--timestamp)
+else
+    # A self-signed certificate has no Apple anchor: pin its public identity, not the executable hash.
+    signing=(--timestamp=none --requirements "=designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\"")
+fi
+codesign --force --options runtime "${signing[@]}" \
+    --entitlements Resources/Goblin.entitlements --sign "$certificate" "$app"
 codesign --verify --strict --verbose=2 "$app"
 # Replace only after signing succeeds; never accumulate stale resources between releases.
 mkdir -p .build/app
