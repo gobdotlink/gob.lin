@@ -35,11 +35,12 @@ Exact aliases continue to work for every model and every active entry. When Clea
 
 iCloud keeps whichever copy was written last, so the copy itself has to merge. `SyncedDictionary` holds every entry with the time it last changed, plus a marker for each deleted entry. `SyncedDictionary.reconcile` notes what changed on this device since its last sync, merges the iCloud copy entry by entry with the newer side winning, and says whether iCloud is missing anything. A deletion is a change like any other, so a deleted word isn't brought back by a device that still has it.
 
-- **Same word on two devices:** a spelling or alias belongs to one entry, so when two devices each added it before syncing, the newer entry stays and the other is deleted, along with its other aliases and scopes.
+- **Same word on two devices:** a spelling or alias belongs to one entry, so when two devices each added it before syncing, the newer entry shows and the other is hidden. Hidden entries stay in the synced copy, so which one shows never depends on the order the copies met in, and no word is lost when a third device's entry displaces the one that was showing. Deleting a word, or editing it off an entry, also deletes the copies hidden behind it, so they don't show in its place.
 - **Clocks:** the newer side is decided by each device's clock. An edit is always stamped later than the version it replaces, so it wins even when the other device's clock runs ahead.
 - **Order:** each device keeps its own order, with words from other devices added as its newest.
 - **Files:** `dictionary.json` keeps its format. The times and deletion markers live beside it in `dictionary-sync.json`, which is saved after the entries.
-- **Limits:** iCloud allows 1 MB, which is several thousand entries. Deletion markers are kept forever.
+- **Limits:** iCloud allows 1 MB, which is several thousand entries. Deletion markers and hidden entries are kept forever.
+- **Crashes:** if gob.lin stops between saving the entries and saving their times, entries that came from another device are stamped as changed here on the next sync. A change another device made to the same entry in that moment is overridden.
 
 ## Browsing
 

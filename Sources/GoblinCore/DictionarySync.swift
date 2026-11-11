@@ -49,17 +49,39 @@ public struct SyncedDictionary: Codable, Equatable, Sendable {
         return (try DictionaryRepository.validated(state.applied(to: entries)), state, state != remote)
     }
 
+    /// The entries a dictionary shows: every record that isn't deleted, except that a spelling or alias belongs to one
+    /// entry, so where two devices each added the same word the newer entry shows and the other stays hidden. Hidden
+    /// entries are kept, not deleted, so what shows depends only on the records, never on the order copies arrived in:
+    /// when a third device's entry displaces the one showing, the word hidden behind it shows again.
+    // ponytail: hidden entries, like deletion markers, are never pruned.
+    private var shown: [String: Record] {
+        var owned: Set<String> = []
+        var result: [String: Record] = [:]
+        for (id, record) in records.sorted(by: { ($0.value.modified, $0.key) > ($1.value.modified, $1.key) }) {
+            guard let keys = record.entry?.keys, !keys.contains(where: owned.contains) else { continue }
+            owned.formUnion(keys)
+            result[id] = record
+        }
+        return result
+    }
+
     /// Notes what this device added, changed or deleted since the state was saved.
     mutating func adopt(_ entries: [DictionaryEntry], now: Date) {
         // Later than the stamp it replaces, so an edit here still wins when the other device's clock runs ahead.
         func stamp(_ id: String) -> Date { max(now, records[id].map { $0.modified.addingTimeInterval(0.001) } ?? now) }
-        var local: Set<String> = []
-        for entry in entries {
-            let id = entry.id.uuidString
-            local.insert(id)
-            if records[id]?.entry != entry { records[id] = Record(modified: stamp(id), entry: entry) }
+        let shown = shown
+        let local = Dictionary(entries.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
+        // The words this device stopped using: a deleted entry's, and those an edit took off an entry.
+        var dropped: Set<String> = []
+        for (id, record) in shown {
+            dropped.formUnion(Set(record.entry?.keys ?? []).subtracting(local[id]?.keys ?? []))
+            // Only an entry this device was showing can have been deleted here; a hidden one was never in its list.
+            if local[id] == nil { records[id] = Record(modified: stamp(id), entry: nil) }
         }
-        for (id, record) in records where record.entry != nil && !local.contains(id) {
+        dropped.subtract(entries.flatMap(\.keys))
+        for (id, entry) in local where records[id]?.entry != entry { records[id] = Record(modified: stamp(id), entry: entry) }
+        // Deleting or renaming a word deletes the copies of it hidden behind that entry, or they would show in its place.
+        for (id, record) in records where shown[id] == nil && local[id] == nil && record.entry?.keys.contains(where: dropped.contains) == true {
             records[id] = Record(modified: stamp(id), entry: nil)
         }
     }
@@ -69,30 +91,19 @@ public struct SyncedDictionary: Codable, Equatable, Sendable {
         for (id, theirs) in other.records where result.records[id].map(theirs.wins(over:)) ?? true {
             result.records[id] = theirs
         }
-        // Two devices can each add the same word before they first meet. A spelling or alias belongs to one entry, so
-        // the newer entry keeps it and the other is deleted, at its own stamp so the outcome is the same everywhere.
-        // ponytail: the deleted entry's other aliases and scopes go with it; fold them into the winner if people miss them.
-        var owned: Set<String> = []
-        let live = result.records.compactMap { id, record in record.entry.map { (id: id, modified: record.modified, entry: $0) } }
-            .sorted { ($0.modified, $0.id) > ($1.modified, $1.id) }
-        for (id, modified, entry) in live {
-            let keys = ([entry.spelling] + entry.aliases).map(dictionaryKey)
-            if keys.contains(where: owned.contains) { result.records[id] = Record(modified: modified, entry: nil) }
-            else { owned.formUnion(keys) }
-        }
         return result
     }
 
     /// This device's entries after a merge: its own order kept, and entries from other devices added as its newest.
     func applied(to entries: [DictionaryEntry]) -> [DictionaryEntry] {
+        let shown = shown
         let known = Set(entries.map(\.id.uuidString))
-        let added = records.filter { !known.contains($0.key) }
-            .compactMap { id, record in record.entry.map { (id: id, modified: record.modified, entry: $0) } }
-            .sorted { ($0.modified, $0.id) < ($1.modified, $1.id) }
-        return entries.compactMap { records[$0.id.uuidString]?.entry } + added.map(\.entry)
+        let added = shown.filter { !known.contains($0.key) }.sorted { ($0.value.modified, $0.key) < ($1.value.modified, $1.key) }
+        return entries.compactMap { shown[$0.id.uuidString]?.entry } + added.compactMap(\.value.entry)
     }
 }
 
 private extension DictionaryEntry {
     var sortKey: [String] { [spelling] + aliases + ["\n"] + apps + ["\n"] + projects }
+    var keys: [String] { ([spelling] + aliases).map(dictionaryKey) }
 }

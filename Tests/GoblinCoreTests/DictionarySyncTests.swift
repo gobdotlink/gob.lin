@@ -55,8 +55,44 @@ private struct Device {
     try mac.sync(&cloud, at: 1)
     try phone.sync(&cloud, at: 2)
     try mac.sync(&cloud, at: 3)
-    // A spelling belongs to one entry, so the newer one keeps it; both devices hold the same valid dictionary.
+    // A spelling belongs to one entry, so the newer one shows; both devices hold the same valid dictionary.
     #expect(mac.spellings == ["paseo", "Kalikin"] && mac.sorted == phone.sorted)
+}
+
+@Test func theOrderDevicesMeetInNeverCostsAWord() throws {
+    // "Alpha", an "Alpha" that also sounds like "Beta", and "Beta": the second loses "Beta" to the third, and the first
+    // "Alpha" must not have been lost to the second on the way.
+    var cloud: Data?
+    var mac = Device(entries: [DictionaryEntry(spelling: "Alpha")])
+    var laptop = Device(entries: [DictionaryEntry(spelling: "Alpha", aliases: ["Beta"])])
+    var phone = Device(entries: [DictionaryEntry(spelling: "Beta")])
+    try mac.sync(&cloud, at: 1)
+    try laptop.sync(&cloud, at: 2)
+    try phone.sync(&cloud, at: 3)
+    try mac.sync(&cloud, at: 4)
+    try laptop.sync(&cloud, at: 5)
+    #expect(mac.spellings == ["Alpha", "Beta"] && mac.sorted == laptop.sorted && mac.sorted == phone.sorted)
+    let aliases = mac.entries.flatMap(\.aliases)
+    #expect(aliases.isEmpty)
+    // Merging the three copies in any order gives the same records.
+    let (a, b, c) = (mac.state, laptop.state, phone.state)
+    #expect(a.merging(b).merging(c) == c.merging(b).merging(a) && a.merging(b).merging(c) == b.merging(c).merging(a))
+}
+
+@Test func deletingAWordDeletesTheCopyHiddenBehindIt() throws {
+    var cloud: Data?
+    var mac = Device(entries: [DictionaryEntry(spelling: "Paseo", aliases: ["passeo"])])
+    var phone = Device(entries: [DictionaryEntry(spelling: "paseo")])
+    try mac.sync(&cloud, at: 1)
+    try phone.sync(&cloud, at: 2)
+    try mac.sync(&cloud, at: 3)
+    #expect(mac.entries.map(\.spelling) == ["paseo"])
+    mac.entries = []
+    try mac.sync(&cloud, at: 4)
+    try phone.sync(&cloud, at: 5)
+    try mac.sync(&cloud, at: 6)
+    // The Mac's older "Paseo" was hidden, not gone; deleting the word must not bring it back on either device.
+    #expect(mac.entries.isEmpty && phone.entries.isEmpty)
 }
 
 @Test func anEditHereWinsWhenTheOtherClockRunsAhead() throws {
