@@ -9,16 +9,16 @@ gob.lin needs a Mac with Apple silicon and macOS 26 or later.
 1. Download `gob.lin-VERSION.zip` from the [latest release](https://github.com/gobdotlink/gob.lin/releases/latest) and open it.
 2. Drag `gob.lin.app` into **Applications** before opening it. A copy opened from
    Downloads cannot update itself.
-3. Open gob.lin from Applications. Builds are not notarized yet, so macOS refuses
-   to open it the first time. Close the message, open **System Settings → Privacy &
-   Security**, scroll to **Security**, and choose **Open Anyway**. You only do this once.
+3. Open gob.lin from Applications. macOS asks once whether to open an app
+   downloaded from the internet; choose **Open**.
 4. gob.lin lives in the menu bar, with no Dock icon. Its first run asks for
    microphone and Accessibility access.
 
 gob.lin checks for updates at launch and every hour, and installs one when you
 choose **Install & relaunch**. Updates keep your settings, history and permissions.
-When releases move to notarized Developer ID builds, you will need to download
-and install that version once by hand, and grant the permissions again.
+If gob.lin says an update does not match its signing identity, your copy predates
+notarized releases: install the latest release by hand once, as above, and grant
+its permissions again.
 
 ## Project
 
@@ -71,9 +71,11 @@ Use an exact certificate name or its full SHA-1 fingerprint from
 the same name, the build lists their fingerprints and asks you to choose one.
 
 Ad-hoc signing is deliberately rejected. Local certificates are for development;
-public distribution requires Developer ID signing and notarization. The app is
-not sandboxed because dictation must interact with other applications through
-Accessibility. Hardened runtime and the microphone entitlement are enabled.
+releases are signed with Developer ID and notarized (see [releases](docs/releases.md)).
+A local build and an installed release share privacy grants only when both are
+signed with the same identity. The app is not sandboxed because dictation must
+interact with other applications through Accessibility. Hardened runtime and the
+microphone entitlement are enabled.
 
 To inspect or work in Xcode, open `Goblin.xcodeproj`; run
 `scripts/setup-signing.sh` first. The committed project builds without generators.
@@ -119,10 +121,11 @@ After merging changes, publish from a clean, up-to-date `main` checkout:
 scripts/release.sh 0.1.1
 ```
 
-The command bumps app/CLI versions and the build number, checks the project, packages
-a certificate-signed ZIP, commits the version, pushes a release tag, and publishes a
-GitHub release with generated notes. To build an archive without publishing, use
-`scripts/package-app.sh`. See [release setup, signing and recovery](docs/releases.md).
+The command bumps app/CLI versions and the build number, checks the project, commits
+the version and pushes a release tag. The Release workflow then signs, notarizes and
+publishes the ZIP as a GitHub release with generated notes. To build an archive
+without publishing, use `scripts/package-app.sh`. See
+[release setup, signing and recovery](docs/releases.md).
 
 ## Source layout
 

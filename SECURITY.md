@@ -4,4 +4,4 @@ Do not post API keys, dictation audio, private transcripts, or exploitable vulne
 
 Reports should include affected versions, reproducible steps using synthetic data, expected impact, and suggested mitigations. Never include a live credential to demonstrate a finding.
 
-Development builds use a local signing identity. Public distribution additionally requires Developer ID signing, notarization, and a verified update mechanism; development signing is not a substitute for that release work.
+Development builds use a local signing identity. Releases are signed with Developer ID and notarized, and the updater installs only a release that matches the installed app's signing identity.

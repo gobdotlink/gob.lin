@@ -1,5 +1,4 @@
-"""Run the release command against local Git remotes and a fake GitHub CLI."""
-import json
+"""Run the release command against local Git remotes."""
 import os
 import pathlib
 import plistlib
@@ -44,18 +43,6 @@ with tempfile.TemporaryDirectory() as temporary:
         path.write_text('#!/bin/sh\ntest "${FAIL_STEP:-}" != checks\n')
         path.chmod(0o755)
     (scripts / 'check-repository.py').write_text('pass\n')
-    package = scripts / 'package-app.sh'
-    package.write_text('''#!/bin/sh
-set -eu
-test "${FAIL_STEP:-}" != package
-test -z "$(git status --porcelain)"
-mkdir -p dist
-version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
-git rev-parse HEAD > "dist/gob.lin-$version.zip"
-echo fixture > "dist/gob.lin-$version.zip.sha256"
-''')
-    package.chmod(0o755)
-    (work / '.gitignore').write_text('dist/\n')
     run('git', 'add', '.', cwd=work)
     run('git', 'commit', '-m', 'Initial fixture', cwd=work)
     run('git', 'push', '-u', 'origin', 'main', cwd=work)
@@ -67,16 +54,7 @@ echo fixture > "dist/gob.lin-$version.zip.sha256"
     swift = tools / 'swift'
     swift.write_text('#!/bin/sh\nexit 0\n')
     swift.chmod(0o755)
-    gh = tools / 'gh'
-    gh.write_text('''#!/usr/bin/env python3
-import json, os, sys
-with open(os.environ['GH_FIXTURE_LOG'], 'a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')
-if sys.argv[1:3] == ['release', 'create'] and os.environ.get('FAIL_STEP') == 'upload': sys.exit(1)
-if sys.argv[1:3] == ['release', 'view']: print('https://example.invalid/release')
-''')
-    gh.chmod(0o755)
-    log = root / 'gh.jsonl'
-    env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'], GH_FIXTURE_LOG=str(log))
+    env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'])
 
     for version in ['invalid', '0.1.0', '0.01.1', '0.1.1-beta']:
         assert run('bash', 'scripts/release.sh', version, cwd=work, env=env, check=False).returncode != 0
@@ -93,19 +71,6 @@ if sys.argv[1:3] == ['release', 'view']: print('https://example.invalid/release'
     assert revision != initial
     assert run('git', 'rev-parse', 'v0.1.1^{commit}', cwd=work).stdout.strip() == revision
     assert run('git', 'rev-parse', 'origin/main', cwd=work).stdout.strip() == revision
-    assert (work / 'dist/gob.lin-0.1.1.zip').read_text().strip() == revision
-    calls = [json.loads(line) for line in log.read_text().splitlines()]
-    create = next(call for call in calls if call[:2] == ['release', 'create'])
-    assert '--draft' in create and '--verify-tag' in create
-    assert create[create.index('--target') + 1] == revision
-    edit = next(call for call in calls if call[:2] == ['release', 'edit'])
-    assert '--draft=false' in edit and '--latest' in edit
-
-    # Upload failure leaves a draft and never executes the publish operation.
-    log.write_text('')
-    failed = dict(env, FAIL_STEP='upload')
-    assert run('bash', 'scripts/release.sh', '0.1.2', cwd=work, env=failed, check=False).returncode != 0
-    calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert any(call[:2] == ['release', 'create'] and '--draft' in call for call in calls)
-    assert not any(call[:2] == ['release', 'edit'] for call in calls)
-print('Release version recovery, exact-commit tagging, and draft-before-publish checks passed.')
+    assert run('git', 'ls-remote', '--tags', 'origin', 'v0.1.1', cwd=work).stdout != ''
+    assert run('bash', 'scripts/release.sh', '0.1.1', cwd=work, env=env, check=False).returncode != 0
+print('Release version recovery, exact-commit tagging and atomic push checks passed.')
