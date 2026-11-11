@@ -77,8 +77,8 @@ The command:
 4. Commits `Release v…`, creates an annotated tag and atomically pushes main and the tag.
 
 The tag starts the Release workflow (`.github/workflows/release.yml`) on a macOS runner.
-It checks the tag is on main and matches `Info.plist`, compiles, then loads the Developer
-ID certificate into a temporary keychain. It signs, notarizes and staples the app with
+It checks the tag is on main, matches `Info.plist` and is newer than the latest release,
+compiles, then loads the Developer ID certificate into a temporary keychain. It signs, notarizes and staples the app with
 `scripts/package-app.sh`, and stops unless Gatekeeper accepts the result. It then creates
 a draft release, uploads `gob.lin-VERSION.zip` and its `.sha256`, and publishes it as
 latest with generated notes only after uploads succeed.
@@ -117,15 +117,21 @@ History, recordings, model files, settings and credentials stay outside the bund
 ## Failures and validation
 
 Before a version commit, failed checks restore the two version files. If push
-fails, nothing is tagged remotely or published; resolve the remote state before
-retrying. Never move an already pushed tag. If the Release workflow fails, nothing
-is published. For a missing or wrong secret, or a transient Apple or GitHub failure,
-fix it and re-run the failed workflow. A rejected notarization prints the submission
-ID; `xcrun notarytool log SUBMISSION_ID --keychain-profile goblin-notary` on a Mac with
-the profile says why. If the cause needs a code change, release the fix as the next
-version. If an upload fails, the release remains a draft: re-run the workflow after
-deleting the draft, or upload the missing files with `gh release upload` and publish
-it with `gh release edit vVERSION --repo gobdotlink/gob.lin --draft=false --latest`.
+fails, nothing is tagged remotely or published, but the release commit and tag stay
+in your checkout, so rerunning the command fails. After a transient failure, push
+them with `git push --atomic origin main vVERSION`. If main moved on GitHub, drop
+them with `git tag -d vVERSION`, `git fetch origin` and `git reset --hard origin/main`,
+then run the command again. Never move an already pushed tag.
+
+If the Release workflow fails, nothing is published. For a missing or wrong secret,
+or a transient Apple or GitHub failure, fix it and re-run the failed workflow. The
+workflow refuses a tag that is not newer than the latest release, so a superseded
+tag never replaces a newer release. A rejected notarization prints the submission
+ID; `xcrun notarytool log SUBMISSION_ID --keychain-profile goblin-notary` on a Mac
+with the profile says why. If the cause needs a code change, release the fix as the
+next version. If an upload fails, the release remains a draft: re-run the workflow
+after deleting the draft, or upload the missing files with `gh release upload` and
+publish it with `gh release edit vVERSION --repo gobdotlink/gob.lin --draft=false --latest`.
 
 ```sh
 swift test
