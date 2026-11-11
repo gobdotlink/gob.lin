@@ -92,3 +92,31 @@ import Testing
     let decoded = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(history))
     #expect(decoded.dictionaryBundleIdentifier == nil && decoded.dictionaryScope == "com.microsoft.Word")
 }
+
+@Test func contextLimitsAliasesToNearbyWords() throws {
+    let sol = DictionaryEntry(spelling: "Sol", aliases: ["soul", "sole"], context: ["GPT", "6.1", "codex"])
+    func corrected(_ text: String) -> String { DictionaryCorrector.correct(text, entries: [sol]).text }
+    #expect(corrected("use a GPT-6.1 soul sub agent") == "use a GPT-6.1 Sol sub agent")
+    // Every word of "6.1" is near, spoken or written; order and punctuation don't matter.
+    #expect(corrected("a six point one sole sub agent") == "a six point one Sol sub agent")
+    #expect(corrected("the soul run, in Codex") == "the Sol run, in Codex")
+    // Elsewhere ordinary words stay: no context word, only part of one, or more than three words away.
+    #expect(corrected("soul music and the sole of a shoe") == "soul music and the sole of a shoe")
+    #expect(corrected("not one soul came") == "not one soul came")
+    #expect(corrected("GPT is fine but my soul is tired") == "GPT is fine but my soul is tired")
+    #expect(corrected("I use GPT. Soul music helps") == "I use GPT. Soul music helps")
+    // Without context an alias applies everywhere, as before.
+    #expect(DictionaryCorrector.correct("my soul", entries: [DictionaryEntry(spelling: "Sol", aliases: ["soul"])]).text == "my Sol")
+
+    // Context is trimmed and deduplicated, and needs version 4, because earlier versions would apply the aliases everywhere.
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("goblin-context-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let repository = DictionaryRepository(url: url)
+    try repository.save([DictionaryEntry(id: sol.id, spelling: "Sol", aliases: ["soul"], context: [" GPT ", "gpt", "6.1", ""])])
+    #expect(try repository.load()[0].context == ["6.1", "GPT"])
+    #expect(String(decoding: try Data(contentsOf: url), as: UTF8.self).contains(#""version" : 4"#))
+    try repository.save([DictionaryEntry(id: sol.id, spelling: "Sol", aliases: ["soul"])])
+    let plain = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+    #expect(plain.contains(#""version" : 1"#) && !plain.contains("context"))
+    #expect(throws: DictionaryError.self) { try DictionaryRepository.validated([DictionaryEntry(spelling: "Sol", context: ["a\nb"])]) }
+}

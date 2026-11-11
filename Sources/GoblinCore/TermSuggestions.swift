@@ -20,13 +20,21 @@ public struct TermSuggestion: Identifiable, Equatable, Sendable {
     public let apps: [String]
     public let projects: [String]
     public let reason: Reason
+    /// Words the term is said with, which limit its aliases (`DictionaryEntry.context`). Before review, the words
+    /// around one fix; after it, the words around two or more.
+    public let context: [String]
+    /// How many fixes this suggestion comes from.
+    public let timesFixed: Int
 
-    public init(spelling: String, aliases: [String] = [], apps: [String] = [], projects: [String] = [], reason: Reason) {
+    public init(spelling: String, aliases: [String] = [], apps: [String] = [], projects: [String] = [], reason: Reason,
+                context: [String] = [], timesFixed: Int = 1) {
         self.spelling = spelling
         self.aliases = aliases
         self.apps = apps
         self.projects = projects
         self.reason = reason
+        self.context = context
+        self.timesFixed = timesFixed
     }
 
     /// The spelling and the place it would apply; dismissals are remembered by this.
@@ -167,27 +175,72 @@ public enum TermSuggestions {
     // MARK: Corrections
 
     /// Terms the user fixed after a dictation: 1–3 words replaced by 1–3 words, such as "go blin" → "gob.lin". The
-    /// suggestion applies in the detected project, or in the app when there is none. Splits on whitespace only, so a
-    /// term like "gob.lin" stays whole.
+    /// suggestion applies in the detected project, or in the app when there is none, and carries the words around the
+    /// fix that could be context. Splits on whitespace only, so a term like "gob.lin" stays whole.
     public static func fromCorrection(dictated: String, edited: String, scope: DictionaryScope) -> [TermSuggestion] {
         let apps: [String], projects: [String]
         if let project = scope.project { apps = []; projects = [project] }
         else if let app = scope.application, !app.isEmpty { apps = [app]; projects = [] }
         else { return [] }
-        let changes = TextDiff.changes(from: dictated, to: edited) { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
+        let split = { (text: String) in text.split(whereSeparator: \.isWhitespace).map(String.init) }
+        let changes = TextDiff.changes(from: dictated, to: edited, split: split)
+        // The edited text's words, and where each replacement sits in them.
+        var words: [String] = []
+        var fixes: [(heard: String, spelling: String, at: Int)] = []
+        for (index, change) in changes.enumerated() {
+            switch change {
+            case .kept(let text): words += split(text)
+            case .removed: break
+            case .added(let added):
+                if index > 0, case .removed(let removed) = changes[index - 1] {
+                    fixes.append((trimmed(removed), trimmed(added), words.count))
+                }
+                words += split(added)
+            }
+        }
         var result: [TermSuggestion] = []
-        for (change, next) in zip(changes, changes.dropFirst()) {
-            guard case .removed(let removed) = change, case .added(let added) = next else { continue }
-            let heard = trimmed(removed), spelling = trimmed(added)
-            let words = { (text: String) in text.split(whereSeparator: \.isWhitespace).count }
-            guard (1...3).contains(words(heard)), (1...3).contains(words(spelling)), heard != spelling else { continue }
+        for fix in fixes {
+            let heard = fix.heard, spelling = fix.spelling
+            let count = { (text: String) in split(text).count }
+            guard (1...3).contains(count(heard)), (1...3).contains(count(spelling)), heard != spelling else { continue }
             let squashed = { (text: String) in dictionaryKey(text).filter { !$0.isWhitespace } }
             // "post hog" → "PostHog" only re-spaces or recases: the spelling alone fixes it.
             let aliases = squashed(heard) == squashed(spelling) ? [] : [heard]
-            result.append(TermSuggestion(spelling: spelling, aliases: aliases, apps: apps, projects: projects, reason: .correction(heard: heard)))
+            let window = DictionaryCorrector.contextWindow, end = fix.at + count(spelling)
+            let nearby = words[max(0, fix.at - window)..<fix.at] + words[min(words.count, end)..<min(words.count, end + window)]
+            result.append(TermSuggestion(spelling: spelling, aliases: aliases, apps: apps, projects: projects, reason: .correction(heard: heard),
+                                         context: contextWords(Array(nearby))))
         }
         return result
     }
+
+    /// The words of `chunks` that say what a term is about: a number or version ("6.1"), or a word of three or more
+    /// letters that isn't a function word, filler or spoken number. "GPT-6.1" gives "GPT" and "6.1".
+    static func contextWords(_ chunks: [String]) -> [String] {
+        let edges = CharacterSet.punctuationCharacters.union(.symbols)
+        var seen: Set<String> = []
+        return chunks.flatMap { $0.split(whereSeparator: { "-/–—".contains($0) }) }
+            .map { String($0).trimmingCharacters(in: edges) }
+            .filter { word in
+                let key = dictionaryKey(word)
+                guard !key.isEmpty, !key.contains(where: \.isWhitespace) else { return false }
+                if key.contains(where: \.isNumber) { return key.allSatisfy { $0.isNumber || $0 == "." || $0.isLetter } }
+                return key.allSatisfy { $0.isLetter || $0 == "'" || $0 == "’" } && key.filter(\.isLetter).count >= 3 && !contextStopWords.contains(key)
+            }
+            .filter { seen.insert(dictionaryKey($0)).inserted }
+    }
+
+    /// Words too common to say what is being talked about.
+    static let contextStopWords = Set("""
+    the and for with you your yours are was were that this these those have has had from but not can will just like all
+    any get got our out its it's also then than them they their there here what when where which who whom how why use
+    using used into onto about some very really would could should been being did does doing done make made want need
+    okay yeah yes sure hmm let lets let's she her hers his him one two three four five six seven eight nine ten eleven
+    twelve zero now well see say said thing things way bit lot kind sort actually basically maybe because thats that's
+    what's i'm i've i'll i'd don't doesn't didn't can't won't isn't aren't wasn't over under more most much many other
+    another each every same such only even still again back off down too try going gonna wanna gotta take put give
+    look know think mean tell keep come came went via per ask point dot something anything everything nothing
+    """.split(whereSeparator: \.isWhitespace).map(String.init))
 
     private static func trimmed(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters).union(.symbols))
@@ -201,28 +254,35 @@ public enum TermSuggestions {
                               isKnownWord: (String) -> Bool) -> [TermSuggestion] {
         let owned = Set(entries.flatMap { [$0.spelling] + $0.aliases }.map(dictionaryKey))
         var result: [TermSuggestion] = []
-        for candidate in candidates {
+        for candidate in combiningFixes(candidates, isKnownWord: isKnownWord) {
             guard (try? DictionaryRepository.validated([DictionaryEntry(spelling: candidate.spelling, aliases: candidate.aliases)])) != nil,
                   candidate.spelling.filter(\.isLetter).count >= 3,
-                  looksLikeTerm(candidate.spelling, isKnownWord: isKnownWord) || fixesMishearing(candidate, isKnownWord: isKnownWord),
                   !dismissed.contains(candidate.id) else { continue }
             let key = dictionaryKey(candidate.spelling)
-            // A known single word as an alias would replace that word everywhere ("cloud" → "Claude").
+            let existing = entries.first { dictionaryKey($0.spelling) == key }
+            // A known single word as an alias would replace that word everywhere ("cloud" → "Claude"), unless context
+            // limits it. Context can't join an entry whose aliases apply everywhere, since it would limit those too.
+            func ordinary(_ alias: String) -> Bool { !alias.contains(where: \.isWhitespace) && isKnownWord(alias) }
+            let canLimit = !candidate.context.isEmpty && existing.map { !$0.context.isEmpty || $0.aliases.isEmpty } ?? true
             let aliases = candidate.aliases.filter { alias in
                 let aliasKey = dictionaryKey(alias)
-                return aliasKey != key && !owned.contains(aliasKey) && (alias.contains(where: \.isWhitespace) || !isKnownWord(alias))
+                return aliasKey != key && !owned.contains(aliasKey) && (!ordinary(alias) || canLimit)
             }
+            let context = aliases.contains(where: ordinary) ? candidate.context : []
             var suggestion = TermSuggestion(spelling: candidate.spelling, aliases: aliases, apps: candidate.apps,
-                                            projects: candidate.projects, reason: candidate.reason)
-            if let existing = entries.first(where: { dictionaryKey($0.spelling) == key }) {
+                                            projects: candidate.projects, reason: candidate.reason, context: context,
+                                            timesFixed: candidate.timesFixed)
+            if let existing {
                 if existing.applies(in: suggestion.place) {
                     // Already used here; only a new "sounds like" alias is worth offering, in the entry's own place.
                     guard !aliases.isEmpty else { continue }
                     suggestion = TermSuggestion(spelling: existing.spelling, aliases: aliases, apps: existing.apps,
-                                                projects: existing.projects, reason: candidate.reason)
+                                                projects: existing.projects, reason: candidate.reason, context: context,
+                                                timesFixed: candidate.timesFixed)
                 } else if kind(existing) != kind(suggestion) || kind(existing) == .mixed {
                     // Apps and projects combine with AND, so adding an app to a project term would narrow it.
-                    suggestion = TermSuggestion(spelling: existing.spelling, aliases: aliases, reason: .everywhere)
+                    suggestion = TermSuggestion(spelling: existing.spelling, aliases: aliases, reason: .everywhere, context: context,
+                                                timesFixed: candidate.timesFixed)
                 }
             }
             guard !dismissed.contains(suggestion.id) else { continue }
@@ -237,6 +297,62 @@ public enum TermSuggestions {
             .enumerated().sorted { (rank($0.element.reason), $0.offset) < (rank($1.element.reason), $1.offset) }.map(\.element)
             .filter { seen.insert(dictionaryKey($0.spelling)).inserted }
             .prefix(limit).map { $0 }
+    }
+
+    /// Most context words a suggestion learns.
+    static let contextLimit = 4
+
+    /// One suggestion per fixed spelling, newest fix first, keeping only spellings that look like a term or fix a
+    /// mishearing. Its aliases are what those fixes heard, its context the words seen around two or more fixes of it,
+    /// and fixes in two or more places make it a suggestion for everywhere. Other candidates pass through unchanged.
+    static func combiningFixes(_ candidates: [TermSuggestion], isKnownWord: (String) -> Bool) -> [TermSuggestion] {
+        var groups: [String: [TermSuggestion]] = [:]
+        var order: [String] = []
+        for candidate in candidates {
+            guard case .correction = candidate.reason else { continue }
+            let key = dictionaryKey(candidate.spelling)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(candidate)
+        }
+        var combined: [String: TermSuggestion] = [:]
+        for key in order {
+            let fixes = groups[key] ?? []
+            let isTerm = fixes.first.map { looksLikeTerm($0.spelling, isKnownWord: isKnownWord) } ?? false
+            let heard = fixes.filter { isTerm || fixesMishearing($0, isKnownWord: isKnownWord) }
+            guard let newest = heard.first else { continue }
+            // The spelling written most often; ties go to the newest.
+            let spellings = fixes.map(\.spelling)
+            let spelling = spellings.max { lhs, rhs in
+                let (a, b) = (spellings.filter { $0 == lhs }.count, spellings.filter { $0 == rhs }.count)
+                return a != b ? a < b : spellings.firstIndex(of: lhs)! > spellings.firstIndex(of: rhs)!
+            } ?? newest.spelling
+            var aliasKeys: Set<String> = []
+            let aliases = heard.flatMap(\.aliases).filter { aliasKeys.insert(dictionaryKey($0)).inserted }
+            var counts: [String: Int] = [:], surfaces: [String: String] = [:], seen: [String] = []
+            for fix in fixes {
+                for word in Set(fix.context.map(dictionaryKey)) { counts[word, default: 0] += 1 }
+                for word in fix.context where surfaces[dictionaryKey(word)] == nil {
+                    surfaces[dictionaryKey(word)] = word
+                    seen.append(dictionaryKey(word))
+                }
+            }
+            let context = seen.filter { (counts[$0] ?? 0) >= 2 && $0 != key && !aliasKeys.contains($0) }
+                .enumerated().sorted { (counts[$0.element] ?? 0, -$0.offset) > (counts[$1.element] ?? 0, -$1.offset) }
+                .prefix(contextLimit).compactMap { surfaces[$0.element] }
+            let places = Set(fixes.map { $0.id.split(separator: "|", omittingEmptySubsequences: false).dropFirst().joined(separator: "|") })
+            combined[key] = TermSuggestion(spelling: spelling, aliases: aliases, apps: places.count > 1 ? [] : newest.apps,
+                                           projects: places.count > 1 ? [] : newest.projects, reason: newest.reason,
+                                           context: Array(context), timesFixed: fixes.count)
+        }
+        var emitted: Set<String> = []
+        return candidates.compactMap { candidate in
+            guard case .correction = candidate.reason else {
+                return looksLikeTerm(candidate.spelling, isKnownWord: isKnownWord) ? candidate : nil
+            }
+            let key = dictionaryKey(candidate.spelling)
+            guard emitted.insert(key).inserted else { return nil }
+            return combined[key]
+        }
     }
 
     private enum Kind { case everywhere, projectOnly, appOnly, mixed }
@@ -286,7 +402,9 @@ public enum TermSuggestions {
         guard first.first == second.first, let distance = EditObservation.graphemeDistance(first, second),
               distance * 2 <= max(first.count, second.count) else { return false }
         let stem = first.commonPrefix(with: second).count
-        return !wordEndings.isSuperset(of: [String(first.dropFirst(stem)), String(second.dropFirst(stem))])
+        let endings: Set<String> = [String(first.dropFirst(stem)), String(second.dropFirst(stem))]
+        // A dropped final "e" makes another word, not another form: "sole" and "sol", "hope" and "hop".
+        return endings == ["", "e"] || !wordEndings.isSuperset(of: endings)
     }
 
     static func looksLikeTerm(_ spelling: String, isKnownWord: (String) -> Bool) -> Bool {
@@ -310,11 +428,12 @@ extension Array where Element == DictionaryEntry {
         let key = dictionaryKey(suggestion.spelling)
         guard let index = firstIndex(where: { dictionaryKey($0.spelling) == key }) else {
             return self + [DictionaryEntry(spelling: suggestion.spelling, aliases: suggestion.aliases, apps: suggestion.apps,
-                                           projects: suggestion.projects)]
+                                           projects: suggestion.projects, context: suggestion.context)]
         }
         var entries = self
         var entry = entries.remove(at: index)
         entry.aliases += suggestion.aliases.filter { alias in !entry.aliases.contains { dictionaryKey($0) == dictionaryKey(alias) } }
+        entry.context += suggestion.context.filter { word in !entry.context.contains { dictionaryKey($0) == dictionaryKey(word) } }
         if suggestion.isEverywhere {
             entry.apps = []
             entry.projects = []

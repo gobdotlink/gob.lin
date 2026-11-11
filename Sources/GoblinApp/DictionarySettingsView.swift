@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 final class DictionaryModel: ObservableObject {
     static let suggestsTermsKey = "dictionary.suggestsTerms"
     static let dismissedSuggestionsKey = "dictionary.dismissedSuggestions"
+    /// Most fixed words remembered: those of the 500 latest edited dictations, about two each.
+    static let fixLimit = 1_000
 
     @Published private(set) var entries: [DictionaryEntry] = [] { didSet { reviewSuggestions() } }
     @Published var error: String?
@@ -18,11 +20,21 @@ final class DictionaryModel: ObservableObject {
     @Published private(set) var suggestions: [TermSuggestion] = []
     /// Whether gob.lin reads the project you dictate into and your fixes for suggestions; on by default.
     @Published var suggestsTerms: Bool {
-        didSet { defaults.set(suggestsTerms, forKey: Self.suggestsTermsKey); reviewSuggestions() }
+        didSet {
+            defaults.set(suggestsTerms, forKey: Self.suggestsTermsKey)
+            if suggestsTerms, !fixesLoaded { Task { await refreshFixes() } }
+            reviewSuggestions()
+        }
     }
     private let defaults: UserDefaults
     private var dismissed: Set<String>
+    /// One candidate per word fixed after a dictation, newest first: History's, then this session's.
     private var correctionCandidates: [TermSuggestion] = []
+    private var fixesLoaded = false
+    /// The spell checker's answers, since review asks about every remembered fix each time.
+    private var knownWords: [String: Bool] = [:]
+    /// The dictations History has seen edited, newest first.
+    var loadFixes: (@MainActor () async -> [HistoryEntry])?
     private var repositoryCandidates: [TermSuggestion] = []
     private var repositoryCache: [String: (read: Date, candidates: [TermSuggestion])] = [:]
     private var repositoryTask: Task<Void, Never>?
@@ -67,6 +79,16 @@ final class DictionaryModel: ObservableObject {
 
     // MARK: Suggestions
 
+    /// Reads the fixes from History, so repeated fixes add up across launches and deleting a dictation forgets its fix.
+    func refreshFixes() async {
+        guard suggestsTerms, let edited = await loadFixes?() else { return }
+        fixesLoaded = true
+        correctionCandidates = edited.flatMap { entry in
+            entry.editedText.map { TermSuggestions.fromCorrection(dictated: entry.finalText, edited: $0, scope: entry.dictionaryContext) } ?? []
+        }
+        reviewSuggestions()
+    }
+
     /// Reads the project's folder in the background, at most every 10 minutes per folder, for names to suggest.
     func offerTerms(from project: DetectedProject) {
         guard suggestsTerms, let root = project.root else { return }
@@ -94,7 +116,7 @@ final class DictionaryModel: ObservableObject {
         guard suggestsTerms else { return [] }
         let found = TermSuggestions.fromCorrection(dictated: dictated, edited: edited, scope: scope)
         guard !found.isEmpty else { return [] }
-        correctionCandidates = Array((found + correctionCandidates).prefix(24))
+        correctionCandidates = Array((found + correctionCandidates).prefix(Self.fixLimit))
         reviewSuggestions()
         // Review may swap in an existing entry's spelling or widen the place, so match on the spelling alone.
         return suggestions.filter { suggestion in
@@ -122,8 +144,12 @@ final class DictionaryModel: ObservableObject {
     private func reviewSuggestions() {
         // Before init finishes loading, and while the file can't be read, there is nothing to compare against.
         guard suggestsTerms, available else { if !suggestions.isEmpty { suggestions = [] }; return }
-        let next = TermSuggestions.review(correctionCandidates + repositoryCandidates, entries: entries, dismissed: dismissed,
-                                          isKnownWord: TermSuggestions.isKnownEnglishWord)
+        let next = TermSuggestions.review(correctionCandidates + repositoryCandidates, entries: entries, dismissed: dismissed) { word in
+            if let known = knownWords[word] { return known }
+            let known = TermSuggestions.isKnownEnglishWord(word)
+            knownWords[word] = known
+            return known
+        }
         if next != suggestions { suggestions = next }
     }
 
@@ -340,7 +366,8 @@ private struct DictionarySuggestionsCard: View {
         let existing = model.entries.first { $0.spelling.caseInsensitiveCompare(suggestion.spelling) == .orderedSame }
         let reason: String
         switch suggestion.reason {
-        case .correction(let heard): reason = "you fixed “\(heard)”"
+        case .correction(let heard):
+            reason = suggestion.timesFixed > 1 ? "you fixed it \(suggestion.timesFixed) times" : "you fixed “\(heard)”"
         case .projectName: reason = "the project's name"
         case .manifest(let file): reason = "from \(file)"
         case .author: reason = "a contributor"
@@ -351,6 +378,10 @@ private struct DictionarySuggestionsCard: View {
             return "you use it in more than one place — use it everywhere?"
         }
         var parts = [reason]
+        if !suggestion.aliases.isEmpty {
+            let heard = suggestion.aliases.map { "“\($0)”" }.joined(separator: ", ")
+            parts.append("sounds like \(heard)" + (suggestion.context.isEmpty ? "" : " near \(suggestion.context.joined(separator: ", "))"))
+        }
         if model.suggestionPlace == nil {
             parts.append(suggestion.projects.first.map { "project \($0)" } ?? DictionaryApps.summary(suggestion.apps))
         }
@@ -362,12 +393,13 @@ private struct DictionarySuggestionsCard: View {
     }
 }
 
-private struct DictionaryEntryEditor: View {
+struct DictionaryEntryEditor: View {
     let entry: DictionaryEntry
     @ObservedObject var model: DictionaryModel
     @Environment(\.dismiss) private var dismiss
     @State private var spelling: String
     @State private var aliases: String
+    @State private var context: String
     @State private var apps: [String]
     @State private var projects: [String]
     @State private var suggestions: [String] = []
@@ -378,6 +410,7 @@ private struct DictionaryEntryEditor: View {
         self.model = model
         _spelling = State(initialValue: entry.spelling)
         _aliases = State(initialValue: entry.aliases.joined(separator: "\n"))
+        _context = State(initialValue: entry.context.joined(separator: "\n"))
         _apps = State(initialValue: entry.apps)
         _projects = State(initialValue: entry.projects)
     }
@@ -395,18 +428,25 @@ private struct DictionaryEntryEditor: View {
                 } header: { Text("Sounds like — one alias per line") } footer: {
                     Text("For example, “day review” → “Dev review”. Aliases match whole words without crossing punctuation.")
                 }
+                Section {
+                    TextEditor(text: $context).font(.body.monospaced()).frame(height: 64)
+                        .scrollContentBackground(.hidden)
+                        .accessibilityLabel("Only near these words")
+                } header: { Text("Only near — one word per line") } footer: {
+                    Text("Aliases then replace only within three words of one of these, so “soul” becomes “Sol” near “GPT” and stays “soul” elsewhere.")
+                }
                 DictionaryAppScopeEditor(apps: $apps)
                 DictionaryProjectScopeEditor(projects: $projects, suggestions: suggestions)
                 if let error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
             }
-            .formStyle(.grouped).frame(height: 560)
+            .formStyle(.grouped).frame(height: 660)
             .task { suggestions = await model.knownProjects() }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
                     if model.put(DictionaryEntry(id: entry.id, spelling: spelling, aliases: aliases.components(separatedBy: .newlines), apps: apps,
-                                                 projects: projects)) {
+                                                 projects: projects, context: context.components(separatedBy: .newlines))) {
                         dismiss()
                     } else { error = model.error; model.error = nil }
                 }.keyboardShortcut(.defaultAction).disabled(spelling.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
