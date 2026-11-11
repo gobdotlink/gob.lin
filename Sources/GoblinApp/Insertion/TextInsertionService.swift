@@ -80,7 +80,6 @@ final class TextInsertionService: ObservableObject {
         guard !busy else { setStatus("A paste is still awaiting confirmation", outcome: .failure(.insertionNotAcknowledged)); return }
         guard !transcript.isEmpty else { setStatus("No transcript to paste", outcome: .failure(.noTranscriptAvailable)); return }
         guard AXIsProcessTrusted() else { setStatus("Allow Accessibility before inserting text", outcome: .failure(.insertionPermissionMissing)); return }
-        guard !IsSecureEventInputEnabled() else { setStatus("Secure Input is active; no text was inserted", outcome: .failure(.secureInputEnabled)); return }
         busy = true
         lastAnchor = nil
         defer { busy = false }
@@ -118,6 +117,9 @@ final class TextInsertionService: ObservableObject {
             target = focused
         } else {
             setStatus("No accessible focused text target; nothing was inserted", outcome: .failure(.insertionFailed)); return
+        }
+        guard !SecureInput.guards(target.pid) else {
+            setStatus("Secure Input is on in this app; no text was inserted", outcome: .failure(.secureInputEnabled)); return
         }
         let application = NSRunningApplication(processIdentifier: target.pid)
         let quirks = AppInsertionQuirks.forBundle(application?.bundleIdentifier ?? "", at: application?.bundleURL)
@@ -219,7 +221,7 @@ final class TextInsertionService: ObservableObject {
         guard let code = KeyboardLayout.pasteKeyCode() else { setStatus("Could not resolve Paste for this keyboard layout", outcome: .failure(.insertionFailed)); return }
         let preservationCount = pasteboard.changeCount
         guard let snapshot = clipboardToPreserve() else { setStatus("The current clipboard could not be preserved; nothing was pasted", outcome: .failure(.insertionClipboardBusy)); return }
-        guard pasteTargetIsUnchanged(target), !Task.isCancelled, !IsSecureEventInputEnabled() else {
+        guard pasteTargetIsUnchanged(target), !Task.isCancelled, !SecureInput.guards(target.pid) else {
             setStatus("Focus or Secure Input changed before paste", outcome: .failure(.insertionTargetChanged)); return
         }
         let provider = TranscriptDataProvider(text: text)
@@ -293,7 +295,7 @@ final class TextInsertionService: ObservableObject {
                                        snapshot: ClipboardSnapshot, quirks: AppInsertionQuirks) async -> Bool {
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while ProcessInfo.processInfo.systemUptime < deadline, !Task.isCancelled, pasteboard.changeCount == ownedCount,
-              AXIsProcessTrusted(), !IsSecureEventInputEnabled() {
+              AXIsProcessTrusted(), !SecureInput.guards(page.pid) {
             if provider.hasBeenRead, let field = FocusedText.capture(timeout: 0.05), field.pid == page.pid, !field.secure,
                !CFEqual(field.element, page.element), let value = field.value,
                let range = InsertionPolicy.forwardedRange(of: text, in: value) {
@@ -332,7 +334,7 @@ final class TextInsertionService: ObservableObject {
     }
 
     private func isSafe(_ target: FocusedText, background: Bool, quirks: AppInsertionQuirks, valueInsertion: Bool = false) -> Bool {
-        guard !Task.isCancelled, AXIsProcessTrusted(), !IsSecureEventInputEnabled(),
+        guard !Task.isCancelled, AXIsProcessTrusted(), !SecureInput.guards(target.pid),
               let app = NSRunningApplication(processIdentifier: target.pid), !app.isTerminated else { return false }
         if target.applicationFallback { return !background && target.isStillFocused() }
         let fresh = FocusedText.read(pid: target.pid, element: target.element)
@@ -430,7 +432,7 @@ final class TextInsertionService: ObservableObject {
         // V carries the Command flag itself; the brief hold only orders the modifier first. Remote desktop
         // clients forward keys over the network and get longer.
         try? await Task.sleep(for: .milliseconds(quirks.remoteDesktop ? 100 : 15))
-        guard !Task.isCancelled, pasteTargetIsUnchanged(target), !IsSecureEventInputEnabled(),
+        guard !Task.isCancelled, pasteTargetIsUnchanged(target), !SecureInput.guards(target.pid),
               pasteboard.changeCount == unverifiedChangeCount else { return false }
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)

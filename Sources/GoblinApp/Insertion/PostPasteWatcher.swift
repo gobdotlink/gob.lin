@@ -88,7 +88,7 @@ final class PostPasteWatcher {
     /// preserve the previous observation when the span is gone.
     private func sampleOnce(sessionID: UUID, isFinalKeySample: Bool = false) -> Bool {
         guard var current = session, current.id == sessionID else { return false }
-        guard !IsSecureEventInputEnabled() else {
+        guard !SecureInput.guards(current.anchor.pid) else {
             if isFinalKeySample { return true }
             finish(report: true); return false
         }

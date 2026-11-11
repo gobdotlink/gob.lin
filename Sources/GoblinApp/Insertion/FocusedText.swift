@@ -1,5 +1,7 @@
 import AppKit
+import Carbon
 import GoblinCore
+import IOKit
 @preconcurrency import ApplicationServices
 
 /// Text read near a field while the user speaks; `field` ties it to the field it was read around.
@@ -178,5 +180,27 @@ struct FocusedText {
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &raw) == .success,
               let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
         return CFEqual(raw, element)
+    }
+}
+
+/// Secure Input is one switch for the whole session: while any app guards a password field, it's on for all of them.
+/// It only stops gob.lin typing into the app holding it; the password fields themselves are refused by `FocusedText.secure`.
+enum SecureInput {
+    /// The app macOS names as holding Secure Input. A hint only: it can name an app that has since let go.
+    static var holder: pid_t? {
+        guard IsSecureEventInputEnabled() else { return nil }
+        let root = IORegistryGetRootEntry(kIOMainPortDefault)
+        defer { IOObjectRelease(root) }
+        guard let users = IORegistryEntryCreateCFProperty(root, "IOConsoleUsers" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? [[String: Any]] else { return nil }
+        let session = users.first { $0["kCGSSessionOnConsoleKey"] as? Bool == true } ?? users.first
+        return (session?["kCGSSessionSecureInputPID"] as? NSNumber).map { pid_t($0.int32Value) }
+    }
+
+    /// True when Secure Input is on and held by `pid`, or by an app macOS doesn't name.
+    static func guards(_ pid: pid_t) -> Bool {
+        guard IsSecureEventInputEnabled() else { return false }
+        guard let holder, holder > 0 else { return true }
+        return holder == pid
     }
 }
