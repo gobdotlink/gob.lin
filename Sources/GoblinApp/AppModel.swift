@@ -113,7 +113,8 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self, !self.shuttingDown else { return }
                 self.refreshDiagnostics()
-                if secure { self.showFailure(.secureInputEnabled) }
+                // A keyed talk key still works while another app has Secure Input on; only refused takes say so.
+                if secure, !self.hotkeys.shortcut.worksUnderSecureInput { self.showFailure(.secureInputEnabled) }
             }
         }.store(in: &subscriptions)
         hotkeys.$lastFailure.combineLatest(insertion.$shortcutFailure).sink { [weak self] hotkeyFailure, pasteFailure in
@@ -377,7 +378,7 @@ final class AppModel: ObservableObject {
             if permissions.snapshot.microphone != .authorized { failure = .microphonePermissionMissing }
             else if !permissions.snapshot.accessibility { failure = .requiredPermissionsMissing }
             else if permissions.tapFailure != nil { failure = .hotkeyUnavailable }
-            else if hotkeys.secureInput { failure = .secureInputEnabled }
+            else if hotkeys.secureInput, secureTarget() { failure = .secureInputEnabled }
             else if !servicesEnabled { failure = .modelUnavailable }
             else { failure = nil }
             if let failure { hotkeys.cancelRecording(); showFailure(failure) }
@@ -400,6 +401,12 @@ final class AppModel: ObservableObject {
 
     /// The same as the overlay's close button.
     func cancelRecording() { if let activeCapture { cancelDictation(activeCapture) } }
+
+    /// Whether the app or field a take would type into is guarded by Secure Input. Another app's password field isn't.
+    private func secureTarget() -> Bool {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return true }
+        return SecureInput.guards(pid) || FocusedText.capture(timeout: 0.1)?.secure == true
+    }
 
     private func beginDictation() {
         guard activeCapture == nil else { return }
