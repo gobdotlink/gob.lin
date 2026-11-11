@@ -123,8 +123,9 @@ scripts/release.sh 0.1.1
 
 The command bumps app/CLI versions and the build number, checks the project, commits
 the version and pushes a release tag. The Release workflow then signs, notarizes and
-publishes the disk image and ZIP as a GitHub release with generated notes. To build them
-without publishing, use `scripts/package-app.sh`. See
+publishes the disk image and ZIP as a GitHub release with generated notes. To package a
+build without publishing, use `scripts/package-app.sh`; only Developer ID builds get the
+disk image. See
 [release setup, signing and recovery](docs/releases.md).
 
 ## Source layout
