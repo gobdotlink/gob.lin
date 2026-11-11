@@ -181,6 +181,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **General:**
   - Talk key: a big keycap card with the key, one sentence on how it works, and Record New Key…. Quick picks: fn / Globe, Right ⌥, ⌥ Space. Cancel a take: esc, or the overlay's × when esc is the talk key. A status row for the Globe key setting.
   - Behaviour: Open at login, Click sounds, Add a space after each take.
+  - iCloud: one Sync with iCloud switch, off by default, whose caption says what syncs and that dictations stay on this Mac. The group shows only in builds signed for iCloud. A red status row appears while the last sync failed.
   - Reduce audio while dictating: independent Pause current media and Mute audio switches. Explain that pause preserves the current player's position, mute lets playback advance, and both can be enabled. Preserve the existing pause preference; mute starts off.
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
 - **Audio:** Microphones is the ranked list. Each row has a light (green in use, amber silenced by the lid, hollow otherwise), the name, and its transport and state, plus a menu with the same moves as dragging. The System Default row is the line: mics above it are used in order, mics below it ("Only when picked") never on their own. A status row names the mic in use and the one it's standing in for.

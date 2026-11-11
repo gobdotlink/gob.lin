@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 final class DictionaryModel: ObservableObject {
     static let suggestsTermsKey = "dictionary.suggestsTerms"
     static let dismissedSuggestionsKey = "dictionary.dismissedSuggestions"
+    static let syncsWithICloudKey = "sync.iCloud"
 
     @Published private(set) var entries: [DictionaryEntry] = [] { didSet { reviewSuggestions() } }
     @Published var error: String?
@@ -20,6 +21,17 @@ final class DictionaryModel: ObservableObject {
     @Published var suggestsTerms: Bool {
         didSet { defaults.set(suggestsTerms, forKey: Self.suggestsTermsKey); reviewSuggestions() }
     }
+    /// Whether gob.lin syncs through the person's iCloud, set on the General page; off by default. The dictionary is the
+    /// only thing that syncs so far.
+    @Published var syncsWithICloud: Bool {
+        didSet { defaults.set(syncsWithICloud, forKey: Self.syncsWithICloudKey); sync() }
+    }
+    /// Why the last sync failed, in words for the General page.
+    @Published private(set) var syncError: String?
+    /// Only a build signed for iCloud can reach it; development builds can't, and never touch iCloud.
+    let canSync = SecTaskCreateFromSelf(nil).flatMap {
+        SecTaskCopyValueForEntitlement($0, "com.apple.developer.ubiquity-kvstore-identifier" as CFString, nil)
+    } != nil
     private let defaults: UserDefaults
     private var dismissed: Set<String>
     private var correctionCandidates: [TermSuggestion] = []
@@ -47,8 +59,40 @@ final class DictionaryModel: ObservableObject {
         self.defaults = defaults
         suggestsTerms = defaults.object(forKey: Self.suggestsTermsKey) as? Bool ?? true
         dismissed = Set(defaults.stringArray(forKey: Self.dismissedSuggestionsKey) ?? [])
+        syncsWithICloud = defaults.bool(forKey: Self.syncsWithICloudKey)
         do { entries = try repository.load(); available = true }
         catch { lastFailure = .dictionaryUnavailable; self.error = "Could not load your dictionary: \(error.localizedDescription)" }
+        guard canSync else { return }
+        NotificationCenter.default.addObserver(forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+                                               object: NSUbiquitousKeyValueStore.default, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.sync() }
+        }
+        NSUbiquitousKeyValueStore.default.synchronize()
+        sync()
+    }
+
+    // MARK: iCloud
+
+    private static let cloudKey = "dictionary"
+
+    /// Merges this Mac's dictionary with the copy in iCloud and writes back whatever iCloud is missing.
+    // ponytail: iCloud refuses a copy over 1 MB without telling this code; watch for
+    // NSUbiquitousKeyValueStoreQuotaViolationChange if dictionaries reach thousands of entries.
+    private func sync() {
+        guard syncsWithICloud, canSync, available else { return }
+        let cloud = NSUbiquitousKeyValueStore.default
+        let stateURL = repository.url.deletingLastPathComponent().appendingPathComponent("dictionary-sync.json")
+        do {
+            let state = FileManager.default.fileExists(atPath: stateURL.path) ? try SyncedDictionary(data: Data(contentsOf: stateURL)) : SyncedDictionary()
+            let remote = try cloud.data(forKey: Self.cloudKey).map(SyncedDictionary.init(data:))
+            let result = try SyncedDictionary.reconcile(entries: entries, state: state, remote: remote)
+            // The entries before the state: the other order can delete words everywhere after a crash (see `reconcile`).
+            if result.entries != entries { try repository.save(result.entries); entries = result.entries }
+            let data = try result.state.data()
+            try data.write(to: stateURL, options: .atomic)
+            if result.push { cloud.set(data, forKey: Self.cloudKey) }
+            syncError = nil
+        } catch { syncError = error.localizedDescription }
     }
 
     /// Where each project has been dictated into, from History, so its words can be listed under those apps.
@@ -148,8 +192,10 @@ final class DictionaryModel: ObservableObject {
             error = "Your dictionary could not be loaded. Fix the file before saving to avoid losing existing entries."
             return false
         }
-        do { try repository.save(next); entries = try DictionaryRepository.validated(next); error = nil; lastFailure = nil; return true }
+        do { try repository.save(next); entries = try DictionaryRepository.validated(next); error = nil; lastFailure = nil }
         catch { lastFailure = .dictionaryUnavailable; self.error = error.localizedDescription; return false }
+        sync()
+        return true
     }
 }
 
