@@ -120,8 +120,9 @@ Before a version commit, failed checks restore the two version files. If push
 fails, nothing is tagged remotely or published, but the release commit and tag stay
 in your checkout, so rerunning the command fails. After a transient failure, push
 them with `git push --atomic origin main vVERSION`. If main moved on GitHub, drop
-them with `git tag -d vVERSION`, `git fetch origin` and `git reset --hard origin/main`,
-then run the command again. Never move an already pushed tag.
+them with `git tag -d vVERSION`, `git fetch origin` and `git reset --keep origin/main`,
+which stops rather than overwrite uncommitted edits, then run the command again.
+Never move an already pushed tag.
 
 If the Release workflow fails, nothing is published. For a missing or wrong secret,
 or a transient Apple or GitHub failure, fix it and re-run the failed workflow. The
