@@ -6,9 +6,9 @@ A native macOS dictation app with a menu bar interface, configurable shortcuts, 
 
 gob.lin needs a Mac with Apple silicon and macOS 26 or later.
 
-1. Download `gob.lin-VERSION.zip` from the [latest release](https://github.com/gobdotlink/gob.lin/releases/latest) and open it.
-2. Drag `gob.lin.app` into **Applications** before opening it. A copy opened from
-   Downloads cannot update itself.
+1. Download `gob.lin.dmg` from the [latest release](https://github.com/gobdotlink/gob.lin/releases/latest) and open it.
+2. Drag `gob.lin.app` onto the **Applications** shortcut beside it before opening it.
+   A copy opened from the disk image cannot update itself.
 3. Open gob.lin from Applications. macOS asks once whether to open an app
    downloaded from the internet; choose **Open**.
 4. gob.lin lives in the menu bar, with no Dock icon. Its first run asks for
@@ -123,7 +123,7 @@ scripts/release.sh 0.1.1
 
 The command bumps app/CLI versions and the build number, checks the project, commits
 the version and pushes a release tag. The Release workflow then signs, notarizes and
-publishes the ZIP as a GitHub release with generated notes. To build an archive
+publishes the disk image and ZIP as a GitHub release with generated notes. To build them
 without publishing, use `scripts/package-app.sh`. See
 [release setup, signing and recovery](docs/releases.md).
 

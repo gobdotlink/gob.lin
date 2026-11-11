@@ -80,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           archive="dist/gob.lin-${GITHUB_REF_NAME#v}.zip"
-          gh release create "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --repo "$GITHUB_REPOSITORY" \
+          gh release create "$GITHUB_REF_NAME" dist/gob.lin.dmg "$archive" "$archive.sha256" --repo "$GITHUB_REPOSITORY" \
             --verify-tag --title "$GITHUB_REF_NAME" --generate-notes --draft \
             --notes "New to gob.lin, or told an update does not match its signing identity? Follow the [install steps](https://github.com/$GITHUB_REPOSITORY#install)."
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
