@@ -35,8 +35,9 @@ struct HistoryRetentionView: View {
                         await model.saveRetention(HistoryRetention(maximumUnstarredCount: countValue, maximumAgeDays: ageValue))
                         dismiss()
                     }
-                }.keyboardShortcut(.defaultAction).tint(GoblinBrand.moss)
+                }.keyboardShortcut(.defaultAction).prominent()
             }
+            .closingActions()
             .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
         }
         .frame(width: 440)

@@ -18,6 +18,8 @@ public struct SyncedDictionary: Codable, Equatable, Sendable {
         }
     }
 
+    /// Raise this when `DictionaryEntry` gains a field: an older gob.lin would drop the field from every entry it
+    /// writes back, so it must refuse the copy instead, as `DictionaryRepository` does for the file.
     var version = 1
     /// Keyed by the entry's UUID string.
     // ponytail: deletion markers are never pruned (about 60 bytes each); prune by age if a copy nears iCloud's 1 MB.
@@ -104,6 +106,6 @@ public struct SyncedDictionary: Codable, Equatable, Sendable {
 }
 
 private extension DictionaryEntry {
-    var sortKey: [String] { [spelling] + aliases + ["\n"] + apps + ["\n"] + projects }
+    var sortKey: [String] { [spelling] + aliases + ["\n"] + apps + ["\n"] + projects + ["\n"] + context }
     var keys: [String] { ([spelling] + aliases).map(dictionaryKey) }
 }

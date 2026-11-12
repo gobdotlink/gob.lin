@@ -114,7 +114,7 @@ struct HistoryView: View {
                 }
             } label: {
                 HStack {
-                    Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(title).font(.row.weight(.semibold)).lineLimit(1)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                 }
@@ -138,10 +138,10 @@ struct HistoryView: View {
     private var retentionFooter: some View {
         Button { showingRetention = true } label: {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(retentionSummary).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text(retentionSummary).font(.meta).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Text("Change…").font(.system(size: 11.5)).foregroundStyle(GoblinBrand.moss)
+                Text("Change…").font(.meta).foregroundStyle(GoblinBrand.moss)
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .contentShape(Rectangle())
@@ -219,13 +219,13 @@ struct HistoryView: View {
         }
     }
 
-    /// The selected row is a solid moss fill with white text, like a native list in an accent colour.
+    /// The selected row is a moss tint; its text, star and time keep their own colours.
     private var entryList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(dayGroups, id: \.day) { group in
-                        Text(group.title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        Text(group.title).font(.meta.weight(.semibold)).foregroundStyle(.secondary)
                             .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 4)
                         ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
                             EntryRow(entry: entry, selected: entry.id == selectedID)
@@ -289,33 +289,29 @@ private struct EntryRow: View {
             AppIcon(bundleIdentifier: entry.targetBundleIdentifier, size: 20).padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(entry.targetApplicationName ?? "Unknown app").font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                    Text(entry.targetApplicationName ?? "Unknown app").font(.status.weight(.semibold)).lineLimit(1)
                     Spacer(minLength: 6)
-                    Text(entry.createdAt, format: .dateTime.hour().minute()).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                    Text(entry.createdAt, format: .dateTime.hour().minute()).font(.status).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Text(entry.finalText.isEmpty ? "Empty dictation" : entry.finalText)
-                    .font(.system(size: 12.5)).lineLimit(2)
+                    .font(.status).lineLimit(2)
                     .foregroundStyle(entry.finalText.isEmpty ? .secondary : .primary).opacity(selected ? 1 : 0.86)
                 HStack(spacing: 6) {
                     Text(Duration.seconds(entry.audioDuration.rounded()).formatted(.time(pattern: .minuteSecond))).monospacedDigit()
                     if entry.starred { Image(systemName: "star.fill").foregroundStyle(GoblinBrand.candle).accessibilityLabel("Starred") }
                     if entry.processingWarning != nil {
                         Label("Warning", systemImage: "exclamationmark.triangle.fill").labelStyle(.titleAndIcon)
-                            .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(GoblinBrand.candle))
+                            .foregroundStyle(GoblinBrand.candle)
                     }
                 }
-                .font(.system(size: 11.5)).foregroundStyle(.tertiary).padding(.top, 1)
+                .font(.meta).foregroundStyle(.secondary).padding(.top, 1)
             }
         }
         .padding(.vertical, 9).padding(.horizontal, 12)
-        .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-        .environment(\.colorScheme, selected ? .dark : environmentScheme)
-        .background(selected ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(selected ? AnyShapeStyle(GoblinBrand.selection) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
-
-    @Environment(\.colorScheme) private var environmentScheme
 }
 
 private struct EntryDetail: View {
@@ -330,16 +326,16 @@ private struct EntryDetail: View {
                 HStack(spacing: 12) {
                     AppIcon(bundleIdentifier: entry.targetBundleIdentifier, size: 36)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(entry.targetApplicationName ?? "Unknown app").font(.system(size: 15, weight: .semibold))
+                        Text(entry.targetApplicationName ?? "Unknown app").font(.cardTitle)
                         Text("\(entry.createdAt.formatted(.dateTime.weekday(.wide).month().day().hour().minute())) · \(seconds) seconds")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                            .font(.meta).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
                     }
                 }
                 if let warning = entry.processingWarning {
                     StatusRow(.waiting, Text(warning)).padding(.top, 14)
                 }
                 Text(entry.finalText.isEmpty ? "No text" : entry.finalText)
-                    .font(.system(size: 17)).lineSpacing(3).textSelection(.enabled)
+                    .font(.reading).lineSpacing(3).textSelection(.enabled)
                     .foregroundStyle(entry.finalText.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 16)
                 playback.padding(.top, 14)
@@ -372,16 +368,16 @@ private struct EntryDetail: View {
         case .edited:
             if let editedText = entry.editedText {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("After we transcribed — you edited").font(.system(size: 13, weight: .semibold))
+                    Text("After we transcribed — you edited").font(.row.weight(.semibold))
                     InlineDiff(from: entry.finalText, to: editedText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         case .rewritten:
-            Text("You rewrote this after dictating.").font(.callout).foregroundStyle(.secondary)
+            Text("You rewrote this after dictating.").font(.status).foregroundStyle(.secondary)
         case .rejected:
-            Text("You deleted this after dictating.").font(.callout).foregroundStyle(.secondary)
+            Text("You deleted this after dictating.").font(.status).foregroundStyle(.secondary)
         default:
             EmptyView()
         }
@@ -405,7 +401,7 @@ private struct EntryDetail: View {
         return HStack(spacing: 12) {
             Button { Task { await history.play(entry) } } label: {
                 Image(systemName: playing ? "stop.fill" : "play.fill")
-                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .font(.meta.weight(.bold)).foregroundStyle(.white)
                     .offset(x: playing ? 0 : 1) // a triangle looks off-centre when centred by its box
                     .frame(width: 28, height: 28).background(GoblinBrand.moss, in: Circle())
                     .contentShape(Circle())
@@ -431,7 +427,7 @@ private struct EntryDetail: View {
                 .contentShape(Rectangle())
                 .onTapGesture { if entry.audioFilename != nil { Task { await history.play(entry) } } }
                 Text("\(time(playing ? history.playbackProgress * entry.audioDuration : 0)) / \(time(entry.audioDuration))")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                    .font(.status).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                 }
             }
         }
@@ -455,13 +451,13 @@ private struct EntryDetail: View {
             fact("Speech model", entry.model.isEmpty ? "—" : entry.model.hasPrefix("parakeet-tdt-v3") ? "Parakeet v3" : entry.model)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .background(GoblinBrand.caseBackground.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
+        .background(GoblinBrand.caseBackground.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
     }
 
     private func fact(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(label).font(.meta).foregroundStyle(.secondary).lineLimit(1)
             Text(value).lineLimit(2).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 10)
@@ -489,7 +485,7 @@ private struct EntryDetail: View {
                 HStack(spacing: 16) { legend(parts) }.fixedSize()
                 VStack(alignment: .leading, spacing: 4) { legend(parts) }
             }
-            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            .font(.meta).foregroundStyle(.secondary).monospacedDigit()
         }
         .accessibilityElement(children: .combine)
     }
@@ -497,7 +493,7 @@ private struct EntryDetail: View {
     private func legend(_ parts: [(String, Double, Color)]) -> some View {
         ForEach(parts.filter { $0.1 > 0 }, id: \.0) { part in
             HStack(spacing: 5) {
-                RoundedRectangle(cornerRadius: 2).fill(part.2).frame(width: 8, height: 8)
+                RoundedRectangle(cornerRadius: Radius.tiny).fill(part.2).frame(width: 8, height: 8)
                 Text("\(part.0) \(ms(part.1))")
             }
         }
@@ -516,9 +512,9 @@ struct EmptyHistoryView: View {
         VStack(spacing: 0) {
             PixelSprite(sprite: .closed, scale: 2)
                 .overlay(alignment: .topTrailing) { PixelSprite(sprite: .zz, scale: 2).offset(x: 22, y: -2) }
-            Text("Nothing to snitch on yet.").font(.title3.weight(.semibold)).padding(.top, 18)
+            Text("Nothing to snitch on yet.").font(.cardTitle).padding(.top, 18)
             Text("Hold \(shortcut) and say something. I'll keep the receipts.").foregroundStyle(.secondary).padding(.top, 4)
-            Text("History stays on this Mac.").font(.caption).foregroundStyle(.tertiary).padding(.top, 16)
+            Text("History stays on this Mac.").font(.meta).foregroundStyle(.tertiary).padding(.top, 16)
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

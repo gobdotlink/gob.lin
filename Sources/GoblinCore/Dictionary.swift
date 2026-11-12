@@ -8,16 +8,21 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
     public var apps: [String]
     /// Project names this entry is used in, matched by `DictionaryScope.projectKey`. Empty means every project.
     public var projects: [String]
+    /// Words the term is said with, such as "GPT" for "Sol". When there are any, the aliases replace only within
+    /// `DictionaryCorrector.contextWindow` words of one, so an ordinary word like "soul" can be an alias.
+    public var context: [String]
 
-    public init(id: UUID = UUID(), spelling: String, aliases: [String] = [], apps: [String] = [], projects: [String] = []) {
+    public init(id: UUID = UUID(), spelling: String, aliases: [String] = [], apps: [String] = [], projects: [String] = [],
+                context: [String] = []) {
         self.id = id
         self.spelling = spelling
         self.aliases = aliases
         self.apps = apps
         self.projects = projects
+        self.context = context
     }
 
-    private enum CodingKeys: String, CodingKey { case id, spelling, aliases, apps, projects }
+    private enum CodingKeys: String, CodingKey { case id, spelling, aliases, apps, projects, context }
 
     // Entries saved before app scopes have no `apps` key and apply everywhere.
     public init(from decoder: Decoder) throws {
@@ -27,6 +32,7 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
         aliases = try container.decode([String].self, forKey: .aliases)
         apps = try container.decodeIfPresent([String].self, forKey: .apps) ?? []
         projects = try container.decodeIfPresent([String].self, forKey: .projects) ?? []
+        context = try container.decodeIfPresent([String].self, forKey: .context) ?? []
     }
 
     // Unscoped entries keep the original file shape.
@@ -37,6 +43,7 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
         try container.encode(aliases, forKey: .aliases)
         if !apps.isEmpty { try container.encode(apps, forKey: .apps) }
         if !projects.isEmpty { try container.encode(projects, forKey: .projects) }
+        if !context.isEmpty { try container.encode(context, forKey: .context) }
     }
 
     /// Whether this entry is limited to particular apps or projects.
@@ -105,7 +112,7 @@ public enum DictionaryError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidTerm: "Spellings and aliases must contain words on a single line."
+        case .invalidTerm: "Spellings, aliases and context words must contain words on a single line."
         case .invalidApp: "An app scope must be an application bundle identifier."
         case .invalidProject: "A project scope must be a project name on a single line."
         case .duplicate(let term): "“\(term)” already belongs to a dictionary entry."
@@ -132,7 +139,7 @@ public struct DictionaryRepository: Sendable {
     public func load() throws -> [DictionaryEntry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         let document = try JSONDecoder().decode(Document.self, from: Data(contentsOf: url))
-        guard [1, 2, 3].contains(document.version) else { throw DictionaryError.unsupportedVersion }
+        guard (1...4).contains(document.version) else { throw DictionaryError.unsupportedVersion }
         return try Self.validated(document.entries)
     }
 
@@ -140,9 +147,11 @@ public struct DictionaryRepository: Sendable {
         let entries = try Self.validated(entries)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        // Each scope kind raises the version (2: apps, 3: projects), so earlier versions refuse files whose scopes they
-        // would drop, and leave them intact, rather than widening the terms to every app or project.
-        let version = entries.contains { !$0.projects.isEmpty } ? 3 : entries.contains(where: \.isScoped) ? 2 : 1
+        // Each kind of limit raises the version (2: apps, 3: projects, 4: context), so earlier versions refuse files whose
+        // limits they would drop, and leave them intact, rather than widening the terms to every app or project, or
+        // their aliases to every sentence.
+        let version = entries.contains { !$0.context.isEmpty } ? 4 : entries.contains { !$0.projects.isEmpty } ? 3
+            : entries.contains(where: \.isScoped) ? 2 : 1
         let data = try encoder.encode(Document(version: version, entries: entries))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
@@ -170,8 +179,14 @@ public struct DictionaryRepository: Sendable {
                 guard !project.contains(where: \.isNewline), !DictionaryScope.projectKey(project).isEmpty else { throw DictionaryError.invalidProject }
                 if !projects.contains(where: { DictionaryScope.projectKey($0) == DictionaryScope.projectKey(project) }) { projects.append(project) }
             }
+            var context: [String] = []
+            for word in entry.context.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !word.isEmpty {
+                guard !word.contains(where: \.isNewline), word.contains(where: { $0.isLetter || $0.isNumber }) else { throw DictionaryError.invalidTerm }
+                if !context.contains(where: { dictionaryKey($0) == dictionaryKey(word) }) { context.append(word) }
+            }
             return DictionaryEntry(id: entry.id, spelling: spelling, aliases: Array(Set(aliases)).sorted(), apps: Array(Set(apps)).sorted(),
-                                   projects: projects.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+                                   projects: projects.sorted { $0.localizedStandardCompare($1) == .orderedAscending },
+                                   context: context.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
         }
     }
 
@@ -210,12 +225,16 @@ public enum DictionaryCorrector {
         var key: String
     }
 
+    /// Most words between an alias and one of its entry's context words, on either side.
+    public static let contextWindow = 3
+
     // Fuzzy correction stays opt-in until the real replay establishes zero ordinary-word regressions.
     public static func correct(_ text: String, entries: [DictionaryEntry], allowFuzzy: Bool = false) -> DictionaryCorrectionResult {
         let tokens = tokenize(text)
         let protected = DictationTextProtection.ranges(in: text)
         let phrases = entries.flatMap { entry in
-            entry.aliases.map { (words: dictionaryKey($0).split(separator: " ").map(String.init), entry: entry) }
+            let context = entry.context.map(contextKeys).filter { !$0.isEmpty }
+            return entry.aliases.map { (words: dictionaryKey($0).split(separator: " ").map(String.init), entry: entry, context: context) }
         }.sorted { $0.words.count > $1.words.count }
         let canonicalPhrases = entries.map { dictionaryKey($0.spelling).split(separator: " ").map(String.init) }
             .sorted { $0.count > $1.count }
@@ -235,7 +254,8 @@ public enum DictionaryCorrector {
                     text[left.range.upperBound..<right.range.lowerBound].allSatisfy(\.isWhitespace)
                 }) else { continue }
                 let range = slice[0].range.lowerBound..<slice[slice.count - 1].range.upperBound
-                guard !DictationTextProtection.contains(range, in: text, ranges: protected) else { continue }
+                guard !DictationTextProtection.contains(range, in: text, ranges: protected),
+                      phrase.context.isEmpty || isNear(phrase.context, tokens: tokens, words: index..<(index + slice.count), in: text) else { continue }
                 let original = String(text[range])
                 let replacement = aliasCapitalization(original, preferred: phrase.entry.spelling)
                 if original != replacement {
@@ -278,6 +298,37 @@ public enum DictionaryCorrector {
         for (range, correction) in edits.reversed() { result.replaceSubrange(range, with: correction.replacement) }
         return DictionaryCorrectionResult(text: result, corrections: edits.map(\.1))
     }
+
+    /// Whether every word of one context entry is within `contextWindow` words of `words` in the same sentence, in any
+    /// order, so "6.1" matches "GPT-6.1" and a spoken "six point one". Code-like text still counts: it says what is
+    /// being talked about.
+    private static func isNear(_ context: [[String]], tokens: [Token], words: Range<Int>, in text: String) -> Bool {
+        // A sentence ends at a line break, or at a full stop, question mark, exclamation mark or semicolon before a
+        // space; the dot in "6.1" doesn't end one.
+        func ends(after index: Int) -> Bool {
+            let gap = text[tokens[index].range.upperBound..<tokens[index + 1].range.lowerBound]
+            return gap.contains(where: \.isNewline) || (gap.contains { ".!?;…".contains($0) } && gap.contains(where: \.isWhitespace))
+        }
+        var start = words.lowerBound
+        while start > max(0, words.lowerBound - contextWindow), !ends(after: start - 1) { start -= 1 }
+        var end = words.upperBound
+        while end < min(tokens.count, words.upperBound + contextWindow), !ends(after: end - 1) { end += 1 }
+        // Counted, so each word of "1.1" needs its own "one".
+        var nearby: [String: Int] = [:]
+        for token in tokens[start..<words.lowerBound] + tokens[words.upperBound..<end] { nearby[numberKey(token.key), default: 0] += 1 }
+        return context.contains { words in
+            Dictionary(words.map { ($0, 1) }, uniquingKeysWith: +).allSatisfy { nearby[$0.key, default: 0] >= $0.value }
+        }
+    }
+
+    /// A context entry's words as the corrector compares them.
+    static func contextKeys(_ word: String) -> [String] { tokenize(word).map { numberKey($0.key) } }
+
+    private static let spokenNumbers = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                                        "eleven", "twelve"]
+
+    /// Spoken numbers compare as digits, because recognition writes either.
+    private static func numberKey(_ key: String) -> String { spokenNumbers.firstIndex(of: key).map(String.init) ?? key }
 
     private static func tokenize(_ text: String) -> [Token] {
         var result: [Token] = []

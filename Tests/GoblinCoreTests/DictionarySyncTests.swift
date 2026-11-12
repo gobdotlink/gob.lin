@@ -35,6 +35,7 @@ private struct Device {
     try mac.sync(&cloud, at: 3)
     phone.entries.removeAll { $0.spelling == "Kalikin" }
     phone.entries[0].aliases = ["passe oh"]
+    phone.entries[0].context = ["GPT"]
     try phone.sync(&stale, at: 4)
     cloud = stale
 
@@ -42,7 +43,7 @@ private struct Device {
     try phone.sync(&cloud, at: 6)
     // The Mac's new word survives the dropped copy, the phone's deletion isn't undone and its edit arrives.
     #expect(mac.spellings == ["Paseo", "Cerebras"] && phone.spellings == mac.spellings)
-    #expect(mac.entries.first?.aliases == ["passe oh"])
+    #expect(mac.entries.first?.aliases == ["passe oh"] && mac.entries.first?.context == ["GPT"])
     // Once they agree, neither writes again: two devices must not answer each other forever.
     let settled = cloud
     #expect(try !mac.sync(&cloud, at: 7) && !phone.sync(&cloud, at: 8) && cloud == settled)

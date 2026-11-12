@@ -82,7 +82,7 @@ private struct OverlayBubble: View {
     @ObservedObject var model: OverlayModel
     let reduceMotion: Bool
     @State private var textHeight: CGFloat = 21
-    private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous)
 
     private var compact: Bool {
         switch model.visiblePhase {
@@ -133,7 +133,7 @@ private struct OverlayBubble: View {
         case .hidden, .arming:
             HStack(spacing: 10) {
                 Meter(levels: model.levels, idle: true)
-                Text("Warming up the mic…").font(.system(size: 14))
+                Text("Warming up the mic…").font(.row)
                 if model.talkKey.keyCode != 53 { DarkKey("esc").padding(.leading, 2) }
                 else { cancelButton }
             }
@@ -145,7 +145,7 @@ private struct OverlayBubble: View {
                         Text(model.handsFree ? "Hands-free" : "Listening").fontWeight(.semibold).foregroundStyle(.white.opacity(0.58))
                         ElapsedTime(start: model.listeningStarted).foregroundStyle(.white.opacity(0.38))
                     }
-                    .font(.system(size: 12))
+                    .font(.status)
                     Spacer(minLength: 8)
                     if model.handsFree {
                         HStack(spacing: 6) {
@@ -153,7 +153,7 @@ private struct OverlayBubble: View {
                             HStack(spacing: 3) { ForEach(Array(talkKeys.enumerated()), id: \.offset) { DarkKey($0.element) } }
                             Text("to finish")
                         }
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).fixedSize()
+                        .font(.status).foregroundStyle(.white.opacity(0.5)).fixedSize()
                         .accessibilityElement(children: .ignore).accessibilityLabel("Tap \(model.talkKey.title) to finish")
                     }
                     cancelButton
@@ -164,11 +164,11 @@ private struct OverlayBubble: View {
                         Image(systemName: "mic.slash.fill").foregroundStyle(Color(red: 1, green: 0.48, blue: 0.43))
                         Text(notice).fontWeight(.semibold)
                     }
-                    .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
+                    .font(.status).foregroundStyle(.white.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
                 } else if let line = model.microphoneLine {
                     Label(line, systemImage: "mic.fill").labelStyle(OverlayLineLabelStyle())
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                        .font(.status).foregroundStyle(.white.opacity(0.5))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 words(caret: true)
@@ -201,9 +201,9 @@ private struct OverlayBubble: View {
                         if let application = result.application { Text("Text landed in \(Text(application).fontWeight(.semibold))") }
                         else { Text("Text delivered") }
                     }
-                    .font(.system(size: 13.5))
+                    .font(.row)
                     Text("\(result.words.formatted()) \(result.words == 1 ? "word" : "words") · \(result.seconds.formatted(.number.precision(.fractionLength(2)))) s")
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
+                        .font(.status).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
                 }
                 if let notice = result.notice {
                     Subline { Text(NoticeCopy(notice).sentence).fixedSize(horizontal: false, vertical: true) }
@@ -214,7 +214,7 @@ private struct OverlayBubble: View {
                 HStack(spacing: 9) {
                     Image(systemName: "doc.on.clipboard").foregroundStyle(GoblinBrand.neon)
                     Text(application.map { "Ready to paste into \($0)" } ?? "Ready to paste")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.row.weight(.semibold))
                 }
                 Subline {
                     Text(shortcut ? "Focus a text field, then press ⌥⇧⌘V. Your words are in History." : "Your words are in History.")
@@ -225,9 +225,9 @@ private struct OverlayBubble: View {
             HStack(spacing: 12) {
                 PixelSprite(sprite: .candle, scale: 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(words.formatted()) words yapped.").font(.system(size: 14, weight: .semibold))
+                    Text("\(words.formatted()) words yapped.").font(.row.weight(.semibold))
                     Text(model.deliveryApplication.map { "Text landed in \($0)" } ?? "About \(max(1, words / 250).formatted()) pages you didn't type.")
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.55))
+                        .font(.status).foregroundStyle(.white.opacity(0.55))
                 }
             }
         case .newMicrophone(let name, let uid):
@@ -235,7 +235,7 @@ private struct OverlayBubble: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "mic.badge.plus").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon).padding(.top, 1)
                     Text("\(Text(name).fontWeight(.semibold)) just connected. Should I use it for dictation?")
-                        .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                        .font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
                 Subline {
                     Text("Audio › new microphone").lineLimit(1)
@@ -249,7 +249,7 @@ private struct OverlayBubble: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "character.book.closed.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon).padding(.top, 1)
                     Text("Add \(Text("“\(suggestion.spelling)”").fontWeight(.semibold)) to the dictionary?")
-                        .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                        .font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
                 Subline {
                     Text(suggestionDetail(suggestion)).lineLimit(1).truncationMode(.middle)
@@ -261,9 +261,9 @@ private struct OverlayBubble: View {
         case .termAdded(let suggestion):
             HStack(spacing: 9) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon)
-                Text("Added \(Text(suggestion.spelling).fontWeight(.semibold))").font(.system(size: 13.5))
+                Text("Added \(Text(suggestion.spelling).fontWeight(.semibold))").font(.row)
                 if let place = placeName(suggestion) {
-                    Text("for \(place)").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    Text("for \(place)").font(.status).foregroundStyle(.white.opacity(0.5))
                 }
             }
         case .error(let notice):
@@ -271,7 +271,7 @@ private struct OverlayBubble: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: copy.symbol).font(.system(size: 15)).foregroundStyle(copy.tint).padding(.top, 1)
-                    Text(copy.sentence).font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    Text(copy.sentence).font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
                 if copy.detail != nil || copy.action != nil {
                     Subline {
@@ -300,10 +300,11 @@ private struct OverlayBubble: View {
         return shortcut.keyCode == nil && shortcut.keys.count == 1 ? [shortcut.keyLabel] : shortcut.keys.map(\.symbol)
     }
 
-    /// "You fixed “anasia” · gob.lin": why, then where the word would apply.
+    /// "You fixed “anasia” · gob.lin", or "You fixed it 5 times · everywhere": why, then where the word would apply.
     private func suggestionDetail(_ suggestion: TermSuggestion) -> String {
         let why: String
-        if case .correction(let heard) = suggestion.reason { why = "You fixed “\(heard)”" } else { why = "From your fix" }
+        if suggestion.timesFixed > 1 { why = "You fixed it \(suggestion.timesFixed) times" }
+        else if case .correction(let heard) = suggestion.reason { why = "You fixed “\(heard)”" } else { why = "From your fix" }
         return [why, placeName(suggestion) ?? "everywhere"].joined(separator: " · ")
     }
 
@@ -326,7 +327,7 @@ private struct OverlayBubble: View {
             : Text("\(Text(model.committedText).foregroundStyle(.white.opacity(0.94)))\(Text(model.tentativeText).foregroundStyle(.white.opacity(0.42)))\(Text(caret ? "▎" : "").foregroundStyle(GoblinBrand.neon))")
         let overflow = textHeight > 84
         return ScrollView(.vertical) {
-            text.font(.system(size: 15)).lineSpacing(3)
+            text.font(.overlayWords).lineSpacing(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
@@ -441,7 +442,7 @@ private struct Subline<Content: View>: View {
         VStack(spacing: 0) {
             Rectangle().fill(.white.opacity(0.1)).frame(height: 0.5)
             HStack(spacing: 8) { content }
-                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
+                .font(.status).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
                 .frame(minHeight: 24).padding(.top, 7)
         }
         .padding(.top, 8)
@@ -501,7 +502,7 @@ private struct Shimmer: View {
     var body: some View {
         TimelineView(.animation(paused: reduceMotion)) { context in
             let phase = reduceMotion ? -1 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 1.6 - 0.3
-            Text(text.isEmpty ? " " : text).font(.system(size: 15)).lineSpacing(3).lineLimit(4)
+            Text(text.isEmpty ? " " : text).font(.overlayWords).lineSpacing(3).lineLimit(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(LinearGradient(stops: [
                     .init(color: .white.opacity(0.94), location: max(0, phase - 0.12)),
@@ -518,9 +519,9 @@ private struct DarkKey: View {
     init(_ label: String) { self.label = label }
 
     var body: some View {
-        Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(.white)
+        Text(label).font(.meta.weight(.medium)).foregroundStyle(.white)
             .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18)
-            .background(.white.opacity(0.13), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .background(.white.opacity(0.13), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
     }
 }
 
@@ -542,7 +543,7 @@ private struct OverlayPillStyle: ButtonStyle {
     var prominent = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12, weight: prominent ? .semibold : .medium)).foregroundStyle(.white)
+        configuration.label.font(.status.weight(prominent ? .semibold : .medium)).foregroundStyle(.white)
             .padding(.horizontal, 11).frame(height: 24)
             .background(prominent ? AnyShapeStyle(GoblinBrand.moss.opacity(configuration.isPressed ? 0.8 : 1))
                                   : AnyShapeStyle(.white.opacity(configuration.isPressed ? 0.22 : 0.14)), in: Capsule())

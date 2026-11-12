@@ -24,14 +24,21 @@ struct DictionaryBrowser: View {
 
     var body: some View {
         let places = model.places
-        VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                TextField(model.entries.count > 1 ? "Search all \(model.entries.count) words" : "Search", text: $search).textFieldStyle(.roundedBorder)
-                Button("Import Words…") { importing = true }.disabled(!model.available)
-                Button("Add Term", systemImage: "plus") { editing = selection.newEntry }.disabled(!model.available).prominent()
-            }
-            .controlSize(.small)
-            Plate(padding: 0) {
+        // One plate: search and Add Term are its header, at the same height and inset as the rows below.
+        Plate(padding: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    SearchField(prompt: model.entries.count > 1 ? "Search all \(model.entries.count) words" : "Search", text: $search)
+                    Menu {
+                        Button("Import Words…") { importing = true }
+                    } label: { IconButtonLabel(symbol: "ellipsis") }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel("More")
+                    Button("Add Term", systemImage: "plus") { editing = selection.newEntry }.prominent()
+                }
+                .disabled(!model.available)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                Hairline()
                 if model.entries.isEmpty && places.apps.isEmpty {
                     ContentUnavailableView("Add your vocabulary", systemImage: "character.book.closed",
                         description: Text("Add a preferred spelling and optional “sounds like” aliases. Import a text file with one term per line."))
@@ -42,13 +49,24 @@ struct DictionaryBrowser: View {
                         Divider()
                         Group { if isSearching { results } else { detail(places) } }.frame(maxWidth: .infinity)
                     }
-                    .frame(height: 480)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(height: listHeight(places))
                 }
             }
+            .clipShape(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
         }
         .task { await model.refreshProjectUses() }
         .onChange(of: places) { if !places.contains(selection) { selection = .everywhere } }
+    }
+
+    /// The split hugs its content: room for six words at least, and it scrolls past fourteen. It is
+    /// sized by the selected place even during a search, so typing never resizes the page; results
+    /// scroll inside it.
+    private func listHeight(_ places: DictionaryPlaces) -> CGFloat {
+        let words = model.entries.filter(selection.holds).count
+        let sidebarRows = 1 + places.apps.reduce(0) { $0 + 1 + (expanded.contains($1.id) ? $1.projects.count : 0) }
+            + (places.unassigned.isEmpty ? 0 : places.unassigned.count + 1)
+        let rows = max(words + 3, sidebarRows)
+        return CGFloat(min(max(rows, 9), 15)) * 32
     }
 
     private func select(_ place: DictionaryPlace) {
@@ -62,33 +80,35 @@ struct DictionaryBrowser: View {
     private func sidebar(_ places: DictionaryPlaces) -> some View {
         let apps = places.apps.map { (app: $0, name: DictionaryApps.name($0.id)) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        // Room for a disclosure chevron only when some app has projects to disclose.
+        let gutter: CGFloat = places.apps.contains { !$0.projects.isEmpty } ? 16 : 0
         return ScrollView {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 0) {
-                    Color.clear.frame(width: 16, height: 1)
-                    SidebarRow(title: "Everywhere", selected: selection == .everywhere && !isSearching, action: { select(.everywhere) }) {
+                    Color.clear.frame(width: gutter, height: 1)
+                    SidebarRow(title: "Everywhere", selected: selection == .everywhere && !isSearching, action: { select(.everywhere) }, tinted: true) {
                         Image(systemName: "globe")
                     } trailing: { Text("\(places.everywhereCount)") }
                 }
                 ForEach(apps, id: \.app.id) { app, name in
-                    appRow(app, name: name)
+                    appRow(app, name: name, gutter: gutter)
                     if expanded.contains(app.id) {
-                        ForEach(app.projects) { projectRow($0).padding(.leading, 34) }
+                        ForEach(app.projects) { projectRow($0).padding(.leading, gutter + 18) }
                     }
                 }
                 if !places.unassigned.isEmpty {
-                    CapsHeader("Other Projects").padding(.leading, 25).padding(.top, 10).padding(.bottom, 3)
-                    ForEach(places.unassigned) { projectRow($0).padding(.leading, 16) }
+                    CapsHeader("Other Projects").padding(.leading, gutter + 9).padding(.top, 10).padding(.bottom, 3)
+                    ForEach(places.unassigned) { projectRow($0).padding(.leading, gutter) }
                 }
             }
             .padding(6)
         }
     }
 
-    private func appRow(_ app: DictionaryPlaces.App, name: String) -> some View {
+    private func appRow(_ app: DictionaryPlaces.App, name: String, gutter: CGFloat) -> some View {
         HStack(spacing: 0) {
             if app.projects.isEmpty {
-                Color.clear.frame(width: 16, height: 1)
+                Color.clear.frame(width: gutter, height: 1)
             } else {
                 let open = expanded.contains(app.id)
                 Button {
@@ -100,14 +120,14 @@ struct DictionaryBrowser: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(open ? "Hide projects in \(name)" : "Show projects in \(name)")
             }
-            SidebarRow(title: name, selected: selection == .app(app.id) && !isSearching, action: { select(.app(app.id)) }) {
+            SidebarRow(title: name, selected: selection == .app(app.id) && !isSearching, action: { select(.app(app.id)) }, tinted: true) {
                 appIcon(app.id, size: 17)
             } trailing: { Text("\(app.wordCount)") }
         }
     }
 
     private func projectRow(_ project: DictionaryPlaces.Project) -> some View {
-        SidebarRow(title: project.name, selected: selection == project.place && !isSearching, action: { select(project.place) }) {
+        SidebarRow(title: project.name, selected: selection == project.place && !isSearching, action: { select(project.place) }, tinted: true) {
             Image(systemName: "folder")
         } trailing: { Text("\(project.wordCount)") }
     }
@@ -131,14 +151,14 @@ struct DictionaryBrowser: View {
             header(places, active: active).padding(.horizontal, 12).padding(.vertical, 9)
             Hairline()
             if words.isEmpty {
-                Text("I don't have any words for this place yet.").font(.callout).foregroundStyle(.secondary)
+                Text("I don't have any words for this place yet.").font(.status).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 wordList(words, showsPlace: false)
             }
             if !also.isEmpty {
                 Hairline()
-                Text("Also active here: " + also).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                Text("Also active here: " + also).font(.meta).foregroundStyle(.secondary).lineLimit(1)
                     .monospacedDigit().frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 7)
             }
         }
@@ -150,7 +170,7 @@ struct DictionaryBrowser: View {
             .sorted { $0.spelling.localizedStandardCompare($1.spelling) == .orderedAscending }
         return Group {
             if words.isEmpty {
-                Text("I couldn't find that spelling.").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text("I couldn't find that spelling.").font(.status).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 wordList(words, showsPlace: true)
             }
@@ -161,7 +181,7 @@ struct DictionaryBrowser: View {
         VStack(spacing: 0) {
             HStack(spacing: DictionaryWordRow.columnSpacing) {
                 column("Word")
-                column("Sounds Like")
+                column("Sounds like")
                 if showsPlace { column("Where") }
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
@@ -192,19 +212,21 @@ struct DictionaryBrowser: View {
         HStack(spacing: 9) {
             headerIcon
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text(subtitle(places)).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                Text(title).font(.cardTitle).lineLimit(1)
+                Text(subtitle(places)).font(.meta).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
             Button { showingActive = true } label: {
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("\(active.used.count) of \(DictionaryScope.activeLimit) active here").font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit()
+                HStack(spacing: 8) {
+                    Text("\(active.used.count) of \(DictionaryScope.activeLimit) active").font(.meta).foregroundStyle(.secondary).monospacedDigit()
                     ZStack(alignment: .leading) {
                         Capsule().fill(.primary.opacity(0.1))
-                        Capsule().fill(GoblinBrand.moss).frame(width: 96 * CGFloat(active.used.count) / CGFloat(DictionaryScope.activeLimit))
+                        Capsule().fill(GoblinBrand.moss).frame(width: 72 * CGFloat(active.used.count) / CGFloat(DictionaryScope.activeLimit))
                     }
-                    .frame(width: 96, height: 4)
+                    .frame(width: 72, height: 4)
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                 }
+                .frame(minHeight: 24)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -272,19 +294,23 @@ private struct DictionaryWordRow: View {
     let delete: () -> Void
     @State private var hovering = false
 
-    private var aliases: String { entry.aliases.joined(separator: ", ") }
+    /// "soul, sole · near GPT, 6.1"
+    private var aliases: String {
+        let near = entry.context.isEmpty ? [] : ["near " + entry.context.joined(separator: ", ")]
+        return ([entry.aliases.joined(separator: ", ")].filter { !$0.isEmpty } + near).joined(separator: " · ")
+    }
 
     var body: some View {
         HStack(spacing: Self.columnSpacing) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(entry.spelling).font(.system(size: 13)).lineLimit(1).truncationMode(.middle).help(entry.spelling)
-                if excluded { Text("Not sent to recognition").font(.system(size: 11.5)).foregroundStyle(.secondary) }
+                Text(entry.spelling).font(.row).lineLimit(1).truncationMode(.middle).help(entry.spelling)
+                if excluded { Text("Not sent to recognition").font(.meta).foregroundStyle(.secondary) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(aliases).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+            Text(aliases).font(.row).foregroundStyle(.secondary).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading).help(aliases)
             if let place {
-                Text(place).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                Text(place).font(.row).foregroundStyle(.secondary).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading).help(place)
             }
         }
@@ -297,7 +323,7 @@ private struct DictionaryWordRow: View {
                     Button("Edit", action: edit)
                     Button("Delete", systemImage: "trash", role: .destructive, action: delete).labelStyle(.iconOnly)
                 }
-                .controlSize(.small).padding(.leading, 16).padding(.trailing, 8).frame(maxHeight: .infinity)
+                .padding(.leading, 16).padding(.trailing, 8).frame(maxHeight: .infinity)
                 .background(GoblinBrand.plate)
             }
         }
@@ -331,7 +357,7 @@ struct DictionaryActiveWords: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("I use \(used.count) of \(DictionaryScope.activeLimit) words here. The most specific come first, then the newest.")
-                    .font(.callout).fixedSize(horizontal: false, vertical: true).monospacedDigit()
+                    .font(.status).fixedSize(horizontal: false, vertical: true).monospacedDigit()
                 ForEach(layers, id: \.name) { layer in
                     VStack(alignment: .leading, spacing: 4) {
                         CapsHeader("\(layer.name) · \(layer.words.count)")
@@ -343,7 +369,7 @@ struct DictionaryActiveWords: View {
                     VStack(alignment: .leading, spacing: 4) {
                         CapsHeader("Past the Limit · \(missed.count)")
                         wordText(missed.map(\.spelling)).foregroundStyle(.secondary)
-                        Text("Their “sounds like” fixes still work.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        Text("Their “sounds like” fixes still work.").font(.meta).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -353,7 +379,7 @@ struct DictionaryActiveWords: View {
     }
 
     private func wordText(_ words: [String]) -> some View {
-        Text(words.joined(separator: ", ")).font(.system(size: 13))
+        Text(words.joined(separator: ", ")).font(.row)
             .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
     }
 }

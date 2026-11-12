@@ -21,7 +21,7 @@ struct DiagnosticsView: View {
             HStack {
                 Text("Status")
                 Spacer()
-                Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.labelStyle(.iconOnly)
+                Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }.labelStyle(.iconOnly).controlSize(.small)
                     .accessibilityLabel("Refresh diagnostics")
             }
         }
@@ -38,7 +38,11 @@ struct DiagnosticsView: View {
         }
         Section("Latest dictation timing") {
             if let timings = model.latestTimings {
-                ForEach(DiagnosticsReport.timingLines(timings), id: \.self) { Text($0).font(.body.monospaced()).monospacedDigit() }
+                // "Capture: 9000.0 ms" drawn like the Environment rows above it.
+                ForEach(DiagnosticsReport.timingLines(timings), id: \.self) { line in
+                    let parts = line.split(separator: ": ", maxSplits: 1).map(String.init)
+                    LabeledContent(parts[0]) { Text(parts.count > 1 ? parts[1] : "").monospacedDigit() }
+                }
             } else { Text("No dictation timings recorded yet.").foregroundStyle(.secondary) }
         }
         if !model.events.isEmpty {
@@ -46,7 +50,7 @@ struct DiagnosticsView: View {
                 ForEach(model.events.reversed()) { event in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(event.failure.area.title + " · " + event.date.formatted(date: .omitted, time: .standard))
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .font(.meta.monospaced()).foregroundStyle(.secondary)
                         Text(event.failure.message).textSelection(.enabled)
                     }
                 }
@@ -54,35 +58,35 @@ struct DiagnosticsView: View {
                 HStack {
                     Text("Recent errors")
                     Spacer()
-                    Button("Clear Recent Errors") { model.clearRecentErrors() }.textCase(nil).font(.callout).controlSize(.small)
+                    Button("Clear Recent Errors") { model.clearRecentErrors() }.textCase(nil).tracking(0).font(.status).controlSize(.small)
                 }
             }
         }
         Section {
             LabeledContent {
-                Text("~/Library/Logs/gob.lin").font(.callout.monospaced()).textSelection(.enabled)
+                Text("~/Library/Logs/gob.lin").font(.status.monospaced()).textSelection(.enabled)
             } label: {
                 Text("Development logs")
-                Text(model.logStatus)
+                Text(model.logStatus).rowDetail()
             }
             HStack {
-                Button("Reveal logs", systemImage: "folder") { model.revealLogs() }
-                Button("Export recent logs…", systemImage: "square.and.arrow.up") { model.exportLogs(includeDeviceNames: includeDeviceNames) }
-                Button("Reveal crash reports") { model.revealCrashReports() }
+                Button("Reveal Logs", systemImage: "folder") { model.revealLogs() }
+                Button("Export Recent Logs…", systemImage: "square.and.arrow.up") { model.exportLogs(includeDeviceNames: includeDeviceNames) }
+                Button("Reveal Crash Reports") { model.revealCrashReports() }
             }
         } header: { Text("Logs") } footer: {
-            Text("Events include build, launch, operation, and process IDs. Audio, transcripts, keys, credentials, clipboard contents, and device names are excluded. Crash reports are listed for matching and shared separately.")
+            Text("Logs hold build, launch, operation and process IDs. Audio, transcripts, keys, clipboard contents and device names are left out. Crash reports are shared separately.")
         }
         Section {
-            Toggle("Include microphone names in copied / exported diagnostics", isOn: $includeDeviceNames)
+            Toggle("Include microphone names", isOn: $includeDeviceNames)
             HStack {
                 if let message = model.copyMessage { Text(message).foregroundStyle(.secondary) }
                 Spacer()
-                Button("Copy diagnostics", systemImage: "doc.on.doc") { model.copyDiagnostics(includeDeviceNames: includeDeviceNames) }
+                Button("Copy Diagnostics", systemImage: "doc.on.doc") { model.copyDiagnostics(includeDeviceNames: includeDeviceNames) }
                     .prominent()
             }
         } header: { Text("Share") } footer: {
-            Text("Copied diagnostics contain versions, permissions, stage timings, and typed errors. Transcript text, keys, request bodies, and file paths are excluded.")
+            Text("Copies and exports hold versions, permissions, timings and typed errors. Transcripts, keys, request bodies and file paths are left out.")
         }
     }
 }

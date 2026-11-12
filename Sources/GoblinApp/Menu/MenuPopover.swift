@@ -78,18 +78,23 @@ private struct PopoverHeader: View {
                         KeyCombo(label: hotkeys.shortcut == .fn ? "fn" : hotkeys.shortcut.label, small: true)
                         Text("to talk")
                     } else {
-                        Text(model.mascotState == .recording ? "Listening…" : model.mascotState == .transcribing ? "Writing it out…"
-                             : "\(status.title) · \(status.detail)")
+                        // One line: the detail drops off before the sentence wraps under the wordmark.
+                        ViewThatFits(in: .horizontal) {
+                            Text(model.mascotState == .recording ? "Listening…" : model.mascotState == .transcribing ? "Writing it out…"
+                                 : "\(status.title) · \(status.detail)")
+                            Text(status.title)
+                        }
+                        .lineLimit(1).help(status.detail)
                     }
                 }
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .font(.status).foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
                 if dictionary.suggestsTerms, !dictionary.suggestions.isEmpty {
                     let count = dictionary.suggestions.count
                     Button("\(count) new \(count == 1 ? "word" : "words")\(dictionary.suggestionPlace.map { " for \($0.name)" } ?? "")") {
                         dismiss.then { model.openSettings(.dictionary) }
                     }
-                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(GoblinBrand.mossText).contentShape(.rect)
+                    .buttonStyle(.plain).font(.status).foregroundStyle(GoblinBrand.mossText).contentShape(.rect)
                 }
             }
             Spacer(minLength: 6)
@@ -145,12 +150,12 @@ private struct PopoverNotices: View {
             HStack(spacing: 10) {
                 circle("arrow.down.circle", on: false)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("gob.lin \(version) is ready").font(.system(size: 13, weight: .semibold))
-                    Text("Restarting takes a second.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    Text("gob.lin \(version) is ready").font(.row.weight(.semibold))
+                    Text("Restarting takes a second.").font(.meta).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 6)
                 Button("Restart") { updates.install() }
-                    .prominent().disabled(updates.isBusy || !model.canInstallUpdate)
+                    .prominent().buttonBorderShape(.capsule).disabled(updates.isBusy || !model.canInstallUpdate)
             }
             .moduleBackground()
         }
@@ -194,7 +199,7 @@ private struct PopoverMicrophone: View {
             HStack(spacing: 10) {
                 circle("mic", on: testing)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Microphone").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    Text("Microphone").font(.meta).foregroundStyle(.secondary)
                     Menu {
                         // In ranked order, the line included; picking one moves it above everything connected now.
                         Picker("Microphone", selection: Binding(get: { selection }, set: { microphones.pick($0) })) {
@@ -218,7 +223,7 @@ private struct PopoverMicrophone: View {
                         Button("Edit Ranking…", action: editRanking)
                     } label: {
                         HStack(spacing: 4) {
-                            Text(deviceName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                            Text(deviceName).font(.row.weight(.semibold)).lineLimit(1)
                             Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
                         }
@@ -230,7 +235,7 @@ private struct PopoverMicrophone: View {
                 }
                 Spacer(minLength: 6)
                 Text(testing ? "Testing" : "Hold to Test")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.status.weight(.semibold))
                     .foregroundStyle(testing ? .white : .primary)
                     .padding(.horizontal, 11).frame(height: 26)
                     .background(testing ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.quaternary), in: Capsule())
@@ -252,7 +257,7 @@ private struct PopoverMicrophone: View {
             .frame(height: 26)
             .accessibilityHidden(true)
             Text(preview.silenceNotice ?? preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : note))
-                .font(.system(size: 11)).foregroundStyle(preview.silenceNotice == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(1)
+                .font(.meta).foregroundStyle(preview.silenceNotice == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(1)
         }
         .moduleBackground()
         .onChange(of: preview.level) { _, level in levels = Array((levels + [level]).suffix(28)) }
@@ -321,12 +326,12 @@ private struct PopoverCleanup: View {
             } label: {
                 HStack(spacing: 4) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Cleanup").font(.system(size: 13, weight: .semibold))
+                        Text("Cleanup").font(.row.weight(.semibold))
                         ViewThatFits(in: .horizontal) {
                             Text(on ? "\(settings.cleanup.title) · \(settings.provider.title)" : "Off")
                             Text(on ? settings.cleanup.title : "Off")
                         }
-                        .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.meta).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
@@ -379,15 +384,15 @@ private struct PopoverTone: View {
             HStack(spacing: 10) {
                 circle("textformat", on: false)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Tone").font(.system(size: 13, weight: .semibold))
-                    Text(selected.title).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    Text("Tone").font(.row.weight(.semibold))
+                    Text(selected.title).font(.meta).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12).frame(height: 52)
             .moduleBackground(padded: false)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.module, style: .continuous))
             .accessibilityElement(children: .combine)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
@@ -418,17 +423,17 @@ private struct PopoverRecents: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField(history.counts.total > 0 ? "Search \(history.counts.total.formatted()) dictations" : "Search dictations", text: $query)
                     .textFieldStyle(.plain).focused($searching)
-                Text("⌘F").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text("⌘F").font(.meta).foregroundStyle(.tertiary)
             }
             .background { Button("Search") { searching = true }.keyboardShortcut("f").hidden() }
             .padding(.horizontal, 9).frame(height: 30)
-            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .padding(.bottom, 4)
+            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+            .padding(.horizontal, PopoverModule.bleed).padding(.bottom, 4)
             VStack(spacing: 2) {
                 if recent.isEmpty {
                     Text(query.isEmpty ? "Your dictations show up here." : "Nothing matches “\(query)”.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).padding(.horizontal, 4)
+                        .font(.status).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).padding(.horizontal, PopoverModule.bleed)
                 }
                 ForEach(recent) { entry in
                     RecentRow(entry: entry, open: { dismiss.then { model.openHistory(.all, focus: entry.id) } }, star: {
@@ -437,10 +442,12 @@ private struct PopoverRecents: View {
                 }
             }
             .frame(height: 4 * 42, alignment: .top)
-            menuItem("All History", chevron: true) { dismiss.then { model.openHistory() } }
+            menuItem("All History", chevron: true, inset: PopoverModule.bleed) { dismiss.then { model.openHistory() } }
             PopoverInsights(history: history) { dismiss.then { model.openSettings(.insights) } }
         }
-        .moduleBackground()
+        // Every row's words start 12 pt in, like the other modules; hover fills bleed 6 pt past them.
+        .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.vertical, 10)
+        .moduleBackground(padded: false)
         .task(id: RecentQuery(text: query, revision: history.revision)) { await reload() }
     }
 
@@ -463,14 +470,14 @@ private struct PopoverInsights: View {
         Button(action: open) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Insights").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                    Text(summary).font(.system(size: 13)).monospacedDigit()
+                    Text("Insights").font(.status.weight(.medium)).foregroundStyle(.secondary)
+                    Text(summary).font(.row).monospacedDigit()
                 }
                 Spacer(minLength: 4)
                 if let insights {
                     HStack(alignment: .bottom, spacing: 3) {
                         ForEach(insights.days) { day in
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: Radius.tiny)
                                 .fill(GoblinBrand.moss.opacity(day.words > 0 ? 1 : 0.2))
                                 .frame(width: 5, height: max(3, 22 * Double(day.words) / Double(max(1, insights.days.map(\.words).max() ?? 0))))
                         }
@@ -480,7 +487,7 @@ private struct PopoverInsights: View {
                 }
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 6).padding(.vertical, 7)
+            .padding(.horizontal, PopoverModule.bleed).padding(.vertical, 7)
             .contentShape(Rectangle())
         }
         .buttonStyle(MenuRowStyle())
@@ -528,7 +535,7 @@ private struct RecentRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.finalText.isEmpty ? "Empty dictation" : entry.finalText).lineLimit(1)
                 Text("\(entry.targetApplicationName ?? "Unknown app") · \(entry.createdAt.formatted(.relative(presentation: .named)))")
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.meta).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
             if hovered {
@@ -543,10 +550,10 @@ private struct RecentRow: View {
                 Image(systemName: "star.fill").foregroundStyle(GoblinBrand.candle).accessibilityLabel("Starred")
             }
         }
-        .font(.system(size: 13))
-        .padding(.vertical, 5).padding(.horizontal, 4)
+        .font(.row)
+        .padding(.vertical, 5).padding(.horizontal, PopoverModule.bleed)
         .frame(height: 40)
-        .background(hovered ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(hovered ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
         .onTapGesture(perform: open)
@@ -590,9 +597,9 @@ private func moduleRow<Action: View>(symbol: String, attention: Bool, title: Str
             .frame(width: 30, height: 30)
             .background(attention ? AnyShapeStyle(LightState.waiting.color.opacity(0.2)) : AnyShapeStyle(.quaternary), in: Circle())
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 13, weight: .semibold))
-            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            action().controlSize(.small).padding(.top, 5)
+            Text(title).font(.row.weight(.semibold))
+            Text(detail).font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            action().controlSize(.small).buttonBorderShape(.capsule).padding(.top, 5)
         }
     }
 }
@@ -606,15 +613,16 @@ private func circle(_ symbol: String, on: Bool) -> some View {
 }
 
 @MainActor
-private func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = false, action: @escaping () -> Void) -> some View {
+private func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = false, inset: CGFloat = PopoverModule.inset,
+                      action: @escaping () -> Void) -> some View {
     Button(action: action) {
         HStack {
             Text(title)
             Spacer()
             if let shortcut { Text(shortcut).foregroundStyle(.tertiary) }
-            if chevron { Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary) }
+            if chevron { Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary) }
         }
-        .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+        .padding(.horizontal, inset).frame(height: 28).contentShape(Rectangle())
     }
     .buttonStyle(MenuRowStyle())
 }
@@ -631,7 +639,7 @@ private struct MenuRowStyle: ButtonStyle {
             configuration.label
                 .foregroundStyle(enabled ? .primary : .tertiary)
                 .background(hovering && enabled ? AnyShapeStyle(.quaternary.opacity(0.8)) : AnyShapeStyle(.clear),
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
                 .onHover { hovering = $0 }
         }
     }
@@ -640,16 +648,20 @@ private struct MenuRowStyle: ButtonStyle {
 private extension View {
     /// A popover module: 14 pt plate inside the 22 pt panel, amber when it needs attention.
     func moduleBackground(attention: Bool = false, padded: Bool = true) -> some View {
-        padding(.horizontal, padded ? 12 : 0).padding(.vertical, padded ? 10 : 0)
+        padding(.horizontal, padded ? PopoverModule.inset : 0).padding(.vertical, padded ? 10 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(attention ? AnyShapeStyle(LightState.waiting.color.opacity(0.13)) : AnyShapeStyle(PopoverModule.fill),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: Radius.module, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.module, style: .continuous)
                 .strokeBorder(attention ? LightState.waiting.color.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 0.5))
     }
 }
 
 private enum PopoverModule {
+    /// Where a module's words start, from its edge.
+    static let inset: CGFloat = 12
+    /// How far a row's hover fill reaches past its words.
+    static let bleed: CGFloat = 6
     /// Light glass in light mode, a faint lift in dark: modules sit on the panel rather than sinking into it.
     static let fill = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.075) : NSColor(white: 1, alpha: 0.62)

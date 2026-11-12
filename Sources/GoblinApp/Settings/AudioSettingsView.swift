@@ -109,6 +109,7 @@ struct AudioSettingsView: View {
         } header: { Text("Microphones") } footer: {
             Text("Drag to reorder. I use the highest one that's connected.")
         }
+        .containerValue(\.footerShown, true)
         if entries.count > line + 1 {
             Section {
                 ForEach(entries.dropFirst(line + 1), id: \.element.id) { MicrophoneRow(entry: $1, index: $0, microphones: microphones) }
@@ -117,31 +118,32 @@ struct AudioSettingsView: View {
         Section {
             Toggle(isOn: $keepMicrophoneWarm) {
                 Text("Keep microphone warm between dictations")
-                Text("Retains up to half a second of audio in memory before you press the shortcut.")
+                Text("Starts faster, but the orange mic indicator stays on.").rowDetail()
+                Text("Keeps half a second of audio in memory; nothing is saved until you record.")
+                Text("Bluetooth mics are never kept warm, so headphones keep their full sound.")
+                Text("With this off, wait for Listening before you speak.")
             }
-        } header: { Text("Input") } footer: {
-            Text("Warm mode keeps the orange microphone indicator on; audio is not saved until recording. Bluetooth microphones are never kept warm, so headphones keep their full sound between dictations. With warm mode off, wait for Listening before speaking; first launch and Bluetooth can take longer.")
-        }
+        } header: { Text("Input") }
         Section {
             LevelMeter(level: preview.level)
                 .accessibilityElement().accessibilityLabel("Device input level, loudest channel")
                 .accessibilityValue(Text(preview.level, format: .percent.precision(.fractionLength(0))))
             LabeledContent {
-                Button(preview.running ? "Stop level preview" : "Preview microphone level") {
+                Button(preview.running ? "Stop Level Preview" : "Preview Microphone Level") {
                     if preview.running { preview.stop() } else { preview.start(ranking: microphones.ranking) }
                 }
                 .disabled(permissions.snapshot.microphone != .authorized)
             } label: {
                 Text("Device input level · loudest channel")
-                if preview.running { Text(preview.ready ? "Receiving device input" : "Waiting for the first audio buffer…") }
+                if preview.running { Text(preview.ready ? "Receiving device input" : "Waiting for the first audio buffer…").rowDetail() }
             }
             if permissions.snapshot.microphone != .authorized {
-                LabeledContent("Microphone access") { Button("Allow microphone…") { permissions.request(.microphone) } }
+                LabeledContent("Microphone access") { Button("Allow Microphone…") { permissions.request(.microphone) } }
             }
             if let notice = preview.silenceNotice { Label(notice, systemImage: "mic.slash.fill").foregroundStyle(.red) }
             if let error = preview.error { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
         } header: { Text("Level check") } footer: {
-            Text("The preview opens the microphone in use. It's local and is not saved.")
+            Text("Opens the microphone in use. Nothing is saved or sent.")
         }
         .onDisappear { preview.stop(reason: .viewClosed) }
         .onChange(of: microphones.choice) { if preview.running { preview.stop(reason: .selectionChanged); preview.start(ranking: microphones.ranking) } }
@@ -177,7 +179,7 @@ private struct MicrophoneRow: View {
                 StatusLight(state: light)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.isSystemDefault ? "System Default" : microphones.device(entry.uid)?.name ?? entry.name)
-                    Text(caption).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    Text(caption).font(.meta).foregroundStyle(.secondary)
                 }
             }
             .accessibilityElement(children: .combine)
@@ -195,8 +197,7 @@ private struct MicrophoneRow: View {
                     }
                 }
             } label: {
-                Image(systemName: "ellipsis.circle").font(.system(size: 14)).foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24).contentShape(.rect)
+                IconButtonLabel(symbol: "ellipsis")
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .accessibilityLabel("Options for \(entry.isSystemDefault ? "System Default" : entry.name)")
@@ -253,7 +254,7 @@ struct LevelMeter: View {
         HStack(spacing: 2) {
         ForEach(0..<segments, id: \.self) { index in
             let position = Double(index) / Double(segments)
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.tiny, style: .continuous)
                 .fill(position < 0.7 ? GoblinBrand.moss : position < 0.9 ? LightState.waiting.color : LightState.problem.color)
                 .opacity(level > position ? 1 : 0.13)
         }

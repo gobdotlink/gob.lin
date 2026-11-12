@@ -1,7 +1,7 @@
 # Releases and updates
 
-gob.lin ships as one versioned ZIP on GitHub Releases, with
-an hourly in-app check, GitHub CLI authentication with a saved token fallback,
+gob.lin ships on GitHub Releases as a disk image for first installs and one
+versioned ZIP for updates, with an hourly in-app check, GitHub CLI authentication with a saved token fallback,
 and an explicit install-and-relaunch action. There is no appcast, Sparkle dependency,
 scheduled publisher, or update service to operate.
 
@@ -57,7 +57,10 @@ scripts remove quarantine or reset privacy grants.
 
 `scripts/package-app.sh` notarizes whenever the app is signed with Developer ID:
 it submits the ZIP with `notarytool`, staples the ticket to the app, checks it with
-`spctl`, then archives that stapled bundle. Notarization reads credentials from a
+`spctl`, then archives that stapled bundle. It also builds `gob.lin.dmg` from the
+stapled app with an Applications shortcut, then signs, notarizes, staples and checks
+the image the same way. Builds signed with the local certificate get the ZIP only.
+Notarization reads credentials from a
 `notarytool` keychain profile, `goblin-notary` unless `GOBLIN_NOTARY_PROFILE` names
 another. The Release workflow creates it on its runner. To package a notarized build
 on a Mac, create it once with an app-specific password from the Apple Account:
@@ -89,7 +92,7 @@ The tag starts the Release workflow (`.github/workflows/release.yml`) on a macOS
 It checks the tag is on main, matches `Info.plist` and is newer than the latest release,
 compiles, then loads the Developer ID certificate into a temporary keychain. It signs, notarizes and staples the app with
 `scripts/package-app.sh`, and stops unless Gatekeeper accepts the result. It then creates
-a draft release, uploads `gob.lin-VERSION.zip` and its `.sha256`, and publishes it as
+a draft release, uploads `gob.lin.dmg`, `gob.lin-VERSION.zip` and the ZIP's `.sha256`, and publishes it as
 latest with generated notes only after uploads succeed.
 
 The workflow's secrets live in the repository's `release` environment, which accepts

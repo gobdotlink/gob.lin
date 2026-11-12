@@ -48,10 +48,10 @@ struct PixelWordCloud: View {
                 if let hover {
                     let word = layout.words[hover.word], point = hover.point, flip = point.x > width * 0.7
                     Text("\(word.text) · \(times(word.count)) \(period)")
-                        .font(.system(size: 11.5, weight: .medium)).monospacedDigit()
+                        .font(.meta.weight(.medium)).monospacedDigit()
                         .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
                         .fixedSize()
                         // Flip to the pointer's left near the right edge so the label never runs off the plate.
                         .alignmentGuide(.leading) { flip ? $0.width - point.x + 12 : -point.x - 14 }

@@ -7,7 +7,8 @@ struct UpdateSettingsView: View {
     var body: some View {
         if needed {
             Section {
-                StatusRow(failed ? .problem : updates.availableVersion == nil ? .waiting : .ready, Text(updates.status)) {
+                // Amber only when there is something to do: an update to install.
+                StatusRow(failed ? .problem : updates.availableVersion == nil ? .off : .waiting, Text(updates.status)) {
                     if updates.isBusy { ProgressView().controlSize(.small) }
                     else if let version = updates.availableVersion {
                         Button("Install v\(version) & Relaunch") { updates.install() }.prominent()
@@ -23,7 +24,7 @@ struct UpdateSettingsView: View {
                         }
                     } label: {
                         Text("GitHub token")
-                        Text("For private releases: sign in with gh, or save a token with Contents read access to gobdotlink/gob.lin.")
+                        Text("For private releases. Sign in with gh, or save a token with Contents read access to gobdotlink/gob.lin.")
                     }
                 }
                 LabeledContent("Release notes") {

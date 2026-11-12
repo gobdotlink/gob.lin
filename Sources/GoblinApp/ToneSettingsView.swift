@@ -12,12 +12,12 @@ struct ToneSettingsView: View {
                     selectedRaw = tone.rawValue
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tone.title).font(.headline)
-                            Text(tone.preview).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tone.title)
+                            Text(tone.preview).font(.status).foregroundStyle(.secondary).multilineTextAlignment(.leading)
                         }
                         Spacer(minLength: 12)
-                        Image(systemName: "checkmark").font(.body.weight(.semibold))
+                        Image(systemName: "checkmark").font(.row.weight(.semibold))
                             .foregroundStyle(GoblinBrand.mossText).opacity(selected ? 1 : 0)
                     }
                     .padding(.vertical, 4)
@@ -28,7 +28,7 @@ struct ToneSettingsView: View {
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
             }
         } header: { Text("Works without AI cleanup") } footer: {
-            Text("Your choice applies globally. Names, dictionary spellings, code, URLs, and acronyms keep their original form.")
+            Text("Applies everywhere. Names, dictionary spellings, code, URLs and acronyms stay as they are.")
         }
     }
 }
