@@ -38,7 +38,8 @@ public enum RewriteKeyStore {
         defaults.set(keys, forKey: preferenceKey)
     }
 
-    private static func account(_ settings: RewriteSettings) throws -> String {
+    /// The name each provider's key is stored under: `load` and `save` use it here, and the iPhone's Keychain uses it.
+    public static func account(_ settings: RewriteSettings) throws -> String {
         settings.provider == .custom ? "custom " + (try settings.endpoint().absoluteString) : settings.provider.rawValue
     }
 
@@ -46,3 +47,15 @@ public enum RewriteKeyStore {
         defaults.dictionary(forKey: preferenceKey) as? [String: String] ?? [:]
     }
 }
+
+/// Why these settings can't run cleanup yet, or nil when they can.
+public func cleanupSetupProblem(_ settings: RewriteSettings, hasKey: Bool) -> String? {
+    if settings.provider.runsOnDevice { return OnDeviceCleanup.availability.problem }
+    let endpoint: URL
+    do { endpoint = try settings.endpoint() } catch { return error.localizedDescription }
+    if settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Choose a model before turning on AI cleanup." }
+    if !hasKey, !isLocalHost(endpoint.host) { return "Add an API key before turning on AI cleanup." }
+    return nil
+}
+
+public func isLocalHost(_ host: String?) -> Bool { ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host ?? "") }

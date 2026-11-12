@@ -331,7 +331,7 @@ public actor RewriteClient {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "HEAD"
         request.timeoutInterval = Self.hardTimeout
-        request.setValue("gob.lin/\(GoblinMetadata.version) (macOS dictation)", forHTTPHeaderField: "User-Agent")
+        request.setValue(GoblinMetadata.userAgent, forHTTPHeaderField: "User-Agent")
         let session = session
         Task.detached(priority: .userInitiated) { _ = try? await session.data(for: request) }
     }
@@ -379,7 +379,7 @@ public actor RewriteClient {
                 guard remaining.seconds >= 0, remaining.attoseconds >= 0 else { throw RewriteFailure.timeout }
                 request.timeoutInterval = max(0.001, Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18)
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("gob.lin/\(GoblinMetadata.version) (macOS dictation)", forHTTPHeaderField: "User-Agent")
+                request.setValue(GoblinMetadata.userAgent, forHTTPHeaderField: "User-Agent")
                 for (field, value) in settings.provider.authorizationHeaders(apiKey: apiKey) { request.setValue(value, forHTTPHeaderField: field) }
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
                 let (data, response) = try await fetch(request, deadline: deadline)

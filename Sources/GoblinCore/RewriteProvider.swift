@@ -135,7 +135,11 @@ public enum RewriteProviderGroup: String, CaseIterable, Sendable, Identifiable {
         case .fast: "Fast inference"
         case .labs: "Model makers"
         case .routers: "Routers"
+        #if os(iOS)
+        case .local: "On this iPhone"
+        #else
         case .local: "On this Mac"
+        #endif
         case .custom: "Custom"
         }
     }

@@ -1,3 +1,5 @@
+// Capture follows Mac input devices; the iPhone app records through its own audio session.
+#if os(macOS)
 import AVFoundation
 import Darwin
 import Foundation
@@ -485,3 +487,4 @@ private final class ConverterSource: @unchecked Sendable {
         supplied = true; state.pointee = .haveData; return input
     }
 }
+#endif

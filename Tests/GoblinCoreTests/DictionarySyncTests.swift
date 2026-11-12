@@ -111,3 +111,32 @@ private struct Device {
 @Test func aCopyFromANewerVersionIsLeftAlone() throws {
     #expect(throws: DictionaryError.self) { try SyncedDictionary(data: Data(#"{"version":2,"records":{}}"#.utf8)) }
 }
+
+@Test func aRoundWithACopyFromANewerVersionWritesNothing() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let repository = DictionaryRepository(url: directory.appendingPathComponent("dictionary.json"))
+    let stateURL = directory.appendingPathComponent("dictionary-sync.json")
+    var entries = [DictionaryEntry(spelling: "Paseo")]
+    try repository.save(entries)
+    _ = try repository.syncRound(&entries, remote: nil)
+    let saved = try [Data(contentsOf: repository.url), Data(contentsOf: stateURL)]
+    entries.append(DictionaryEntry(spelling: "Kalikin"))
+    #expect(throws: DictionaryError.self) { try repository.syncRound(&entries, remote: Data(#"{"version":2,"records":{}}"#.utf8)) }
+    #expect(try [Data(contentsOf: repository.url), Data(contentsOf: stateURL)] == saved)
+}
+
+@Test func theSyncStateIsNotSavedWhenTheEntriesCannotBe() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    // A folder where the dictionary file belongs, so saving the entries fails.
+    let repository = DictionaryRepository(url: directory.appendingPathComponent("dictionary.json"))
+    try FileManager.default.createDirectory(at: repository.url, withIntermediateDirectories: true)
+    var cloud: Data?
+    var phone = Device(entries: [DictionaryEntry(spelling: "Paseo")])
+    try phone.sync(&cloud, at: 1)
+    var entries: [DictionaryEntry] = []
+    #expect(throws: (any Error).self) { try repository.syncRound(&entries, remote: cloud) }
+    #expect(entries.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("dictionary-sync.json").path))
+}

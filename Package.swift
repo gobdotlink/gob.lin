@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Goblin",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("26.0"), .iOS("26.0")],
     products: [
         .library(name: "GoblinCore", targets: ["GoblinCore"]),
         .library(name: "GoblinEngines", targets: ["GoblinEngines"]),
@@ -21,7 +21,7 @@ let package = Package(
         .systemLibrary(name: "CSQLite", providers: [.apt(["libsqlite3-dev"])]),
         .target(name: "GoblinCore", dependencies: ["CSQLite"], plugins: [.plugin(name: "BuildIdentity")]),
         .target(name: "GoblinEngines", dependencies: ["GoblinCore", .product(name: "FluidAudio", package: "FluidAudio"),
-            .product(name: "WhisperKit", package: "argmax-oss-swift")], resources: [.process("Resources")]),
+            .product(name: "WhisperKit", package: "argmax-oss-swift")], resources: [.process("Resources"), .copy("Notices")]),
         .executableTarget(name: "GoblinApp", dependencies: ["GoblinCore", "GoblinEngines"], resources: [.copy("Assets")]),
         .executableTarget(name: "GoblinCLI", dependencies: ["GoblinCore", "GoblinEngines", .product(name: "FluidAudio", package: "FluidAudio"),
             .product(name: "MoonshineVoice", package: "moonshine-swift")]),

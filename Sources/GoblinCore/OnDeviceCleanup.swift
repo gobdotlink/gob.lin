@@ -12,9 +12,15 @@ public enum OnDeviceCleanupAvailability: Equatable, Sendable {
         switch self {
         case .available: nil
         case .notInThisBuild: "Apple Intelligence cleanup isn't included in this build."
+        #if os(iOS)
+        case .deviceNotEligible: "This iPhone doesn't support Apple Intelligence."
+        case .notEnabled: "Turn on Apple Intelligence in Settings to use on-device cleanup."
+        case .modelNotReady: "Apple Intelligence is still getting ready on this iPhone. Try again later."
+        #else
         case .deviceNotEligible: "This Mac doesn't support Apple Intelligence."
         case .notEnabled: "Turn on Apple Intelligence in System Settings to use on-device cleanup."
         case .modelNotReady: "Apple Intelligence is still getting ready on this Mac. Try again later."
+        #endif
         case .unavailable: "Apple Intelligence is unavailable right now."
         }
     }
