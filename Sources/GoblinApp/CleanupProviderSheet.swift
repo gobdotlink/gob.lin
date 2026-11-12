@@ -272,15 +272,16 @@ struct CleanupProviderSheet: View {
     @ViewBuilder private var modelStatus: some View {
         let name = modelSourceName
         let tryAgain = Button("Try Again") { refreshes += 1 }
-        // The list's own row carries Refresh, so the Model field stays one control.
+        // The list's own row carries Refresh, so the Model field stays one control. Every state of the
+        // row offers Refresh or Try Again: nothing else re-asks without a change to the provider or key.
         let refresh = Button("Refresh") { refreshes += 1 }.disabled(!inspectCredentials || loadingModels)
             .help("Ask \(name) which models this key can use")
         if let listing = shownListing, let failure = listing.failure {
             switch failure as? RewriteFailure {
             case .httpStatus(401), .httpStatus(403):
-                StatusRow(.problem, Text(listing.source.key.isEmpty ? "\(name) wants an API key before it lists models." : "\(name) didn't accept that key."))
+                StatusRow(.problem, Text(listing.source.key.isEmpty ? "\(name) wants an API key before it lists models." : "\(name) didn't accept that key.")) { refresh }
             case .httpStatus(404):
-                StatusRow(.problem, Text("\(name) doesn't list models at this address."))
+                StatusRow(.problem, Text("\(name) doesn't list models at this address.")) { refresh }
             case .httpStatus(let status):
                 StatusRow(.problem, Text("\(name) answered HTTP \(String(status)) when I asked for its models.")) { tryAgain }
             case .timeout:
@@ -288,9 +289,9 @@ struct CleanupProviderSheet: View {
             case .transport:
                 StatusRow(.problem, Text("I couldn't reach \(name).")) { tryAgain }
             case .invalidResponse:
-                StatusRow(.problem, Text("\(name) sent a model list I couldn't read."))
+                StatusRow(.problem, Text("\(name) sent a model list I couldn't read.")) { refresh }
             case .configuration(let reason):
-                StatusRow(.problem, Text(reason))
+                StatusRow(.problem, Text(reason)) { refresh }
             case nil:
                 StatusRow(.problem, Text("I couldn't get models from \(name). \(failure.localizedDescription)")) { tryAgain }
             }

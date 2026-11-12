@@ -118,6 +118,12 @@ struct SettingsCapture {
                     for step in OnboardingView.Step.allCases {
                         try await shoot("onboarding-\(step.rawValue + 1)", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 516))
                     }
+                    // A long first take must not push the closing buttons out of the fixed-size window.
+                    let long = (result: OverlayResult(application: nil, words: 100, seconds: 0.41),
+                                text: Array(repeating: "The goblin types faster than I do, and it never stops to check.", count: 8).joined(separator: " "))
+                    for step in [OnboardingView.Step.firstTake, .hired] {
+                        try await shoot("onboarding-\(step.rawValue + 1)-long", OnboardingView(model: model, startAt: step, take: long), size: NSSize(width: 660, height: 516))
+                    }
                     for step in OnboardingView.Step.allCases {
                         try await shoot("onboarding-\(step.rawValue + 1)-dark", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 516), dark: true)
                     }

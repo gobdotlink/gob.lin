@@ -15,9 +15,11 @@ struct OnboardingView: View {
 
     enum Step: Int, CaseIterable { case permissions, talkKey, firstTake, hired }
 
-    init(model: AppModel, startAt step: Step = .permissions) {
+    /// `take` seeds a first take, so previews and captures can show the steps that follow one.
+    init(model: AppModel, startAt step: Step = .permissions, take: (result: OverlayResult, text: String)? = nil) {
         self.model = model
         _step = State(initialValue: step)
+        _take = State(initialValue: take)
         _permissions = ObservedObject(wrappedValue: model.permissions)
         _hotkeys = ObservedObject(wrappedValue: model.hotkeys)
     }
@@ -261,7 +263,8 @@ struct OnboardingView: View {
                 }
             }
             .font(.row).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.top, 8)
-            if take != nil { takeField.frame(width: 440).padding(.top, 20) }
+            // Three lines at most, so a long first take leaves room for the hint and the bottom row.
+            if take != nil { takeField.lineLimit(3).frame(width: 440).padding(.top, 20) }
             HStack(spacing: 12) {
                 HStack(spacing: 12) {
                     Image(nsImage: GoblinBrand.menuImage(.idle)).padding(.horizontal, 4).frame(height: 22)
