@@ -142,6 +142,7 @@ private struct GeneralSettingsView: View {
     @ObservedObject private var hotkeys: HotkeyService
     @ObservedObject private var insertion: TextInsertionService
     @ObservedObject private var permissions: PermissionModel
+    @ObservedObject private var dictionary: DictionaryModel
     @AppStorage("feedbackSoundsEnabled") private var sounds = true
     @AppStorage("audio.pauseMediaWhileDictating") private var pauseMedia = false
     @AppStorage("audio.muteWhileDictating") private var muteAudio = false
@@ -155,6 +156,7 @@ private struct GeneralSettingsView: View {
         _hotkeys = ObservedObject(wrappedValue: model.hotkeys)
         _insertion = ObservedObject(wrappedValue: model.insertion)
         _permissions = ObservedObject(wrappedValue: model.permissions)
+        _dictionary = ObservedObject(wrappedValue: model.dictionary)
     }
 
     var body: some View {
@@ -217,6 +219,16 @@ private struct GeneralSettingsView: View {
                 Text("I watch for 30 seconds. Password fields and password managers are never watched.")
             }
         } header: { CapsHeader("Behaviour") }
+        if dictionary.canSync {
+            Section {
+                Toggle(isOn: $dictionary.syncsWithICloud) {
+                    Text("Sync with iCloud")
+                    Text("Shares your dictionary with your other devices.").rowDetail()
+                    Text("I keep your dictionary in your own iCloud. Your dictations, recordings and settings stay on this Mac.")
+                }
+                if let error = dictionary.syncError { StatusRow(.problem, Text("I couldn't sync your dictionary: \(error)")) }
+            } header: { CapsHeader("iCloud") }
+        }
         Section {
             Toggle(isOn: $pauseMedia) {
                 Text("Pause current media")

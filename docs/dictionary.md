@@ -31,6 +31,19 @@ For a word recognition keeps getting wrong, add what you hear as a "sounds like"
 
 Exact aliases continue to work for every model and every active entry. When Cleanup is enabled at a non-None level, its prompt receives the active preferred spellings, including those excluded from native recognition. Adding dictionary terms never enables Cleanup.
 
+## iCloud sync
+
+"Sync with iCloud" in Settings → General is off by default, and shows only in builds signed for iCloud. When on, the dictionary is kept in the person's iCloud key-value store, where their other devices read and write it. Nothing else syncs.
+
+iCloud keeps whichever copy was written last, so the copy itself has to merge. `SyncedDictionary` holds every entry with the time it last changed, plus a marker for each deleted entry. `SyncedDictionary.reconcile` notes what changed on this device since its last sync, merges the iCloud copy entry by entry with the newer side winning, and says whether iCloud is missing anything. A deletion is a change like any other, so a deleted word isn't brought back by a device that still has it.
+
+- **Same word on two devices:** a spelling or alias belongs to one entry, so when two devices each added it before syncing, the newer entry shows and the other is hidden. Hidden entries stay in the synced copy, so which one shows never depends on the order the copies met in, and no word is lost when a third device's entry displaces the one that was showing. Deleting a word, or editing it off an entry, also deletes the copies hidden behind it, so they don't show in its place.
+- **Clocks:** the newer side is decided by each device's clock. An edit is always stamped later than the version it replaces, so it wins even when the other device's clock runs ahead.
+- **Order:** each device keeps its own order, with words from other devices added as its newest.
+- **Files:** `dictionary.json` keeps its format. The times and deletion markers live beside it in `dictionary-sync.json`, which is saved after the entries.
+- **Limits:** iCloud allows 1 MB, which is several thousand entries. Deletion markers and hidden entries are kept forever.
+- **Crashes:** if gob.lin stops between saving the entries and saving their times, entries that came from another device are stamped as changed here on the next sync. A change another device made to the same entry in that moment is overridden.
+
 ## Browsing
 
 The Dictionary page lists places on the left and the selected place's words on the right. Places are Everywhere, then each app with its icon, which opens to its projects (Slack's are workspaces). A project's words are shared between apps unless a word lists apps of its own, so a project appears under every app History has seen it in, marked "also in …", and editing a word there changes it in each. Projects with words that no app has been seen using are under Other Projects. The last dictation's app and project are always listed, so a word can be added before there is one. Search covers every word and alias and says where each one lives.

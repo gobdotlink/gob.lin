@@ -39,6 +39,15 @@ mismatched and incompatible updates fail without replacing the app. Archive entr
 cannot escape the expected bundle or introduce symlinks. Dependency resource bundles
 ship inside the archive.
 
+Developer ID builds also embed `Resources/Goblin.provisionprofile` and claim the iCloud
+key-value entitlement that [dictionary sync](dictionary.md#icloud-sync) needs. macOS honours
+that entitlement only beside the profile Apple issued for the signing certificate, and
+refuses to launch an app that claims it without one. So `scripts/build.sh` checks the
+profile was issued for the certificate it is signing with, and otherwise signs without
+iCloud, as development builds do: those builds work and hide iCloud sync. A renewed
+certificate needs a new Developer ID profile for `app.goblin.dictation` from the developer
+portal, saved over that file. `GOBLIN_PROVISIONING_PROFILE` names a different file.
+
 The dedicated local certificate from `scripts/setup-signing.sh` is for development.
 Its builds pin that certificate, are not notarized and cannot update a Developer ID
 installation, or be updated by one. Installations from before notarized releases

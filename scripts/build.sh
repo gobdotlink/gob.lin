@@ -51,6 +51,7 @@ for resource in "$binary_directory"/*.bundle; do
 done
 
 # Match without a pipe: under pipefail, an early-exiting grep can make a match look like a miss.
+entitlements=Resources/Goblin.entitlements
 case "$identities" in
     *"$certificate \"Developer ID Application: "*) developer_id=true ;;
     *) developer_id=false ;;
@@ -59,12 +60,31 @@ if "$developer_id"; then
     # Apple's default requirement pins the team, so a renewed certificate still updates installs
     # and keeps privacy grants. Notarization needs a secure timestamp, which needs the network.
     signing=(--timestamp)
+    # iCloud is a restricted entitlement: macOS honours it only beside the provisioning profile Apple issued for this
+    # certificate, and refuses to launch an app that claims it without one. Any other certificate signs without iCloud.
+    profile="${GOBLIN_PROVISIONING_PROFILE:-Resources/Goblin.provisionprofile}"
+    if [ -f "$profile" ]; then
+        security cms -D -i "$profile" > "$staging/profile.plist"
+        # ponytail: checks the profile's first certificate only; loop if a profile ever lists several.
+        issued_for=$(plutil -extract DeveloperCertificates.0 raw -o - "$staging/profile.plist" | base64 --decode | shasum | awk '{ print toupper($1) }')
+        if [ "$issued_for" = "$certificate" ]; then
+            team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$staging/profile.plist")
+            cp "$profile" "$app/Contents/embedded.provisionprofile"
+            cp Resources/Goblin.entitlements "$staging/entitlements.plist"
+            entitlements="$staging/entitlements.plist"
+            /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team.app.goblin.dictation" \
+                -c "Add :com.apple.developer.team-identifier string $team" \
+                -c "Add :com.apple.developer.ubiquity-kvstore-identifier string $team.app.goblin.dictation" "$entitlements"
+        else
+            printf 'Signing without iCloud: %s was not issued for this certificate.\n' "$profile" >&2
+        fi
+    fi
 else
     # A self-signed certificate has no Apple anchor: pin its public identity, not the executable hash.
     signing=(--timestamp=none --requirements "=designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\"")
 fi
 codesign --force --options runtime "${signing[@]}" \
-    --entitlements Resources/Goblin.entitlements --sign "$certificate" "$app"
+    --entitlements "$entitlements" --sign "$certificate" "$app"
 codesign --verify --strict --verbose=2 "$app"
 # Replace only after signing succeeds; never accumulate stale resources between releases.
 mkdir -p .build/app
