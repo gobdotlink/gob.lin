@@ -282,8 +282,12 @@ public enum TermSuggestions {
             func ordinary(_ alias: String) -> Bool { !alias.contains(where: \.isWhitespace) && isKnownWord(alias) }
             let canLimit: Bool
             if let existing, !existing.context.isEmpty {
-                let current = Set(existing.context.map(dictionaryKey))
-                canLimit = candidate.context.contains { current.contains(dictionaryKey($0)) }
+                // Compared as the corrector compares them, so "GPT" and "6.1" heard nearby satisfy "GPT-6.1".
+                var heard: [String: Int] = [:]
+                for word in candidate.context.flatMap(DictionaryCorrector.contextKeys) { heard[word, default: 0] += 1 }
+                canLimit = existing.context.map(DictionaryCorrector.contextKeys).contains { words in
+                    !words.isEmpty && Dictionary(words.map { ($0, 1) }, uniquingKeysWith: +).allSatisfy { heard[$0.key, default: 0] >= $0.value }
+                }
             } else {
                 canLimit = !candidate.context.isEmpty && (existing?.aliases.isEmpty ?? true)
             }

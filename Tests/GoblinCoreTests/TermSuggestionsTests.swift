@@ -169,6 +169,10 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     #expect([limited].accepting(sole[0])[0].context == ["GPT"])
     let elsewhere = review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["Claude"])])
     #expect(elsewhere.isEmpty)
+    // Context is compared as the corrector compares it: "GPT" and "6.1" learned separately satisfy "GPT-6.1".
+    let compound = review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["GPT-6.1"])])
+    #expect(compound.map(\.aliases) == [["sole"]])
+    #expect(review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["GPT-7"])]).isEmpty)
 }
 
 @Test func contextIsLearnedWithinTheSentence() {
