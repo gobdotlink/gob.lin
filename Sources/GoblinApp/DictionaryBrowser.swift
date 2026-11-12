@@ -272,7 +272,11 @@ private struct DictionaryWordRow: View {
     let delete: () -> Void
     @State private var hovering = false
 
-    private var aliases: String { entry.aliases.joined(separator: ", ") }
+    /// "soul, sole · near GPT, 6.1"
+    private var aliases: String {
+        let near = entry.context.isEmpty ? [] : ["near " + entry.context.joined(separator: ", ")]
+        return ([entry.aliases.joined(separator: ", ")].filter { !$0.isEmpty } + near).joined(separator: " · ")
+    }
 
     var body: some View {
         HStack(spacing: Self.columnSpacing) {

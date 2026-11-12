@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GoblinCore
 
-private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted"]
+private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted"]
 private func isKnown(_ word: String) -> Bool { known.contains(word.lowercased()) }
 private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry] = [], dismissed: Set<String> = []) -> [TermSuggestion] {
     TermSuggestions.review(candidates, entries: entries, dismissed: dismissed, isKnownWord: isKnown)
@@ -118,4 +118,70 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     #expect(corrected("better then that", "better than that").isEmpty)
     #expect(corrected("there going", "they're going").isEmpty)
     #expect(corrected("we want to go", "we wanted go").isEmpty)
+}
+
+@Test func aDroppedFinalEIsAnotherWordNotAnotherForm() {
+    #expect(TermSuggestions.soundsAlike("sole", "sol"))
+    #expect(TermSuggestions.soundsAlike("sol", "sole"))
+    #expect(!TermSuggestions.soundsAlike("use", "used"))
+    #expect(!TermSuggestions.soundsAlike("make", "making"))
+}
+
+@Test func repeatedFixesAddUpToOneTermWithContext() {
+    let panacea = DictionaryScope(application: "com.t3tools.t3code", project: "panacea-app")
+    let fixes = [
+        TermSuggestions.fromCorrection(dictated: "use a codex 6.1 sole sub agent to review", edited: "use a codex 6.1 sol sub agent to review", scope: panacea),
+        TermSuggestions.fromCorrection(dictated: "create a GPT 6.1 soul sub agent to test", edited: "create a GPT 6.1 Sol sub agent to test", scope: panacea),
+        TermSuggestions.fromCorrection(dictated: "test with a GPT-6.1 source subagent.", edited: "test with a GPT-6.1 sol subagent.", scope: panacea),
+        TermSuggestions.fromCorrection(dictated: "you can use a soul sub agent", edited: "you can use a sol sub agent",
+                                       scope: DictionaryScope(application: "com.t3tools.t3code")),
+    ].flatMap { $0 }
+    #expect(fixes[0].context == ["codex", "6.1", "sub", "agent"])
+    #expect(fixes[2].context == ["GPT", "6.1", "subagent"])
+    let kept = review(fixes)
+    #expect(kept.count == 1)
+    guard let sol = kept.first else { return }
+    // The usual spelling, what it was heard as when that sounds alike ("source" doesn't), the words seen around two
+    // or more of the fixes, and everywhere, since the fixes were in two places.
+    #expect(sol.spelling == "sol" && sol.aliases == ["sole", "soul"] && sol.isEverywhere && sol.timesFixed == 4)
+    #expect(sol.context == ["6.1", "sub", "agent", "GPT"])
+    let entries = [DictionaryEntry]().accepting(sol)
+    // Context stays within its sentence.
+    #expect(DictionaryCorrector.correct("a GPT six point one soul sub agent. Soul music too", entries: entries).text
+            == "a GPT six point one sol sub agent. Soul music too")
+
+    // One fix learns no context, so a known word still isn't an alias.
+    let once = review(Array(fixes.prefix(1)))
+    #expect(once.map { ($0.spelling, $0.aliases, $0.context, $0.projects) }.first ?? ("", [], [], []) == ("sol", [], [], ["panacea-app"]))
+    // An existing term without aliases takes the aliases and context; one whose aliases apply everywhere doesn't,
+    // since context would limit those too.
+    let existing = DictionaryEntry(spelling: "Sol")
+    let added = review(fixes, [existing])
+    #expect(added.map(\.spelling) == ["Sol"] && added[0].aliases == ["sole", "soul"])
+    let merged = [existing].accepting(added[0])
+    #expect(merged.count == 1 && merged[0].context == ["6.1", "sub", "agent", "GPT"] && merged[0].aliases == ["sole", "soul"])
+    #expect(review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["saul"])]).isEmpty)
+    // An entry already limited keeps its context, so its aliases never widen: a new ordinary word joins only when it
+    // was heard near that context, and a new unusual word is limited by it too.
+    let limited = DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["GPT"])
+    let sole = review(fixes, [limited])
+    #expect(sole.map(\.aliases) == [["sole"]] && sole[0].context.isEmpty)
+    #expect([limited].accepting(sole[0])[0].context == ["GPT"])
+    let elsewhere = review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["Claude"])])
+    #expect(elsewhere.isEmpty)
+    // Context is compared as the corrector compares it: "GPT" and "6.1" learned separately satisfy "GPT-6.1".
+    let compound = review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["GPT-6.1"])])
+    #expect(compound.map(\.aliases) == [["sole"]])
+    #expect(review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["GPT-7"])]).isEmpty)
+}
+
+@Test func contextIsLearnedWithinTheSentence() {
+    let scope = DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin")
+    let fixes = TermSuggestions.fromCorrection(dictated: "Use soul. Music is next", edited: "Use sol. Music is next", scope: scope)
+        + TermSuggestions.fromCorrection(dictated: "Try soul. Music again", edited: "Try sol. Music again", scope: scope)
+    #expect(fixes.map(\.context) == [[], []])
+    // No context, so the ordinary word stays out of the aliases.
+    #expect(review(fixes).map { ($0.spelling, $0.aliases) }.first ?? ("", []) == ("sol", []))
+    let before = TermSuggestions.fromCorrection(dictated: "Codex next. We use GPT soul agents! Done", edited: "Codex next. We use GPT sol agents! Done", scope: scope)
+    #expect(before.first?.context == ["GPT", "agents"])
 }
