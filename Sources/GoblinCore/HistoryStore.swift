@@ -97,6 +97,13 @@ public actor HistoryStore {
             .map { try decode($0[0]) }
     }
 
+    /// The latest dictations the user edited after pasting, newest first, for learning the terms they fix.
+    public func editedDictations(limit: Int = 500) throws -> [HistoryEntry] {
+        try database.query("SELECT metadata FROM entries WHERE json_extract(metadata, '$.editOutcome') = 'edited' AND json_extract(metadata, '$.editedText') IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT ?",
+                           [.number(Double(max(1, min(limit, 2000))))])
+            .map { try decode($0[0]) }
+    }
+
     /// Each app and project dictated into, for listing project words under their apps.
     public func dictionaryProjectUses() throws -> [DictionaryProjectUse] {
         let application = "json_extract(metadata, '$.dictionaryBundleIdentifier')", project = "json_extract(metadata, '$.dictionaryProject')"

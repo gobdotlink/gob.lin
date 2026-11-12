@@ -18,6 +18,7 @@ struct SettingsCapture {
             DictionaryEntry(spelling: "Dev review", aliases: ["day review"]),
             DictionaryEntry(spelling: "gob.lin", aliases: ["goblin"]),
             DictionaryEntry(spelling: "Postgres", aliases: ["post grass"]),
+            DictionaryEntry(spelling: "Sol", aliases: ["soul", "sole"], context: ["GPT", "6.1"]),
         ])
         defaults.set(try JSONEncoder().encode(HistoryRetention(maximumUnstarredCount: 500, maximumAgeDays: 30)), forKey: "history.retention")
         defaults.set(OverlayPosition.top.rawValue, forKey: "overlayPosition")
@@ -47,7 +48,13 @@ struct SettingsCapture {
             do {
                 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
                 try await seedHistory(model.history)
-                precondition(model.dictionary.entries.count == 3 && model.dictionary.available)
+                precondition(model.dictionary.entries.count == 4 && model.dictionary.available)
+                // Two fixes of one word, so the Dictionary page offers it with the context they share.
+                for (heard, after) in [("rock", "review"), ("rock", "agent")] {
+                    model.dictionary.offerCorrection(dictated: "ask the Claude 5 \(heard) \(after) for this",
+                                                     edited: "ask the Claude 5 Rook \(after) for this",
+                                                     scope: DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin"))
+                }
                 var window = window
                 @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false) async throws {
                     // A fresh window per shot, so one view's toolbar never leaks into the next capture.
@@ -93,6 +100,11 @@ struct SettingsCapture {
                                                         inspectCredentials: false, turnOn: false, onSave: { _ in }, onFailure: { _ in })
                     try await shoot("settings-cleanup-provider", provider, size: NSSize(width: 680, height: 520))
                     try await shoot("settings-cleanup-provider-dark", provider, size: NSSize(width: 680, height: 520), dark: true)
+                    let sol = model.dictionary.entries.first { $0.spelling == "Sol" }!
+                    for dark in [false, true] {
+                        try await shoot("settings-dictionary-entry\(dark ? "-dark" : "")", DictionaryEntryEditor(entry: sol, model: model.dictionary).background(Color(nsColor: .windowBackgroundColor)),
+                                        size: NSSize(width: 460, height: 740), dark: dark)
+                    }
                 }
                 if wanted("history") {
                     model.settingsSelection = .history
@@ -220,6 +232,8 @@ struct SettingsCapture {
             ("milestone", make(.milestone(words: 10_000))),
             ("term-suggestion", make(.termSuggestion(TermSuggestion(spelling: "panacea", aliases: ["anasia"], projects: ["gob.lin"],
                                                                      reason: .correction(heard: "anasia"))))),
+            ("term-suggestion-repeated", make(.termSuggestion(TermSuggestion(spelling: "Sol", aliases: ["soul", "sole"],
+                                                                     reason: .correction(heard: "soul"), context: ["GPT", "6.1"], timesFixed: 5)))),
             ("term-added", make(.termAdded(TermSuggestion(spelling: "panacea", projects: ["gob.lin"], reason: .correction(heard: "anasia"))))),
             ("error-cleanup", make(.error(OverlayNotice(.rewriteTimeout)))),
             ("error-microphone", make(.error(OverlayNotice(.microphoneUnavailable)))),

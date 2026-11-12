@@ -300,10 +300,11 @@ private struct OverlayBubble: View {
         return shortcut.keyCode == nil && shortcut.keys.count == 1 ? [shortcut.keyLabel] : shortcut.keys.map(\.symbol)
     }
 
-    /// "You fixed “anasia” · gob.lin": why, then where the word would apply.
+    /// "You fixed “anasia” · gob.lin", or "You fixed it 5 times · everywhere": why, then where the word would apply.
     private func suggestionDetail(_ suggestion: TermSuggestion) -> String {
         let why: String
-        if case .correction(let heard) = suggestion.reason { why = "You fixed “\(heard)”" } else { why = "From your fix" }
+        if suggestion.timesFixed > 1 { why = "You fixed it \(suggestion.timesFixed) times" }
+        else if case .correction(let heard) = suggestion.reason { why = "You fixed “\(heard)”" } else { why = "From your fix" }
         return [why, placeName(suggestion) ?? "everywhere"].joined(separator: " · ")
     }
 
