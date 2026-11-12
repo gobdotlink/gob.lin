@@ -58,9 +58,11 @@ struct DictionaryBrowser: View {
         .onChange(of: places) { if !places.contains(selection) { selection = .everywhere } }
     }
 
-    /// The split hugs its content: room for six words at least, and it scrolls past fourteen.
+    /// The split hugs its content: room for six words at least, and it scrolls past fourteen. It is
+    /// sized by the selected place even during a search, so typing never resizes the page; results
+    /// scroll inside it.
     private func listHeight(_ places: DictionaryPlaces) -> CGFloat {
-        let words = isSearching ? model.entries.count : model.entries.filter(selection.holds).count
+        let words = model.entries.filter(selection.holds).count
         let sidebarRows = 1 + places.apps.reduce(0) { $0 + 1 + (expanded.contains($1.id) ? $1.projects.count : 0) }
             + (places.unassigned.isEmpty ? 0 : places.unassigned.count + 1)
         let rows = max(words + 3, sidebarRows)
