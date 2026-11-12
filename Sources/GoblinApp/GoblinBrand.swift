@@ -19,6 +19,11 @@ enum GoblinBrand {
     static let plate = Color(nsColor: .dynamic(light: 0xFBFAF8, dark: 0x2A2B2E))
     /// The overlay, in both appearances.
     static let bubble = Color(nsColor: NSColor(hex: 0x181A1C, alpha: 0.92))
+    /// The selected row in a list inside a plate: History, Model, Dictionary places, first run.
+    /// A stronger tint in dark, where 13% of moss all but disappears into the plate.
+    static let selection = Color(nsColor: NSColor(name: nil) {
+        $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(hex: 0x34965F, alpha: 0.24) : NSColor(hex: 0x2B7D4F, alpha: 0.13)
+    })
     static let wordmark = Color(nsColor: .dynamic(light: 0x2B7D4F, dark: 0x57E68F))
 
     /// Inset for pages that cannot be grouped Forms, so every page shares Form margins.
@@ -116,6 +121,41 @@ enum GoblinBrand {
     }
 }
 
+/// DESIGN.md › Type. Every piece of SF Pro text uses one of these; a page never invents a size.
+extension Font {
+    /// Small caps above a plate. Track it 0.85 and uppercase it.
+    static let capsLabel = Font.system(size: 10, weight: .semibold)
+    /// A second line, a footnote, a count.
+    static let meta = Font.system(size: 11)
+    /// A status sentence, or text in a small control.
+    static let status = Font.system(size: 12)
+    /// Body text, row titles and buttons.
+    static let row = Font.system(size: 13)
+    /// The title of a card, a sheet or a toolbar.
+    static let cardTitle = Font.system(size: 15, weight: .semibold)
+    /// Text to read at length: a dictation, the first-run prompt.
+    static let reading = Font.system(size: 17)
+    static let hero = Font.system(size: 28, weight: .bold)
+    /// The overlay's live words only, read at a glance from across the screen.
+    static let overlayWords = Font.system(size: 15)
+}
+
+/// DESIGN.md › Craft. Corner radii, smallest to largest.
+enum Radius {
+    /// Chart squares, swatches, meter bars.
+    static let tiny: CGFloat = 2
+    /// Keycaps, text fields, tooltips, chips.
+    static let control: CGFloat = 6
+    /// Selected and hovered rows, icon tiles.
+    static let row: CGFloat = 8
+    /// Plates, cards and large fields.
+    static let plate: CGFloat = 12
+    /// A popover module, inside the 22 pt panel.
+    static let module: CGFloat = 14
+    /// The overlay bubble.
+    static let bubble: CGFloat = 20
+}
+
 extension NSColor {
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
         self.init(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
@@ -191,7 +231,8 @@ struct GoblinWordmark: View {
     }
 }
 
-/// `$ sudo autism --unmuted`. Only on About and the last first-run step.
+/// `$ sudo autism --unmuted`. Only on About and the last first-run step. Its marks take the
+/// wordmark's colour: moss on light, neon on dark, where neon reads without glaring.
 struct GoblinTagline: View {
     var size: CGFloat = 22
     var cursor = false
@@ -203,12 +244,12 @@ struct GoblinTagline: View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             let on = !cursor || reduceMotion || Int(context.date.timeIntervalSinceReferenceDate * 2) % 2 == 0
             Text("""
-                \(Text("$ ").foregroundStyle(GoblinBrand.neon))\
+                \(Text("$ ").foregroundStyle(GoblinBrand.wordmark))\
                 \(Text("sudo ").foregroundStyle(.secondary))\
-                \(Text("autism ").foregroundStyle(GoblinBrand.neon))\
+                \(Text("autism ").foregroundStyle(GoblinBrand.wordmark))\
                 \(Text("--unmuted").foregroundStyle(.secondary))\
-                \(Text(reply.isEmpty ? "" : "  " + reply).foregroundStyle(GoblinBrand.neon))\
-                \(Text(cursor ? " █" : "").foregroundStyle(GoblinBrand.neon.opacity(on ? 1 : 0)))
+                \(Text(reply.isEmpty ? "" : "  " + reply).foregroundStyle(GoblinBrand.wordmark))\
+                \(Text(cursor ? " █" : "").foregroundStyle(GoblinBrand.wordmark.opacity(on ? 1 : 0)))
                 """)
                 .font(.custom("VT323-Regular", size: size, relativeTo: .body))
                 .lineLimit(1).fixedSize()

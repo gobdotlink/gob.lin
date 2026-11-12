@@ -41,6 +41,8 @@ struct CleanupProviderSheet: View {
         self.turnOn = turnOn; self.onSave = onSave; self.onFailure = onFailure
     }
 
+    /// Every control in the sheet ends on the same right edge; the fields are this wide. A popup
+    /// button never grows past its widest item, so the pickers share the edge, not the width.
     private static let fieldWidth: CGFloat = 290
 
     var body: some View {
@@ -62,12 +64,12 @@ struct CleanupProviderSheet: View {
                                 }
                             }
                         }
-                        .labelsHidden().fixedSize()
+                        .labelsHidden().fixedSize().frame(width: Self.fieldWidth, alignment: .trailing)
                     }
                     if !settings.provider.hasFixedAddress {
                         LabeledContent("Address") {
                             TextField("Address", text: $settings.baseURL, prompt: Text("https://…"))
-                                .labelsHidden().font(.body.monospaced()).autocorrectionDisabled().frame(width: Self.fieldWidth)
+                                .labelsHidden().font(.row.monospaced()).autocorrectionDisabled().frame(width: Self.fieldWidth)
                         }
                     }
                     if settings.provider.runsOnDevice {
@@ -82,21 +84,21 @@ struct CleanupProviderSheet: View {
                         Picker("Reasoning", selection: $settings.reasoning) {
                             ForEach(RewriteReasoning.allCases) { Text($0.title).tag($0) }
                         }
-                        .labelsHidden().fixedSize()
+                        .labelsHidden().fixedSize().frame(width: Self.fieldWidth, alignment: .trailing)
                     } label: {
                         Text("Reasoning")
-                        Text("Off is fastest. Cleanup rarely needs more.")
+                        Text("Off is fastest. Cleanup rarely needs more.").rowDetail()
                     }
                     LabeledContent {
                         HStack(spacing: 8) {
                             SecureField("API key", text: $apiKey, prompt: Text(keySaved ? "••••••••••••" : "Paste a key"))
-                                .labelsHidden().font(.body.monospaced())
+                                .labelsHidden().font(.row.monospaced())
                             if keySaved { Button("Remove") { keySaved = false; removeKey = true; apiKey = "" } }
                         }
                         .frame(width: Self.fieldWidth)
                     } label: {
                         Text("API key")
-                        Label(keySaved ? "Saved in gob.lin preferences" : "Stored unencrypted in gob.lin preferences", systemImage: "key")
+                        Text(keySaved ? "Saved in gob.lin preferences" : "Stored unencrypted in gob.lin preferences").rowDetail()
                     }
                     modelStatus
                     }
@@ -116,13 +118,13 @@ struct CleanupProviderSheet: View {
                                         .labelsHidden().frame(width: 80)
                                 }
                             }
-                            Text("Extra options (JSON)").font(.caption).foregroundStyle(.secondary)
+                            Text("Extra options (JSON)").font(.meta).foregroundStyle(.secondary)
                             TextEditor(text: $settings.extraRequestJSON)
-                                .font(.body.monospaced()).autocorrectionDisabled()
+                                .font(.row.monospaced()).autocorrectionDisabled()
                                 .frame(minHeight: 100, maxHeight: 160)
                                 .accessibilityLabel("Extra request options JSON")
                             Text("For example {\"max_completion_tokens\": 1024}. Options override request defaults, and null leaves a field out. Model, messages and streaming are managed by gob.lin. Keep API keys in the API key field, not here.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.meta).foregroundStyle(.secondary)
                         }
                         .padding(.top, 8)
                     }
@@ -138,6 +140,7 @@ struct CleanupProviderSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(turnOn ? "Save and Turn On" : "Save") { save() }.prominent().keyboardShortcut(.defaultAction)
             }
+            .closingActions()
             .padding(.horizontal, 28).padding(.bottom, 20)
         }
         .frame(width: 680)
@@ -150,14 +153,14 @@ struct CleanupProviderSheet: View {
     }
 
     private var modelField: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             TextField("Model", text: Binding(get: { settings.model }, set: { typed in
                 // A completion or paste that lands on a preset counts as choosing it; a keystroke doesn't.
                 if abs(typed.count - settings.model.count) > 1, settings.provider.models.contains(where: { $0.id == typed }) {
                     chooseModel(typed)
                 } else { settings.model = typed }
             }), prompt: Text("model-id"))
-                .labelsHidden().font(.body.monospaced()).autocorrectionDisabled()
+                .labelsHidden().font(.row.monospaced()).autocorrectionDisabled()
                 .focused($modelFieldFocused)
                 .textInputSuggestions {
                     ForEach(modelSuggestions) { option in
@@ -187,18 +190,12 @@ struct CleanupProviderSheet: View {
                     }
                 }
             } label: {
-                Label("Choose Model", systemImage: "chevron.down").labelStyle(.iconOnly)
+                IconButtonLabel(symbol: "chevron.down")
             }
-            .menuIndicator(.hidden).fixedSize()
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Choose Model")
             .help("Suggested models, then the models \(modelSourceName) offers this key")
             .disabled(settings.provider.models.isEmpty && listedModels.isEmpty)
-            Button { refreshes += 1 } label: {
-                Label("Refresh Models", systemImage: "arrow.clockwise").labelStyle(.iconOnly)
-                    .opacity(loadingModels ? 0 : 1)
-                    .overlay { if loadingModels { ProgressView().controlSize(.small) } }
-            }
-            .help("Ask \(modelSourceName) which models this key can use")
-            .disabled(!inspectCredentials)
         }
     }
 
@@ -275,12 +272,16 @@ struct CleanupProviderSheet: View {
     @ViewBuilder private var modelStatus: some View {
         let name = modelSourceName
         let tryAgain = Button("Try Again") { refreshes += 1 }
+        // The list's own row carries Refresh, so the Model field stays one control. Every state of the
+        // row offers Refresh or Try Again: nothing else re-asks without a change to the provider or key.
+        let refresh = Button("Refresh") { refreshes += 1 }.disabled(!inspectCredentials || loadingModels)
+            .help("Ask \(name) which models this key can use")
         if let listing = shownListing, let failure = listing.failure {
             switch failure as? RewriteFailure {
             case .httpStatus(401), .httpStatus(403):
-                StatusRow(.problem, Text(listing.source.key.isEmpty ? "\(name) wants an API key before it lists models." : "\(name) didn't accept that key."))
+                StatusRow(.problem, Text(listing.source.key.isEmpty ? "\(name) wants an API key before it lists models." : "\(name) didn't accept that key.")) { refresh }
             case .httpStatus(404):
-                StatusRow(.problem, Text("\(name) doesn't list models at this address."))
+                StatusRow(.problem, Text("\(name) doesn't list models at this address.")) { refresh }
             case .httpStatus(let status):
                 StatusRow(.problem, Text("\(name) answered HTTP \(String(status)) when I asked for its models.")) { tryAgain }
             case .timeout:
@@ -288,23 +289,28 @@ struct CleanupProviderSheet: View {
             case .transport:
                 StatusRow(.problem, Text("I couldn't reach \(name).")) { tryAgain }
             case .invalidResponse:
-                StatusRow(.problem, Text("\(name) sent a model list I couldn't read."))
+                StatusRow(.problem, Text("\(name) sent a model list I couldn't read.")) { refresh }
             case .configuration(let reason):
-                StatusRow(.problem, Text(reason))
+                StatusRow(.problem, Text(reason)) { refresh }
             case nil:
                 StatusRow(.problem, Text("I couldn't get models from \(name). \(failure.localizedDescription)")) { tryAgain }
             }
         } else if let listing = shownListing, listing.models.isEmpty {
-            StatusRow(.waiting, Text("\(name) didn't list any chat models. You can still type a model ID."))
+            StatusRow(.waiting, Text("\(name) didn't list any chat models. You can still type a model ID.")) { refresh }
         } else if let listing = shownListing {
             let model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
             let forKey = listing.source.key.isEmpty ? "" : " for this key"
             if !model.isEmpty, listing.models.contains(where: { $0.id == model }) {
-                StatusRow(.ready, Text("\(name) lists \(Text(model).monospaced())\(forKey)."))
+                StatusRow(.ready, Text("\(name) lists \(Text(model).monospaced())\(forKey).")) { refresh }
             } else if !modelFieldFocused, !model.isEmpty {
                 // Wait until editing ends: a half-typed id is never listed.
-                StatusRow(.waiting, Text("\(name) doesn't list \(Text(model).monospaced())\(forKey). It might still work."))
+                StatusRow(.waiting, Text("\(name) doesn't list \(Text(model).monospaced())\(forKey). It might still work.")) { refresh }
+            } else {
+                StatusRow(.off, Text("Type a model ID, or pick one from \(name)'s list.")) { refresh }
             }
+        } else {
+            StatusRow(loadingModels ? .waiting : .off,
+                      Text(loadingModels ? "Asking \(name) for its models…" : "I haven't asked \(name) for its models yet.")) { refresh }
         }
     }
 

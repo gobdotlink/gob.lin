@@ -241,28 +241,9 @@ struct DictionarySettingsView: View {
         }
         .containerValue(\.plateless, true)
         Section {
-            LabeledContent {
-                Text(service.selectedModel.name)
-            } label: {
-                Text("Speech Model")
-                if service.selectedModel.capabilities.customVocabulary { Text("Spelling hints · whole terms, project and app terms first, then newest") }
-            }
-            LabeledContent {
-                Text("Every model")
-            } label: {
-                Text("Aliases")
-                Text("I replace exact “sounds like” matches after recognition.")
-            }
-            LabeledContent {
-                Text(cleanupEnabled ? "On" : "Off")
-            } label: {
-                Text("Cleanup")
-                Text(cleanupEnabled ? "I add the preferred spellings for the app and project you're dictating into to the prompt."
-                                    : "I don't send your dictionary to a rewrite model.")
-            }
             Toggle(isOn: $model.suggestsTerms) {
                 Text("Suggest words")
-                Text("I look for names in the project you're dictating into and in words you fix afterwards. I only add one when you click Add.")
+                Text("From project names and your fixes. Nothing is added without a click.").rowDetail()
             }
             if model.entries.contains(where: { !$0.projects.isEmpty }) {
                 if let context = model.lastContext {
@@ -292,9 +273,16 @@ struct DictionarySettingsView: View {
             } else {
                 StatusRow(.waiting, Text("I'm checking which terms fit…"))
             }
-        } header: { Text("How I Use Them") } footer: {
+        } header: { Text("How I use them") } footer: {
+            // The facts that used to be three read-only rows.
+            Text("I swap exact “sounds like” matches after recognition, with every model.")
+            if service.selectedModel.capabilities.customVocabulary {
+                Text("\(service.selectedModel.name) also takes spelling hints as it listens: project and app terms first, then the newest.")
+            }
+            Text(cleanupEnabled ? "Cleanup is on, so its prompt gets the spellings for the app and project you're in."
+                                : "Cleanup is off, so your dictionary isn't sent to a rewrite model.")
             if model.available, scoped, service.selectedModel.capabilities.customVocabulary {
-                Text("App-specific terms join these when you dictate into their apps and share the same limit. Project terms apply after recognition, once I know the project.")
+                Text("App terms join in when you dictate into their app and share the limit. Project terms apply after recognition.")
             }
         }
         .task(id: current) {
@@ -335,15 +323,15 @@ private struct DictionarySuggestionsCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.system(size: 13, weight: .semibold))
+                        Text(title).font(.row.weight(.semibold))
                         if let place = model.suggestionPlace {
                             let used = model.entries.active(in: place.scope).count
-                            Text("\(used) of \(DictionaryScope.activeLimit) words for \(place.name)").font(.system(size: 11.5))
+                            Text("\(used) of \(DictionaryScope.activeLimit) words for \(place.name)").font(.meta)
                                 .foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
                     Spacer(minLength: 12)
-                    if model.suggestions.count > 1 { Button("Add All") { model.acceptAll() }.controlSize(.small) }
+                    if model.suggestions.count > 1 { Button("Add All") { model.acceptAll() } }
                 }
                 .padding(.bottom, 6)
                 ForEach(model.suggestions) { suggestion in
@@ -351,14 +339,14 @@ private struct DictionarySuggestionsCard: View {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(suggestion.spelling)
-                            Text(caption(suggestion)).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                            Text(caption(suggestion)).font(.meta).foregroundStyle(.secondary)
                         }
                         .accessibilityElement(children: .combine)
                         Spacer(minLength: 12)
                         Button("Not Now") { model.dismiss(suggestion) }.accessibilityLabel("Not now, \(suggestion.spelling)")
                         Button("Add") { model.accept(suggestion) }.prominent().accessibilityLabel("Add \(suggestion.spelling)")
                     }
-                    .controlSize(.small).padding(.vertical, 8)
+                    .padding(.vertical, 6)
                 }
             }
         }
@@ -430,14 +418,14 @@ struct DictionaryEntryEditor: View {
                     TextField("Preferred spelling", text: $spelling)
                 }
                 Section {
-                    TextEditor(text: $aliases).font(.body.monospaced()).frame(height: 96)
+                    TextEditor(text: $aliases).font(.row.monospaced()).frame(height: 96)
                         .scrollContentBackground(.hidden)
                         .accessibilityLabel("Sounds like aliases")
                 } header: { Text("Sounds like — one alias per line") } footer: {
                     Text("For example, “day review” → “Dev review”. Aliases match whole words without crossing punctuation.")
                 }
                 Section {
-                    TextEditor(text: $context).font(.body.monospaced()).frame(height: 64)
+                    TextEditor(text: $context).font(.row.monospaced()).frame(height: 64)
                         .scrollContentBackground(.hidden)
                         .accessibilityLabel("Only near these words")
                 } header: { Text("Only near — one word per line") } footer: {
@@ -457,8 +445,9 @@ struct DictionaryEntryEditor: View {
                                                  projects: projects, context: context.components(separatedBy: .newlines))) {
                         dismiss()
                     } else { error = model.error; model.error = nil }
-                }.keyboardShortcut(.defaultAction).disabled(spelling.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.keyboardShortcut(.defaultAction).prominent().disabled(spelling.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            .closingActions()
             .padding([.horizontal, .bottom], GoblinBrand.pagePadding)
         }
         .frame(width: 460)

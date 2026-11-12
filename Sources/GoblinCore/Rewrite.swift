@@ -9,10 +9,10 @@ public enum RewriteCleanup: String, CaseIterable, Codable, Sendable, Identifiabl
     public var title: String { self == .codingAgent ? "Coding agent" : rawValue.capitalized }
     public var detail: String {
         switch self {
-        case .none: "Skip AI cleanup."
-        case .light: "Remove hesitation sounds and accidental stutters; fix punctuation and clear transcription errors while keeping your wording."
-        case .medium: "Light cleanup plus minor grammar fixes and clear self-corrections. Preserve your voice and sentence order."
-        case .codingAgent: "Light cleanup with paragraphs for new points and clear spoken commands, issue IDs and numbers formatted for a coding agent."
+        case .none: "Skips AI cleanup."
+        case .light: "Removes ums and stutters and fixes punctuation. Keeps your wording."
+        case .medium: "Light, plus small grammar fixes and self-corrections. Keeps your voice."
+        case .codingAgent: "Light, plus paragraphs, with commands, issue IDs and numbers formatted for a coding agent."
         }
     }
 }

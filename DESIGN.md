@@ -30,7 +30,7 @@ The values live in `GoblinBrand`. This table is what it must contain.
 | Token | Light | Dark | Job |
 |---|---|---|---|
 | moss | `#2B7D4F` | `#34965F` fill, `#62C78A` text | Every interactive job: primary buttons, switches, links, selection, chart bars |
-| neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline, the top word of the Insights cloud on dark |
+| neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline on dark, the top word of the Insights cloud on dark |
 | candle | `#B26B0F` | `#F2A93B` | Stars and milestones |
 | case | `#EDECE9` | `#1E1F21` | Settings and History window background |
 | plate | `#FBFAF8` | `#2A2B2E` | A grouped section, with a 0.5 pt hairline |
@@ -39,9 +39,21 @@ The values live in `GoblinBrand`. This table is what it must contain.
 
 ### Type
 
-- SF Pro for everything, using system text styles.
+- SF Pro for everything, in seven sizes. They live in `GoblinBrand.swift` as `Font` tokens; a page never invents a size.
+
+  | Token | Size | Job |
+  |---|---|---|
+  | `.capsLabel` | 10 pt semibold, tracked | The small-caps label above a plate |
+  | `.meta` | 11 pt | A second line, a footnote, a count |
+  | `.status` | 12 pt | A status sentence, text in a small control |
+  | `.row` | 13 pt | Body text, row titles, buttons (semibold for a title) |
+  | `.cardTitle` | 15 pt semibold | The title of a card, a sheet or a toolbar |
+  | `.reading` | 17 pt | Text read at length: a dictation, the first-run prompt |
+  | `.hero` | 28 pt bold | First-run headlines |
+
+  Two exceptions: the overlay's live words are 15 pt (`.overlayWords`), and the Insights headline numbers are 48 pt.
 - Workbench for the wordmark "gob.lin" only, at sizes that are multiples of 4: 24 pt in the popover header, 48 pt on About.
-- VT323 for the tagline `$ sudo autism --unmuted` only. It appears on About and on the last first-run step, nowhere else. `$` and `autism` are neon.
+- VT323 for the tagline `$ sudo autism --unmuted` only. It appears on About and on the last first-run step, nowhere else. `$` and `autism` take the wordmark's colour: moss on light, neon on dark.
 - Press Start 2P for the Insights word cloud only. Draw it at its native 8 pt with antialiasing off, then scale by whole numbers on a 2 pt grid, like the sprites.
 - SF Mono for values a person would copy: URLs, model IDs, a masked API key.
 - `.monospacedDigit()` on any number that changes: timers, counts, latencies.
@@ -66,6 +78,8 @@ Reuse these before writing new ones:
 - **`GoblinEyes`, `GazingGoblin`:** the goblin whose eyes follow the pointer over a whole region.
 - **`StatusLight`, `StatusRow`:** status lights, and a light with its sentence.
 - **`PlateFormStyle`, `CapsHeader`, `Plate`, `RowDisclosureStyle`:** the case-and-plates pages, and disclosure rows that open from anywhere on the row.
+- **`InfoButton`, `rowDetail()`:** an explanation behind an ⓘ. `PlateFormStyle` does this for a row label's extra lines and for a section's footer. Mark a line `rowDetail()` to show it under the title, and a section `footerShown` to show its footer under the plate.
+- **`SearchField`, `IconButtonLabel`:** the search field and the icon-only menu button for plates and pages.
 - **`KeyCap`, `KeyCombo`, `BigKeyCap`:** keys.
 - **`InlineDiff`:** the inline diff, over `TextDiff` in GoblinCore.
 - **`AppStatus`, `DiagnosticFailure.plainWords`:** the status line and problem copy.
@@ -107,12 +121,17 @@ The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a 
 - Controls, titles and menu items use plain Apple title case: "Record New Key…", "Open Settings".
 - Each message says what happened and what was kept, in one sentence where one will do.
 - Names: **Cleanup** (formerly Post-processing), **Typing it in** (the insertion group), **talk key** (the shortcut), **dictation** (an entry).
-- A page header is the title alone. Turn explanatory footnotes into status rows or delete them.
+- A page header is the title alone. A status row is for state, never for an explanation.
+- A row shows one short line under its title when someone needs it to decide: what the control does if the title doesn't say, what it costs, or what leaves the Mac. Keep it to one line. Everything else (how it works, exceptions, reassurance) waits behind the ⓘ beside the title. A group's note goes behind the ⓘ beside its label, unless it is an instruction for using the group, like "Drag to reorder".
 - "autism" appears only inside the tagline.
 
 ### Craft
 
-- Radii are concentric: outer radius = inner radius + padding. The popover is 22 / 14 / 8 (panel, module, row), and the overlay bubble is 20.
+- Radii come from `Radius`: 2 (chart squares, swatches, meter bars), 6 (keycaps, text fields, tooltips, chips), 8 (selected and hovered rows, icon tiles), 12 (plates, cards, large fields), 14 (a popover module) and 20 (the overlay bubble).
+- Radii are concentric: outer radius = inner radius + padding. The popover is 22 / 14 / 8 (panel, module, row).
+- Buttons take their shape from their job. Inside a plate or a row they are regular rounded rectangles. The closing actions of a window or sheet (Cancel, Save, Continue, Done) are 28 pt capsules: `closingActions()`. Buttons on glass, in the popover and the overlay, are capsules too.
+- A selected row in a list inside a plate is a moss tint (`GoblinBrand.selection`) at radius 8, and its text keeps its own colours. The window sidebars keep their neutral grey.
+- An icon-only menu button on a plate uses `IconButtonLabel`, which draws it at the height of a regular button. A bordered menu button shrinks to its glyph.
 - Hairlines provide structure: 0.5 pt at 8–14% black or white. Shadows provide elevation: layered and soft.
 - Motion animates transform and opacity only. Enter with ease-out in 120–200 ms, and exit faster than you enter. Scale from 0.94 or more, never from 0. Keyboard-triggered, high-frequency actions don't animate.
 - Under Reduce Motion, keep the fades, drop the movement, and keep the sprite frame swaps.
@@ -187,13 +206,13 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **Cleanup:** the switch and level apply as soon as they change; the provider is edited in a sheet and applies on Save.
   - A top plate with the AI cleanup switch and a status row naming where the text goes. Turning it on with an unfinished provider opens the provider sheet, whose button reads Save and Turn On.
   - Provider: one row naming the service, with the model, host (Local and Custom) and "key saved" under it, and Edit…. While the provider can't run, an amber row says what's missing, with Set Up….
-  - Style: Level (None, Light, Medium, Coding agent) as a popup, with the level's description under the label. Cloud providers add a “Send text near the cursor” switch, off by default, whose caption says what is sent and to whom; the top status row then says the text near the cursor goes too.
-  - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again, plus an amber row: "Slower than 4 s? I type what you said instead."
-  - The provider sheet: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key, plus Refresh), Reasoning, API key (masked, "Saved in gob.lin preferences", Remove), the model-list status row, and Advanced request options. Cancel and Save.
-- **Dictionary:** while there are suggestions, a card above Terms with the look-down goblin at 64 pt gripping its top edge. A title in the goblin's voice ("I found some words in gob.lin"), the budget ("22 of 32 words for gob.lin"), and one row per word with a reason caption ("you fixed “go blin”", "from Package.swift", "you fixed it 6 times · sounds like “soul”, “sole” near GPT, 6.1"), Not Now and Add, plus Add All. Nothing is added without a click. A word learned from a fix is also offered once in the overlay; Not Now there is the same as Not Now here. Below it, a search field with Import Words… and a moss Add Term, then one plate split in two: places on the left, drawn with `SidebarRow` (Everywhere, apps with their icons and a chevron that opens their projects, then Other Projects), and the selected place's words on the right, as a table with Word and Sounds Like columns in SF Pro; Sounds Like ends with the context words ("soul, sole · near GPT, 6.1"). Its header has the place, the app icon and a meter ("32 of 32 active here") that opens the words in priority order. Edit and delete appear on hover, and in the row's context menu.
+  - Style: Level (None, Light, Medium, Coding agent) as a popup, with the level's description under the label. Cloud providers add a “Send text near the cursor” switch, off by default, whose line says what is sent and to whom, with the rest behind its ⓘ; the top status row then says the text near the cursor goes too.
+  - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again. The group's ⓘ holds the timeout note: "Slower than 4 s? I type what you said instead."
+  - The provider sheet: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key), Reasoning, API key (masked, "Saved in gob.lin preferences", Remove), the model-list status row with Refresh, and Advanced request options. Every control ends on the same right edge. Cancel and Save.
+- **Dictionary:** while there are suggestions, a card above Terms with the look-down goblin at 64 pt gripping its top edge. A title in the goblin's voice ("I found some words in gob.lin"), the budget ("22 of 32 words for gob.lin"), and one row per word with a reason caption ("you fixed “go blin”", "from Package.swift", "you fixed it 6 times · sounds like “soul”, “sole” near GPT, 6.1"), Not Now and Add, plus Add All. Nothing is added without a click. A word learned from a fix is also offered once in the overlay; Not Now there is the same as Not Now here. Below it, one plate. Its header is a search field, a ⋯ menu holding Import Words… and a moss Add Term. Under the header the plate splits in two and hugs its content: places on the left, drawn with `SidebarRow` (Everywhere, apps with their icons and a chevron that opens their projects, then Other Projects), and the selected place's words on the right, as a table with Word and Sounds Like columns in SF Pro; Sounds Like ends with the context words ("soul, sole · near GPT, 6.1"). Its header has the place, the app icon and a meter ("32 of 32 active") that opens the words in priority order. The selected place is a moss tint. Edit and delete appear on hover, and in the row's context menu.
 - **About:** centred.
   - The goblin at 128 pt, whose eyes follow the pointer anywhere over the page, the 48 pt wordmark, the version, and the tagline with a blinking block cursor.
-  - Two plates: four sentences of lore with three stats (words yapped, dictations, 0 s of audio uploaded), and spec rows (recognition, runs on, model size, languages, network).
+  - Two plates, one above the other: four sentences of lore with three stats (words yapped, dictations, 0 s of audio uploaded), then spec rows (recognition, runs on, model size, languages, network).
   - Check for Updates…, Licences, Data Folder.
 
 ### History window
@@ -201,7 +220,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 `Sources/GoblinApp/History/`. History is its own window (about 1100 × 720), opened from "All History" in the popover.
 
 - **Sidebar:** Insights, All Dictations, Starred and Warnings, each with a count, then Apps with counts. The filters run in the store query, not on the loaded page. The footer is the week's total: "1,284 words this week. About 23 minutes of typing you didn't do."
-- **List:** grouped by day. A row is the app icon, app name, time, a two-line preview, the length, a star, and "Not inserted" when it failed.
+- **List:** grouped by day. The selected row is a moss tint. A row is the app icon, app name, time, a two-line preview, the length, a star, and "Not inserted" when it failed.
 - **Detail:**
   - The app and title, then the time and length.
   - The text at 17 pt, then playback with a waveform.
@@ -231,7 +250,8 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 4. **Finale:** "You're hired."
    - The cackle goblin at 128 pt with sparkles and coins. They burst at 1× then 2× and fade over 600 ms; this is the app's one long animation.
    - The timing sentence, the field with what they said, and a menu-bar hint: "That's me, top right."
-   - The tagline strip, then Open Settings and Done.
+   - The goblin, the sentences and the hint sit on the window's centre line, centred in the space above the bottom row.
+   - The bottom row: the tagline on the left, on a faint tint, with Open Settings and Done on the right.
 
 ## Before you call a UI change done
 

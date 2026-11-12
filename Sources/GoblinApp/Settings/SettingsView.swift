@@ -126,8 +126,8 @@ private struct StatusFooter: View {
         return HStack(alignment: .top, spacing: 9) {
             StatusLight(state: status.light).padding(.top, 4)
             VStack(alignment: .leading, spacing: 1) {
-                Text(status.title).font(.system(size: 12, weight: .medium))
-                Text(status.detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                Text(status.title).font(.status.weight(.medium))
+                Text(status.detail).font(.meta).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -166,9 +166,9 @@ private struct GeneralSettingsView: View {
                 HStack(spacing: 16) {
                     if !stacked { TalkKeyCaps(shortcut: hotkeys.shortcut, light: keyLight) }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(hotkeys.shortcut.title).font(.system(size: 15, weight: .semibold))
+                        Text(hotkeys.shortcut.title).font(.cardTitle)
                         Text("Hold to talk, let go to type. Tap once to keep listening hands-free, and tap again to finish.")
-                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 12)
                     ShortcutRecorder(service: hotkeys, showsCurrent: false)
@@ -205,42 +205,48 @@ private struct GeneralSettingsView: View {
             }
             Toggle(isOn: $sounds) {
                 Text("Click sounds")
-                Text("A soft tick once the mic is really listening, and another when it stops.")
+                Text("A tick when the mic starts listening, and another when it stops.").rowDetail()
             }
             Toggle(isOn: $insertion.trailingSpace) {
                 Text("Add a space after each take")
-                Text("So the next one doesn't run into this one.")
+                Text("So the next take doesn't run into this one.")
             }
             Toggle(isOn: $insertion.watchEdits) {
                 Text("Watch edits after paste")
-                Text("Watch for 30 seconds and show corrections in History. Secure fields and password managers are excluded.")
+                Text("Shows what you changed in History.").rowDetail()
+                Text("I watch for 30 seconds. Password fields and password managers are never watched.")
             }
         } header: { CapsHeader("Behaviour") }
         Section {
             Toggle(isOn: $pauseMedia) {
                 Text("Pause current media")
-                Text("Pauses the player controlled by macOS, then resumes where it left off unless you changed playback. Other players can keep playing.")
+                Text("Pauses what's playing, then resumes it.").rowDetail()
+                Text("Only the player macOS controls is paused; others keep playing. It stays paused if you changed playback meanwhile.")
             }
             Toggle(isOn: $muteAudio) {
                 Text("Mute audio")
-                Text("Silences your current sound output while music and videos keep advancing. Restores sound when you finish; audio that was already muted stays muted.")
+                Text("Silences the sound; music and videos keep running.").rowDetail()
+                Text("Sound comes back when you finish. Anything already muted stays muted.")
             }
         } header: { CapsHeader("Reduce audio while dictating") } footer: {
-            Text("Use either option, or both to pause the current player and silence other sounds. Some external audio devices don't support muting.")
+            Text("Use either, or both. Some external audio devices can't be muted.")
         }
         Section {
-            Picker("Insert dictation into", selection: $insertion.destination) {
-                Text("Current text field").tag(DictationDestination.currentField)
-                Text("Where I started").tag(DictationDestination.originalField)
+            LabeledContent {
+                Picker("Insert dictation into", selection: $insertion.destination) {
+                    Text("Current text field").tag(DictationDestination.currentField)
+                    Text("Where I started").tag(DictationDestination.originalField)
+                }
+                .pickerStyle(.menu).labelsHidden().fixedSize()
+            } label: {
+                Text("Insert dictation into")
+                Text(insertion.destination == .currentField ? "Wherever your cursor is when the text is ready."
+                                                            : "Where you started, even if you switch apps.").rowDetail()
+                if insertion.destination == .originalField { Text("If it can't land there, the text stays ready to paste.") }
             }
-            .pickerStyle(.menu)
-            Text(insertion.destination == .currentField
-                 ? "Paste where your cursor is when the transcript is ready."
-                 : "Insert where you started dictation, even after switching apps. If it can't land there, it stays ready for manual paste.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             LabeledContent { KeyCombo(label: "⌥⇧⌘V") } label: {
                 Text("Paste last dictation again")
-                Text("Choose a text field and use this shortcut to paste your last transcript again.")
+                Text("Click into a text field, then press the shortcut.")
             }
             StatusRow(insertionLight, Text(insertion.status))
             if insertion.hasRecoveryClipboard {
@@ -298,56 +304,36 @@ private struct AboutSettingsView: View {
             VStack(spacing: 0) {
                 GazingGoblin(eyes: eyes, scale: 2)
                 GoblinWordmark(size: 48).padding(.top, 10)
-                Text(versionLine).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                Text(versionLine).font(.status).foregroundStyle(.secondary).monospacedDigit()
                     .textSelection(.enabled).padding(.top, 8)
                 GoblinTagline(size: 22, cursor: true).padding(.top, 14)
             }
             .frame(maxWidth: .infinity).padding(.top, 4)
         }
         .containerValue(\.plateless, true)
+        // One column, like every other page: the lore and its numbers, then the specs as plain rows.
         Section {
-            // Equal-height panels, like the two columns of a grid.
-            HStack(alignment: .top, spacing: 12) {
-                Plate(padding: 0) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Lives in your menu bar. Listens only while you hold the key. Turns speech into text on this Mac, and only sends text out if you turn on Cleanup. Has strong opinions about “um”.")
-                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                        Hairline().padding(.top, 14)
-                        HStack(alignment: .top) {
-                            stat(totalWords.map { $0.formatted() } ?? "—", "words yapped")
-                            stat(history.counts.total.formatted(), "dictations")
-                            stat("0 s", "audio uploaded")
-                        }
-                        .padding(.top, 12)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 14)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                }
-                Plate(padding: 0) {
-                    VStack(spacing: 0) {
-                        spec("Recognition", "\(speechModels.selectedModel.name), on this Mac")
-                        Hairline()
-                        spec("Runs on", "Core ML")
-                        Hairline()
-                        spec("Model size", modelSize ?? "—")
-                        Hairline()
-                        spec("Languages", languages)
-                        Hairline()
-                        spec("Network", "Not needed. Cleanup is opt-in.")
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 4)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                }
+            Text("Lives in your menu bar. Listens only while you hold the key. Turns speech into text on this Mac, and only sends text out if you turn on Cleanup. Has strong opinions about “um”.")
+                .lineSpacing(2).fixedSize(horizontal: false, vertical: true).padding(.vertical, 3)
+            HStack(alignment: .top) {
+                stat(totalWords.map { $0.formatted() } ?? "—", "words yapped")
+                stat(history.counts.total.formatted(), "dictations")
+                stat("0 s", "audio uploaded")
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 10)
+            .padding(.vertical, 3)
             .task(id: history.revision) { totalWords = try? await history.store?.insights().totalWords }
             .task(id: speechModels.selectedModel.id) {
                 let directory = speechModels.directory
                 modelSize = await Task.detached(priority: .utility) { Self.measure(directory) }.value
             }
         }
-        .containerValue(\.plateless, true)
+        Section {
+            spec("Recognition", "\(speechModels.selectedModel.name), on this Mac")
+            spec("Runs on", "Core ML")
+            spec("Model size", modelSize ?? "—")
+            spec("Languages", languages)
+            spec("Network", "Not needed. Cleanup is opt-in.")
+        }
         Section {
             HStack(spacing: 8) {
                 Button("Check for Updates…") { updates.check() }.disabled(updates.isBusy)
@@ -365,7 +351,7 @@ private struct AboutSettingsView: View {
                     if let folder = try? HistoryStore.defaultDirectory() { NSWorkspace.shared.open(folder) }
                 }
                 Spacer()
-                Text("Apache 2.0 · fonts under OFL 1.1").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text("Apache 2.0 · fonts under OFL 1.1").font(.meta).foregroundStyle(.secondary)
             }
             .padding(.top, 2)
         }
@@ -385,13 +371,7 @@ private struct AboutSettingsView: View {
     }
 
     private func spec(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
-            Text(value).monospacedDigit().fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .font(.system(size: 12.5))
-        .padding(.vertical, 8)
+        LabeledContent(label) { Text(value).foregroundStyle(.secondary).monospacedDigit() }
     }
 
     private var languages: String {
@@ -412,8 +392,8 @@ private struct AboutSettingsView: View {
 
     private func stat(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.system(size: 20, weight: .semibold)).monospacedDigit()
-            Text(label).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text(value).font(.reading.weight(.semibold)).monospacedDigit()
+            Text(label).font(.meta).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)

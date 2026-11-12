@@ -88,7 +88,8 @@ struct SettingsCapture {
                         if page == .diagnostics { model.diagnostics.report(.modelUnavailable) }
                         try await shoot("settings-\(page.rawValue.lowercased())", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080))
                     }
-                    for page in [SettingsSection.general, .dictionary, .cleanup, .about] {
+                    // Every page in dark too: DESIGN.md asks for both appearances of whatever a change touches.
+                    for page in SettingsSection.allCases where page != .history && page != .insights {
                         model.settingsSelection = page
                         try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     }
@@ -98,6 +99,7 @@ struct SettingsCapture {
                     let provider = CleanupProviderSheet(settings: RewriteSettingsStore.load(defaults: defaults), defaults: defaults,
                                                         inspectCredentials: false, turnOn: false, onSave: { _ in }, onFailure: { _ in })
                     try await shoot("settings-cleanup-provider", provider, size: NSSize(width: 680, height: 520))
+                    try await shoot("settings-cleanup-provider-dark", provider, size: NSSize(width: 680, height: 520), dark: true)
                     let sol = model.dictionary.entries.first { $0.spelling == "Sol" }!
                     for dark in [false, true] {
                         try await shoot("settings-dictionary-entry\(dark ? "-dark" : "")", DictionaryEntryEditor(entry: sol, model: model.dictionary).background(Color(nsColor: .windowBackgroundColor)),
@@ -117,6 +119,7 @@ struct SettingsCapture {
                 }
                 if wanted("popover") {
                     try await shoot("popover", popover(model), size: NSSize(width: 420, height: 720))
+                    try await shoot("popover-dark", popover(model), size: NSSize(width: 420, height: 720), dark: true)
                     model.diagnostics.report(.requiredPermissionsMissing)
                     model.diagnostics.report(.rewriteConfiguration)
                     try await shoot("popover-attention-dark", popover(model), size: NSSize(width: 420, height: 720), dark: true)
@@ -127,7 +130,15 @@ struct SettingsCapture {
                     for step in OnboardingView.Step.allCases {
                         try await shoot("onboarding-\(step.rawValue + 1)", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 516))
                     }
-                    try await shoot("onboarding-1-dark", OnboardingView(model: model, startAt: .permissions), size: NSSize(width: 660, height: 516), dark: true)
+                    // A long first take must not push the closing buttons out of the fixed-size window.
+                    let long = (result: OverlayResult(application: nil, words: 100, seconds: 0.41),
+                                text: Array(repeating: "The goblin types faster than I do, and it never stops to check.", count: 8).joined(separator: " "))
+                    for step in [OnboardingView.Step.firstTake, .hired] {
+                        try await shoot("onboarding-\(step.rawValue + 1)-long", OnboardingView(model: model, startAt: step, take: long), size: NSSize(width: 660, height: 516))
+                    }
+                    for step in OnboardingView.Step.allCases {
+                        try await shoot("onboarding-\(step.rawValue + 1)-dark", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 516), dark: true)
+                    }
                 }
                 if wanted("overlay") {
                     for (name, overlay) in overlayPhases() {
