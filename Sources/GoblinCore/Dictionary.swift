@@ -313,8 +313,12 @@ public enum DictionaryCorrector {
         while start > max(0, words.lowerBound - contextWindow), !ends(after: start - 1) { start -= 1 }
         var end = words.upperBound
         while end < min(tokens.count, words.upperBound + contextWindow), !ends(after: end - 1) { end += 1 }
-        let nearby = Set((tokens[start..<words.lowerBound] + tokens[words.upperBound..<end]).map { numberKey($0.key) })
-        return context.contains { $0.allSatisfy(nearby.contains) }
+        // Counted, so each word of "1.1" needs its own "one".
+        var nearby: [String: Int] = [:]
+        for token in tokens[start..<words.lowerBound] + tokens[words.upperBound..<end] { nearby[numberKey(token.key), default: 0] += 1 }
+        return context.contains { words in
+            Dictionary(words.map { ($0, 1) }, uniquingKeysWith: +).allSatisfy { nearby[$0.key, default: 0] >= $0.value }
+        }
     }
 
     /// A context entry's words as the corrector compares them.

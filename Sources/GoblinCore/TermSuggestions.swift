@@ -206,12 +206,27 @@ public enum TermSuggestions {
             let squashed = { (text: String) in dictionaryKey(text).filter { !$0.isWhitespace } }
             // "post hog" → "PostHog" only re-spaces or recases: the spelling alone fixes it.
             let aliases = squashed(heard) == squashed(spelling) ? [] : [heard]
-            let window = DictionaryCorrector.contextWindow, end = fix.at + count(spelling)
-            let nearby = words[max(0, fix.at - window)..<fix.at] + words[min(words.count, end)..<min(words.count, end + window)]
+            // The corrector's window: three words either side, within the sentence.
+            let window = DictionaryCorrector.contextWindow, end = min(words.count, fix.at + count(spelling))
+            var lower = fix.at
+            while lower > max(0, fix.at - window), !endsSentence(words[lower - 1]) { lower -= 1 }
+            var upper = end
+            if end > fix.at, !endsSentence(words[end - 1]) {
+                while upper < min(words.count, end + window) {
+                    upper += 1
+                    if endsSentence(words[upper - 1]) { break }
+                }
+            }
+            let nearby = words[lower..<fix.at] + words[end..<upper]
             result.append(TermSuggestion(spelling: spelling, aliases: aliases, apps: apps, projects: projects, reason: .correction(heard: heard),
                                          context: contextWords(Array(nearby))))
         }
         return result
+    }
+
+    /// Whether a whitespace-separated chunk ends its sentence, as the corrector judges it: "agent." does, "6.1" doesn't.
+    private static func endsSentence(_ chunk: String) -> Bool {
+        chunk.trimmingCharacters(in: CharacterSet(charactersIn: "\"'”’)]}")).last.map { ".!?;…".contains($0) } ?? false
     }
 
     /// The words of `chunks` that say what a term is about: a number or version ("6.1"), or a word of three or more
@@ -261,14 +276,22 @@ public enum TermSuggestions {
             let key = dictionaryKey(candidate.spelling)
             let existing = entries.first { dictionaryKey($0.spelling) == key }
             // A known single word as an alias would replace that word everywhere ("cloud" → "Claude"), unless context
-            // limits it. Context can't join an entry whose aliases apply everywhere, since it would limit those too.
+            // limits it. An entry's context applies to all its aliases, so it never changes on an entry that has
+            // aliases: context can't limit aliases that apply everywhere, and new context would widen restricted ones.
+            // A restricted entry takes an ordinary word only when the fixes were heard near its own context.
             func ordinary(_ alias: String) -> Bool { !alias.contains(where: \.isWhitespace) && isKnownWord(alias) }
-            let canLimit = !candidate.context.isEmpty && existing.map { !$0.context.isEmpty || $0.aliases.isEmpty } ?? true
+            let canLimit: Bool
+            if let existing, !existing.context.isEmpty {
+                let current = Set(existing.context.map(dictionaryKey))
+                canLimit = candidate.context.contains { current.contains(dictionaryKey($0)) }
+            } else {
+                canLimit = !candidate.context.isEmpty && (existing?.aliases.isEmpty ?? true)
+            }
             let aliases = candidate.aliases.filter { alias in
                 let aliasKey = dictionaryKey(alias)
                 return aliasKey != key && !owned.contains(aliasKey) && (!ordinary(alias) || canLimit)
             }
-            let context = aliases.contains(where: ordinary) ? candidate.context : []
+            let context = aliases.contains(where: ordinary) && existing.map({ $0.context.isEmpty }) ?? true ? candidate.context : []
             var suggestion = TermSuggestion(spelling: candidate.spelling, aliases: aliases, apps: candidate.apps,
                                             projects: candidate.projects, reason: candidate.reason, context: context,
                                             timesFixed: candidate.timesFixed)

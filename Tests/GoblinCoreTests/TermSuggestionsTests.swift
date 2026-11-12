@@ -161,4 +161,23 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     let merged = [existing].accepting(added[0])
     #expect(merged.count == 1 && merged[0].context == ["6.1", "sub", "agent", "GPT"] && merged[0].aliases == ["sole", "soul"])
     #expect(review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["saul"])]).isEmpty)
+    // An entry already limited keeps its context, so its aliases never widen: a new ordinary word joins only when it
+    // was heard near that context, and a new unusual word is limited by it too.
+    let limited = DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["GPT"])
+    let sole = review(fixes, [limited])
+    #expect(sole.map(\.aliases) == [["sole"]] && sole[0].context.isEmpty)
+    #expect([limited].accepting(sole[0])[0].context == ["GPT"])
+    let elsewhere = review(fixes, [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["Claude"])])
+    #expect(elsewhere.isEmpty)
+}
+
+@Test func contextIsLearnedWithinTheSentence() {
+    let scope = DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin")
+    let fixes = TermSuggestions.fromCorrection(dictated: "Use soul. Music is next", edited: "Use sol. Music is next", scope: scope)
+        + TermSuggestions.fromCorrection(dictated: "Try soul. Music again", edited: "Try sol. Music again", scope: scope)
+    #expect(fixes.map(\.context) == [[], []])
+    // No context, so the ordinary word stays out of the aliases.
+    #expect(review(fixes).map { ($0.spelling, $0.aliases) }.first ?? ("", []) == ("sol", []))
+    let before = TermSuggestions.fromCorrection(dictated: "Codex next. We use GPT soul agents! Done", edited: "Codex next. We use GPT sol agents! Done", scope: scope)
+    #expect(before.first?.context == ["GPT", "agents"])
 }

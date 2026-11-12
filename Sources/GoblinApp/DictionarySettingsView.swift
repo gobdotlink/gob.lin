@@ -33,8 +33,8 @@ final class DictionaryModel: ObservableObject {
     private var fixesLoaded = false
     /// The spell checker's answers, since review asks about every remembered fix each time.
     private var knownWords: [String: Bool] = [:]
-    /// The dictations History has seen edited, newest first.
-    var loadFixes: (@MainActor () async -> [HistoryEntry])?
+    /// The dictations History has seen edited, newest first; nil when History can't be read.
+    var loadFixes: (@MainActor () async -> [HistoryEntry]?)?
     private var repositoryCandidates: [TermSuggestion] = []
     private var repositoryCache: [String: (read: Date, candidates: [TermSuggestion])] = [:]
     private var repositoryTask: Task<Void, Never>?
@@ -81,11 +81,15 @@ final class DictionaryModel: ObservableObject {
 
     /// Reads the fixes from History, so repeated fixes add up across launches and deleting a dictation forgets its fix.
     func refreshFixes() async {
-        guard suggestsTerms, let edited = await loadFixes?() else { return }
+        guard suggestsTerms, let edited = await loadFixes?() ?? nil else { return }
+        // Diffing hundreds of long dictations stays off the main actor.
+        let found = await Task.detached(priority: .utility) {
+            edited.flatMap { entry in
+                entry.editedText.map { TermSuggestions.fromCorrection(dictated: entry.finalText, edited: $0, scope: entry.dictionaryContext) } ?? []
+            }
+        }.value
         fixesLoaded = true
-        correctionCandidates = edited.flatMap { entry in
-            entry.editedText.map { TermSuggestions.fromCorrection(dictated: entry.finalText, edited: $0, scope: entry.dictionaryContext) } ?? []
-        }
+        correctionCandidates = found
         reviewSuggestions()
     }
 
@@ -114,6 +118,8 @@ final class DictionaryModel: ObservableObject {
     @discardableResult
     func offerCorrection(dictated: String, edited: String, scope: DictionaryScope) -> [TermSuggestion] {
         guard suggestsTerms else { return [] }
+        // History couldn't be read at launch; it holds this edit too by now.
+        if !fixesLoaded { Task { await refreshFixes() } }
         let found = TermSuggestions.fromCorrection(dictated: dictated, edited: edited, scope: scope)
         guard !found.isEmpty else { return [] }
         correctionCandidates = Array((found + correctionCandidates).prefix(Self.fixLimit))
@@ -380,7 +386,9 @@ private struct DictionarySuggestionsCard: View {
         var parts = [reason]
         if !suggestion.aliases.isEmpty {
             let heard = suggestion.aliases.map { "“\($0)”" }.joined(separator: ", ")
-            parts.append("sounds like \(heard)" + (suggestion.context.isEmpty ? "" : " near \(suggestion.context.joined(separator: ", "))"))
+            // Accepting keeps the entry's own context, which then limits the new aliases too.
+            let near = suggestion.context.isEmpty ? existing?.context ?? [] : suggestion.context
+            parts.append("sounds like \(heard)" + (near.isEmpty ? "" : " near \(near.joined(separator: ", "))"))
         }
         if model.suggestionPlace == nil {
             parts.append(suggestion.projects.first.map { "project \($0)" } ?? DictionaryApps.summary(suggestion.apps))

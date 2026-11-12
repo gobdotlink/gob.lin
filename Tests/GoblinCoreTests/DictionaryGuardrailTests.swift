@@ -105,6 +105,10 @@ import Testing
     #expect(corrected("not one soul came") == "not one soul came")
     #expect(corrected("GPT is fine but my soul is tired") == "GPT is fine but my soul is tired")
     #expect(corrected("I use GPT. Soul music helps") == "I use GPT. Soul music helps")
+    // A repeated word needs each occurrence: one "one" isn't "1.1".
+    let repeated = [DictionaryEntry(spelling: "Sol", aliases: ["soul"], context: ["1.1"])]
+    #expect(DictionaryCorrector.correct("not one soul came", entries: repeated).text == "not one soul came")
+    #expect(DictionaryCorrector.correct("version one point one soul", entries: repeated).text == "version one point one Sol")
     // Without context an alias applies everywhere, as before.
     #expect(DictionaryCorrector.correct("my soul", entries: [DictionaryEntry(spelling: "Sol", aliases: ["soul"])]).text == "my Sol")
 

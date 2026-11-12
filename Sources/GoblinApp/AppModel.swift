@@ -179,7 +179,7 @@ final class AppModel: ObservableObject {
         }
         overlay.model.applicationName = { DictionaryApps.name($0) }
         dictionary.loadProjectUses = { [history] in (try? await history.store?.dictionaryProjectUses()) ?? [] }
-        dictionary.loadFixes = { [history] in (try? await history.store?.editedDictations()) ?? [] }
+        dictionary.loadFixes = { [history] in try? await history.store?.editedDictations() }
         Task { [dictionary] in await dictionary.refreshFixes() }
         overlay.model.perform = { [weak self] action in
             guard let self else { return }
