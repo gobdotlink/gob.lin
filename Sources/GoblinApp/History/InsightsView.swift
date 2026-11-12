@@ -117,7 +117,7 @@ struct InsightsView: View {
                     figure("Typing saved", value: minutes == 0 && data.typingSecondsSaved > 0 ? "<1" : minutes.formatted(), unit: minutes > 1 || data.typingSecondsSaved == 0 ? "minutes" : "minute")
                     figure("Words", value: data.totalWords.formatted(), unit: data.totalWords == 1 ? "word" : "words")
                 }
-                Text(talkSentence(shown)).font(.system(size: 15, weight: .medium)).padding(.top, 8)
+                Text(talkSentence(shown)).font(.reading.weight(.medium)).padding(.top, 8)
                 Text(sinceSentence(shown)).foregroundStyle(.secondary).padding(.top, 2)
             }
             .padding(.vertical, 10)
@@ -140,10 +140,10 @@ struct InsightsView: View {
 
     private func figure(_ title: String, value: String, unit: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            Text(title).font(.status.weight(.medium)).foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(value).font(.system(size: 48, weight: .semibold)).monospacedDigit().minimumScaleFactor(0.6)
-                Text(unit).font(.system(size: 20, weight: .medium)).foregroundStyle(.secondary)
+                Text(unit).font(.reading.weight(.medium)).foregroundStyle(.secondary)
             }
             .lineLimit(1)
         }
@@ -166,12 +166,12 @@ struct InsightsView: View {
 
     private func stat(_ title: String, value: String, unit: String, detail: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(title).font(.meta).foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value).font(.system(size: 20, weight: .semibold)).monospacedDigit()
-                Text(unit).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                Text(value).font(.reading.weight(.semibold)).monospacedDigit()
+                Text(unit).font(.row.weight(.medium)).foregroundStyle(.secondary)
             }
-            if let detail { Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit() }
+            if let detail { Text(detail).font(.meta).foregroundStyle(.secondary).monospacedDigit() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 3)
@@ -248,7 +248,7 @@ struct InsightsView: View {
                 .help("Next Week")
         }
         .labelStyle(.iconOnly).buttonStyle(.borderless)
-        .font(.system(size: 11.5, weight: .medium)).textCase(nil).tracking(0)
+        .font(.meta.weight(.medium)).textCase(nil).tracking(0)
         .padding(.trailing, 10)
     }
 
@@ -270,7 +270,7 @@ struct InsightsView: View {
             VStack(spacing: 4) {
                 PixelWordCloud(words: shown.cloud.words, seed: cloudSeed(shown.period), period: description(shown.period))
                 Text("From \(entries.formatted()) \(entries == 1 ? "dictation" : "dictations") \(description(shown.period)). Hover a word to see how often you said it.")
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.meta).foregroundStyle(.secondary).monospacedDigit()
                     .frame(maxWidth: .infinity)
             }
         }
@@ -293,7 +293,7 @@ struct InsightsView: View {
                     Text(app.name).fontWeight(.medium).textSelection(.enabled)
                     Spacer()
                     Text("\(app.words.formatted()) \(app.words == 1 ? "word" : "words") · \(percent)")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                        .font(.status).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Capsule().fill(GoblinBrand.moss.opacity(0.16)).frame(height: 4)
                     .overlay(alignment: .leading) {
@@ -465,7 +465,7 @@ private struct ActivityRow: View {
                         DashedRule().stroke(.secondary, style: StrokeStyle(lineWidth: 1, dash: [3, 2])).frame(width: 14, height: 1)
                         Text("avg \(Int(average.rounded()).formatted())").monospacedDigit()
                     }
-                    .font(.system(size: 10.5)).foregroundStyle(.secondary).padding(.top, 3)
+                    .font(.meta).foregroundStyle(.secondary).padding(.top, 3)
                 }
             }
             HStack(spacing: 0) {
@@ -485,7 +485,7 @@ private struct ActivityRow: View {
             HStack(spacing: 0) {
                 ForEach(bars.indices, id: \.self) { index in
                     Text(bars[index].label)
-                        .font(.system(size: 10.5, weight: index == current ? .semibold : .regular))
+                        .font(.meta.weight(index == current ? .semibold : .regular))
                         .foregroundStyle(index == current ? .primary : .secondary)
                         .fixedSize()
                         .frame(maxWidth: .infinity)
@@ -499,9 +499,9 @@ private struct ActivityRow: View {
         let bar = chart.bars[index]
         let barHeight = bar.words > 0 ? max(4, height * CGFloat(bar.words) / CGFloat(top)) : 0
         return ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(.primary.opacity(0.045))
+            RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(.primary.opacity(0.045))
             if barHeight > 0 {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                     .fill(GoblinBrand.moss.opacity(index == current ? 1 : 0.55))
                     .frame(height: barHeight)
             }
@@ -511,7 +511,7 @@ private struct ActivityRow: View {
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             if labelled {
-                Text(bar.words.formatted()).font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                Text(bar.words.formatted()).font(.meta.weight(.semibold)).monospacedDigit()
                     .fixedSize().offset(y: -(max(barHeight, 4) + 5))
             }
         }
@@ -533,18 +533,18 @@ private struct ActivityRow: View {
             HStack(alignment: .top, spacing: 8) {
                 heading("When you talk", detail: busiest.map { "Busiest around \(ActivityChart.hourName($0))." } ?? chart.empty)
                 Spacer(minLength: 0)
-                Text("Each square is one hour").font(.system(size: 10.5)).foregroundStyle(.secondary).padding(.top, 3)
+                Text("Each square is one hour").font(.meta).foregroundStyle(.secondary).padding(.top, 3)
             }
             VStack(alignment: .leading, spacing: Self.gap) {
                 ForEach(rows.indices, id: \.self) { index in
                     let row = rows[index]
                     HStack(spacing: Self.gap) {
                         Text(row.label)
-                            .font(.system(size: 10, weight: row.current ? .semibold : .regular))
+                            .font(.meta.weight(row.current ? .semibold : .regular))
                             .foregroundStyle(row.current ? .primary : .secondary)
                             .frame(width: Self.labelWidth, alignment: .leading)
                         ForEach(0..<24, id: \.self) { hour in
-                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            RoundedRectangle(cornerRadius: Radius.tiny, style: .continuous)
                                 .fill(shade(row.hours[hour], top: top))
                                 .frame(width: cell, height: cell)
                                 .help("\(row.name) \(ActivityChart.hourName(hour)) · \(row.hours[hour] > 0 ? "\(row.hours[hour].formatted()) words" : "quiet")")
@@ -561,7 +561,7 @@ private struct ActivityRow: View {
                     Text(ActivityChart.hourName(hour)).frame(width: 6 * (cell + Self.gap), alignment: .leading)
                 }
             }
-            .font(.system(size: 10.5)).foregroundStyle(.tertiary).monospacedDigit()
+            .font(.meta).foregroundStyle(.tertiary).monospacedDigit()
             .padding(.leading, Self.labelWidth + Self.gap).padding(.top, 7)
         }
     }
@@ -576,7 +576,7 @@ private struct ActivityRow: View {
     private func heading(_ title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).fontWeight(.semibold)
-            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+            Text(detail).font(.status).foregroundStyle(.secondary).monospacedDigit()
         }
     }
 

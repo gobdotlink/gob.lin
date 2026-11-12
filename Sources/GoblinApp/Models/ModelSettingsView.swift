@@ -33,83 +33,85 @@ struct ModelSettingsView: View {
                         .pickerStyle(.segmented).labelsHidden().tint(GoblinBrand.moss)
                         .frame(width: 280)
                     }
-                    HStack(spacing: 10) {
-                        TextField("Search models or languages", text: $search)
-                            .textFieldStyle(.plain).padding(.horizontal, 9).frame(height: 28)
-                            .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
-                            .accessibilityLabel("Search models or languages")
-                        Text("Supports Language").font(.caption).foregroundStyle(.secondary).fixedSize()
+                    HStack(spacing: 8) {
+                        SearchField(prompt: "Search models or languages", text: $search)
                         Picker("Supports Language", selection: $languageFilter) {
-                            Text("Any").tag("all")
+                            Text("Any Language").tag("all")
                             ForEach(catalogLanguages, id: \.self) { code in Text(languageName(code)).tag(code) }
                         }
-                        .labelsHidden().frame(width: 130)
+                        .labelsHidden().frame(width: 150)
                         .help("Filter model choices; this does not change your dictation language.")
                     }
                     Plate(padding: 0) {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                if catalogModels.isEmpty { emptyCatalog }
-                                ForEach(catalogModels) { model in
-                                    SpeechModelRow(model: model, service: service,
-                                        downloaded: downloadedModelIDs.contains(model.id),
-                                        selectionError: service.selectionFailureModelID == model.id ? service.selectionFailure
-                                            : (failedModelID == model.id ? selectionError : nil),
-                                        select: { select(model) })
-                                    .overlay(alignment: .top) { if model.id != catalogModels.first?.id { Hairline() } }
-                                }
+                        // A short list hugs its rows; a long one scrolls inside the plate.
+                        let rows = VStack(spacing: 2) {
+                            if catalogModels.isEmpty { emptyCatalog }
+                            ForEach(catalogModels) { model in
+                                SpeechModelRow(model: model, service: service,
+                                    downloaded: downloadedModelIDs.contains(model.id),
+                                    selectionError: service.selectionFailureModelID == model.id ? service.selectionFailure
+                                        : (failedModelID == model.id ? selectionError : nil),
+                                    select: { select(model) })
                             }
                         }
-                        .frame(height: 464)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(4)
+                        if catalogModels.count > 5 {
+                            ScrollView { rows }.frame(height: 5.5 * SpeechModelRow.height)
+                                .clipShape(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+                        } else { rows }
                     }
                 }
             }
             .containerValue(\.plateless, true)
             Section("Dictation Language") {
-                VStack(alignment: .leading, spacing: 8) {
+                let explicit = service.selectedModel.capabilities.languageControl == .explicit
+                LabeledContent {
                     if service.selectedModel.capabilities.languageControl == .fixed {
-                        LabeledContent("Language", value: "\(languageName(service.recognitionOptions.language ?? "en")) (fixed)")
+                        Text("\(languageName(service.recognitionOptions.language ?? "en")) (fixed)").foregroundStyle(.secondary)
                     } else {
-                        Picker(service.selectedModel.capabilities.languageControl == .explicit ? "Recognition Language" : "Preferred Language",
+                        Picker(explicit ? "Recognition language" : "Preferred language",
                                selection: Binding(get: { service.recognitionOptions.language ?? "auto" }, set: { language in
                             do { try service.selectLanguage(language); selectionError = nil }
                             catch { selectionError = error.localizedDescription; failedModelID = service.selectedModel.id }
                         })) {
                             if service.selectedModel.capabilities.automaticLanguage { Text("Automatic").tag("auto") }
                             ForEach(languages, id: \.self) { code in Text(languageName(code)).tag(code) }
-                        }.disabled(service.pendingModel != nil)
+                        }
+                        .labelsHidden().fixedSize().disabled(service.pendingModel != nil)
                     }
-                    Text(languageHint).font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                } label: {
+                    Text(service.selectedModel.capabilities.languageControl == .fixed ? "Language" : explicit ? "Recognition language" : "Preferred language")
+                    Text(languageHint).rowDetail()
                     if service.preferredLanguage != (service.recognitionOptions.language ?? "auto") {
-                        Text("Saved preference: \(languageName(service.preferredLanguage)). \(service.selectedModel.name) uses \(languageName(service.recognitionOptions.language ?? "auto")); your preference is kept when you switch models.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("You prefer \(languageName(service.preferredLanguage)), but \(service.selectedModel.name) uses \(languageName(service.recognitionOptions.language ?? "auto")). Your preference is kept for other models.")
                     }
                 }
             }
             Section {
-                Picker("Unload After Idle", selection: $service.idleTimeout) {
-                    ForEach(ModelIdleTimeout.allCases) { timeout in Text(timeout.label).tag(timeout) }
+                LabeledContent {
+                    Picker("Unload after idle", selection: $service.idleTimeout) {
+                        ForEach(ModelIdleTimeout.allCases) { timeout in Text(timeout.label).tag(timeout) }
+                    }
+                    .labelsHidden().fixedSize()
+                } label: {
+                    Text("Unload after idle")
+                    Text("Frees memory when idle; reloads when you talk.").rowDetail()
                 }
-                DisclosureGroup("Model Details") {
-                    LabeledContent("Active Model", value: service.selectedModel.name)
+                DisclosureGroup("Model details") {
+                    LabeledContent("Active model", value: service.selectedModel.name)
                     LabeledContent("Runtime", value: service.selectedModel.runtime)
-                    LabeledContent("Download Size", value: modelSize(service.selectedModel))
-                    LabeledContent("Supported Languages", value: "\(service.selectedModel.capabilities.languageCodes.count)")
+                    LabeledContent("Download size", value: modelSize(service.selectedModel))
+                    LabeledContent("Supported languages", value: "\(service.selectedModel.capabilities.languageCodes.count)")
                     LabeledContent("Dictionary", value: dictionarySupport(service.selectedModel))
                     if let timing = service.lastLoadTiming {
-                        LabeledContent("Model Load") { Text(String(format: "%.0f ms", timing.runtimeLoadMilliseconds)).monospacedDigit() }
-                        LabeledContent("Total Preparation") { Text(String(format: "%.0f ms", timing.preparationMilliseconds)).monospacedDigit() }
+                        LabeledContent("Model load") { Text(String(format: "%.0f ms", timing.runtimeLoadMilliseconds)).monospacedDigit() }
+                        LabeledContent("Total preparation") { Text(String(format: "%.0f ms", timing.preparationMilliseconds)).monospacedDigit() }
                     }
                     Button("Open Model Folder") { NSWorkspace.shared.open(service.directory) }
-                    Text("Models download from their publishers and run on your Mac. Downloaded files stay on disk when memory is freed.")
-                        .font(.callout).foregroundStyle(.secondary)
+                    Text("Models download from their publishers and run on this Mac. Files stay on disk when memory is freed.")
+                        .font(.meta).foregroundStyle(.secondary)
                 }
-            } header: { Text("Storage & Memory") } footer: {
-                Text("I free up memory when idle and reload when you talk.")
-            }
+            } header: { Text("Storage & Memory") }
         }
         .task(id: service.isPreparing) { if !service.isPreparing { await refreshDownloads() } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -120,9 +122,9 @@ struct ModelSettingsView: View {
     private var languageHint: String {
         switch service.selectedModel.capabilities.languageControl {
         case .fixed: "This model recognizes English only."
-        case .scriptHint: "Automatic is best when you switch languages. A preference guides the writing script."
-        case .hint: "Automatic detects the language. A preference gives the model a hint."
-        case .explicit: "Choose the language you speak, or use Automatic when switching languages."
+        case .scriptHint: "Automatic suits switching languages. A preference picks the script."
+        case .hint: "Automatic detects the language. A preference is a hint."
+        case .explicit: "Pick the language you speak, or Automatic if you switch."
         }
     }
 
@@ -155,7 +157,7 @@ struct ModelSettingsView: View {
                 Button("Clear Filters") { search = ""; languageFilter = "all" }
             }
         }
-        .frame(maxWidth: .infinity).frame(height: 464).multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity).frame(height: 3 * SpeechModelRow.height).multilineTextAlignment(.center)
         .padding(.horizontal, 14)
     }
 
@@ -194,26 +196,30 @@ struct SpeechModelRow: View {
     @State private var showFailureDetails = false
     @Environment(\.colorSchemeContrast) private var contrast
 
+    /// A name, a summary and a details line, with 8 pt above and below.
+    static let height: CGFloat = 72
+
     private var current: Bool { service.selectedModel.id == model.id }
     private var pending: Bool { service.pendingModel?.id == model.id }
 
     var body: some View {
         HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(model.name).fontWeight(.semibold)
-                Text(model.selectionSummary).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                Text(model.selectionSummary).font(.status).foregroundStyle(.secondary).lineLimit(1)
                 // The dictionary marker is the first thing to go when the row is narrow.
                 ViewThatFits(in: .horizontal) {
                     if model.capabilities.customVocabulary { details(dictionary: true) }
                     details(dictionary: false)
-                }.font(.caption).foregroundStyle(.secondary)
+                }.font(.meta).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            VStack(spacing: 7) { action }
-                .font(.callout).frame(width: 128, height: 86)
+            VStack(spacing: 4) { action }
+                .font(.status).frame(width: 128)
         }
-        .padding(.horizontal, 14).frame(height: 116)
-        .background(current ? GoblinBrand.moss.opacity(contrast == .increased ? 0.18 : 0.10) : Color.clear)
-        .overlay(alignment: .leading) { if current { GoblinBrand.moss.frame(width: 3) } }
+        // The current model is an inset tinted row, like first run's current permission.
+        .padding(.horizontal, 10).frame(height: Self.height)
+        .background(current ? (contrast == .increased ? GoblinBrand.moss.opacity(0.3) : GoblinBrand.selection) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 
@@ -261,7 +267,7 @@ struct SpeechModelRow: View {
             wideButton(downloaded ? "Use Model" : "Download & Use", action: select)
                 .disabled(!service.canChangeModel)
                 .accessibilityLabel("\(downloaded ? "Use" : "Download and use") \(model.name)")
-            Text(downloaded ? "Downloaded" : "Download required").font(.caption).foregroundStyle(.secondary)
+            Text(downloaded ? "Downloaded" : "Download required").font(.meta).foregroundStyle(.secondary)
         }
     }
 
@@ -302,7 +308,7 @@ struct SpeechModelRow: View {
     private func status(_ light: LightState, _ text: String) -> some View {
         HStack(spacing: 5) {
             StatusLight(state: light)
-            Text(text).font(.caption).foregroundStyle(.secondary)
+            Text(text).font(.meta).foregroundStyle(.secondary)
         }.accessibilityElement(children: .combine)
     }
 
@@ -315,12 +321,12 @@ struct SpeechModelRow: View {
                     if let fraction = progress.fractionCompleted, progress.phase == .downloading {
                         Text(fraction, format: .percent.precision(.fractionLength(0))).monospacedDigit()
                     } else { Image(systemName: "info.circle") }
-                }.font(.caption).contentShape(Rectangle())
+                }.font(.meta).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showProgressDetails) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(model.name).font(.headline)
+                    Text(model.name).font(.row.weight(.semibold))
                     Text(progressLabel(progress))
                     if let component = progress.component { Text(component).foregroundStyle(.secondary) }
                     if let start = service.preparationStartedAt {
@@ -331,7 +337,7 @@ struct SpeechModelRow: View {
                     Text(progress.phase == .downloading
                          ? "Interrupted downloads keep their progress.\(pending ? " Your current model stays available during download." : "")"
                          : "First-use preparation can take several minutes. Switching waits for active dictations to finish.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.status).foregroundStyle(.secondary)
                 }.padding(16).frame(width: 320)
             }
             if let fraction = progress.fractionCompleted, progress.phase == .downloading {
@@ -346,11 +352,11 @@ struct SpeechModelRow: View {
         Button("Details…") { showFailureDetails = true }
             .popover(isPresented: $showFailureDetails) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(model.name).font(.headline)
-                    Text(message).font(.callout).textSelection(.enabled)
+                    Text(model.name).font(.row.weight(.semibold))
+                    Text(message).font(.status).textSelection(.enabled)
                     Text(current ? "Retry keeps downloaded files. Download Again replaces this model's cache to repair damaged files."
                          : "Retry keeps downloaded files. Your previous model selection is kept if preparation fails.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.status).foregroundStyle(.secondary)
                     if current {
                         Button("Download Again", role: .destructive) { Task { await service.repair() } }
                             .disabled(!service.canChangeModel)
@@ -387,8 +393,8 @@ struct ModelLanguagesPopover: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Supported Languages").font(.headline)
-                    Text(model.name).font(.callout).foregroundStyle(.secondary)
+                    Text("Supported Languages").font(.row.weight(.semibold))
+                    Text(model.name).font(.status).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Close", systemImage: "xmark") { dismiss() }.labelStyle(.iconOnly)
@@ -399,11 +405,11 @@ struct ModelLanguagesPopover: View {
             ScrollView {
                 if languages.isEmpty { Text("No matching language.").foregroundStyle(.secondary) }
                 LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 10) {
-                    ForEach(languages, id: \.self) { code in Text(languageName(code)).font(.callout) }
+                    ForEach(languages, id: \.self) { code in Text(languageName(code)).font(.status) }
                 }
             }.frame(height: 180)
             Text("\(languages.count) of \(model.capabilities.languageCodes.count) supported languages")
-                .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .font(.meta).monospacedDigit().foregroundStyle(.secondary)
         }
         .padding(16).frame(width: 320)
         .onAppear { searchFocused = true }

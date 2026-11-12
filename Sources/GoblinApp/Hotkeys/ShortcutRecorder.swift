@@ -13,7 +13,7 @@ struct ShortcutRecorder: View {
             HStack(spacing: 10) {
                 if service.recorderActive {
                     if let preview = capture.preview { KeyCombo(label: preview.label) }
-                    else { Text("press keys…").font(.callout.monospaced()).foregroundStyle(GoblinBrand.mossText) }
+                    else { Text("press keys…").font(.status.monospaced()).foregroundStyle(GoblinBrand.mossText) }
                 } else if showsCurrent {
                     KeyCombo(label: service.shortcut.label)
                 }
@@ -29,7 +29,7 @@ struct ShortcutRecorder: View {
                     Text(caution).foregroundStyle(.orange)
                 }
             }
-            .font(.caption).multilineTextAlignment(.trailing).frame(maxWidth: 260, alignment: .trailing)
+            .font(.meta).multilineTextAlignment(.trailing).frame(maxWidth: 260, alignment: .trailing)
             .fixedSize(horizontal: false, vertical: true)
         }
         .onChange(of: service.recorderActive) { _, active in

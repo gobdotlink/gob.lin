@@ -53,11 +53,11 @@ struct StatusRow<Trailing: View>: View {
             // Light and words read as one; the trailing control stays its own element.
             HStack(spacing: 9) {
                 StatusLight(state: state)
-                text.font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                text.font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
-            trailing.font(.callout).foregroundStyle(.secondary)
+            trailing.font(.status).foregroundStyle(.secondary)
         }
         .containerValue(\.statusRow, true)
     }
@@ -73,7 +73,58 @@ struct CapsHeader: View {
     init(_ title: String) { self.title = title }
 
     var body: some View {
-        Text(title.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(0.85).foregroundStyle(.secondary)
+        Text(title.uppercased()).font(.capsLabel).tracking(0.85).foregroundStyle(.secondary)
+    }
+}
+
+/// An explanation kept one click away: a small ⓘ that opens the words in a popover.
+struct InfoButton<Content: View>: View {
+    @ViewBuilder var content: Content
+    @State private var shown = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: "info.circle").font(.system(size: 12)).foregroundStyle(.secondary)
+                .frame(width: 18, height: 18).contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More information")
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 6) { content }
+                .font(.status).foregroundStyle(.primary).tracking(0).textCase(nil)
+                .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                .padding(12).frame(width: 280, alignment: .leading)
+        }
+    }
+}
+
+/// The face of an icon-only menu button on a plate, drawn to the height of a regular button. A
+/// bordered menu button shrinks to its glyph, so these menus are plain-styled around this label.
+struct IconButtonLabel: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol).font(.system(size: 12, weight: .medium))
+            .frame(width: 28, height: 22)
+            .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+            .contentShape(.rect)
+    }
+}
+
+/// The one search field for plates and pages: a magnifier, 28 pt high.
+struct SearchField: View {
+    let prompt: String
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
+            TextField(prompt, text: $text).textFieldStyle(.plain).accessibilityLabel(prompt)
+        }
+        .font(.row)
+        .padding(.horizontal, 8).frame(height: 28)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(.primary.opacity(0.14), lineWidth: 0.5))
     }
 }
 
@@ -85,8 +136,8 @@ struct Plate<Content: View>: View {
     var body: some View {
         content.padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
+            .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
     }
 }
@@ -118,11 +169,11 @@ struct KeyCap: View {
         Text(label)
             .font(.system(size: small ? 10 : 11, weight: .medium))
             .padding(.horizontal, small ? 4 : 5).frame(minWidth: small ? 17 : 20, minHeight: small ? 17 : 20)
-            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(
                 scheme == .dark ? LinearGradient(colors: [Color(white: 0.24), Color(white: 0.2)], startPoint: .top, endPoint: .bottom)
                                 : LinearGradient(colors: [.white, Color(white: 0.945)], startPoint: .top, endPoint: .bottom)))
-            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(.black.opacity(scheme == .dark ? 0.7 : 0.2), lineWidth: 0.5))
-            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(.black.opacity(scheme == .dark ? 0.5 : 0.09)).offset(y: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(.black.opacity(scheme == .dark ? 0.7 : 0.2), lineWidth: 0.5))
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(.black.opacity(scheme == .dark ? 0.5 : 0.09)).offset(y: 1.5))
     }
 }
 
@@ -150,9 +201,9 @@ struct BigKeyCap: View {
 
     var body: some View {
         let ink = Color.black.opacity(0.86)
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
+        RoundedRectangle(cornerRadius: Radius.row, style: .continuous)
             .fill(LinearGradient(colors: [.white, Color(white: 0.945)], startPoint: .top, endPoint: .bottom))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(.black.opacity(0.2), lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: Radius.row, style: .continuous).strokeBorder(.black.opacity(0.2), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.08), radius: 0, y: 2)
             .shadow(color: .black.opacity(0.06), radius: 5, y: 4)
             .overlay(alignment: word.isEmpty && !globe ? .center : .topTrailing) {
@@ -212,6 +263,10 @@ extension View {
     /// which is why moss is applied here rather than as an app-wide tint.
     func prominent() -> some View { buttonStyle(.borderedProminent).tint(GoblinBrand.moss) }
 
+    /// The closing actions of a window or sheet (Cancel, Save, Continue): 28 pt capsules. Buttons
+    /// inside plates and rows stay regular rounded rectangles.
+    func closingActions() -> some View { controlSize(.large).buttonBorderShape(.capsule) }
+
     /// The warm grey window background shared by Settings and History.
     func caseBackground() -> some View { background(GoblinBrand.caseBackground.ignoresSafeArea()) }
 }
@@ -243,10 +298,15 @@ struct PlateFormStyle: FormStyle {
         } else {
             if !section.header.isEmpty {
                 // The first header sits 6 pt under the toolbar; later ones leave 22 pt above.
-                section.header
-                    .font(.system(size: 10, weight: .semibold)).tracking(0.85).textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 14).padding(.top, first ? 6 : 22).padding(.bottom, 8)
+                // A group's explanation waits behind the ⓘ beside its label.
+                HStack(spacing: 4) {
+                    section.header
+                        .font(.capsLabel).tracking(0.85).textCase(.uppercase)
+                        .foregroundStyle(.secondary)
+                    if !section.footer.isEmpty, !section.containerValues.footerShown { InfoButton { section.footer } }
+                }
+                .frame(minHeight: 18)
+                .padding(.leading, 14).padding(.top, first ? 2 : 18).padding(.bottom, 4)
             } else {
                 Spacer().frame(height: first ? 6 : 14)
             }
@@ -259,12 +319,12 @@ struct PlateFormStyle: FormStyle {
                             .padding(.horizontal, 14)
                     }
                 }
-                .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
                 .shadow(color: .black.opacity(0.035), radius: 1, y: 1)
             }
-            if !section.footer.isEmpty {
-                section.footer.font(.system(size: 11.5)).foregroundStyle(.secondary)
+            if !section.footer.isEmpty, section.header.isEmpty || section.containerValues.footerShown {
+                section.footer.font(.meta).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14).padding(.top, 7)
             }
@@ -272,20 +332,30 @@ struct PlateFormStyle: FormStyle {
     }
 }
 
-/// A title, then an optional grey second line, stacked. Shared by rows and switches.
+/// A row's title. A line marked `rowDetail()` shows as a grey second line: a value, a state, or the
+/// one short sentence someone needs to decide. Unmarked lines are background and wait behind an ⓘ.
 private struct RowTitle: View {
     let label: AnyView
 
     var body: some View {
         Group(subviews: label) { lines in
+            let rest = Array(lines.dropFirst())
+            let notes = rest.filter { !$0.containerValues.rowDetail }
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-                    if index == 0 { line } else { line.font(.system(size: 11.5)).foregroundStyle(.secondary) }
+                HStack(spacing: 4) {
+                    if let title = lines.first { title }
+                    if !notes.isEmpty { InfoButton { ForEach(notes) { $0 } } }
                 }
+                ForEach(rest.filter { $0.containerValues.rowDetail }) { $0.font(.meta).foregroundStyle(.secondary) }
             }
             .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+extension View {
+    /// Marks a row label's second line to show under the title instead of behind the ⓘ.
+    func rowDetail() -> some View { containerValue(\.rowDetail, true) }
 }
 
 struct PlateLabeledContentStyle: LabeledContentStyle {
@@ -343,6 +413,10 @@ extension ContainerValues {
     @Entry var plateless: Bool = false
     /// Status rows are shorter than control rows in a plate.
     @Entry var statusRow: Bool = false
+    /// A section whose footer is an instruction to show under the plate, not an explanation for the ⓘ.
+    @Entry var footerShown: Bool = false
+    /// A row label's second line that stays visible (see `RowTitle`).
+    @Entry var rowDetail: Bool = false
 }
 
 /// A sidebar row: a neutral grey fill when selected, with the glyph in moss. A List's selection is
@@ -351,6 +425,8 @@ struct SidebarRow<Icon: View, Trailing: View>: View {
     let title: String
     let selected: Bool
     let action: () -> Void
+    /// Moss tint instead of grey, for a list inside a plate.
+    var tinted = false
     @ViewBuilder var icon: Icon
     @ViewBuilder var trailing: Trailing
 
@@ -362,9 +438,9 @@ struct SidebarRow<Icon: View, Trailing: View>: View {
                 Spacer(minLength: 4)
                 trailing.foregroundStyle(.secondary).monospacedDigit()
             }
-            .font(.system(size: 13))
+            .font(.row)
             .padding(.horizontal, 9).frame(height: 28)
-            .background(selected ? AnyShapeStyle(Color.primary.opacity(0.08)) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(selected ? (tinted ? AnyShapeStyle(GoblinBrand.selection) : AnyShapeStyle(Color.primary.opacity(0.08))) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -374,7 +450,7 @@ struct SidebarRow<Icon: View, Trailing: View>: View {
 
 extension SidebarRow where Trailing == EmptyView {
     init(title: String, selected: Bool, action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
-        self.init(title: title, selected: selected, action: action, icon: icon) { EmptyView() }
+        self.init(title: title, selected: selected, action: action, icon: icon, trailing: { EmptyView() })
     }
 }
 
@@ -388,8 +464,8 @@ struct ToolbarTitle: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(title).font(.system(size: 15, weight: .semibold))
-                if let subtitle { Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit() }
+                Text(title).font(.cardTitle)
+                if let subtitle { Text(subtitle).font(.meta).foregroundStyle(.secondary).monospacedDigit() }
             }
             // The navigation slot already starts 6 pt past the sidebar.
             .padding(.leading, leading - 6)

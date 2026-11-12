@@ -5,7 +5,7 @@ struct InsertionSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Text insertion").font(.largeTitle.bold())
+            Text("Text insertion").font(.hero)
             Toggle("Add a trailing space", isOn: $service.trailingSpace)
             Toggle("Watch edits after paste", isOn: $service.watchEdits)
             Text("For 30 seconds after a verified paste, gob.lin checks whether you kept, edited, or replaced the text and shows it in History. Heavily rewritten text is counted but never saved. Secure fields and password managers are never watched.")
@@ -22,7 +22,7 @@ struct InsertionSettingsView: View {
             Text("Your clipboard is restored automatically only after the same focused app exposes the expected inserted text. Clipboard-manager reads alone cannot trigger restoration.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Terminals, Electron editors, browser address bars and remote desktop sessions use paste. Remote apps may need manual clipboard recovery.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(28)
         .frame(minWidth: 540, maxWidth: 800, minHeight: 360, maxHeight: 650, alignment: .topLeading)

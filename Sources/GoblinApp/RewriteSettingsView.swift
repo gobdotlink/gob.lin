@@ -30,7 +30,7 @@ struct RewriteSettingsView: View {
         Section {
             Toggle(isOn: Binding(get: { settings.enabled }, set: { setEnabled($0) })) {
                 Text("AI cleanup")
-                Text("Off unless you turn it on. Only text is sent, never the audio.")
+                Text("Sends text only, never audio.").rowDetail()
             }
             StatusRow(isOn ? .ready : .off,
                       Text(isOn ? (settings.provider.runsOnDevice
@@ -46,7 +46,7 @@ struct RewriteSettingsView: View {
                 Button("Edit…") { editingProvider = true }
             } label: {
                 Text(settings.provider.title)
-                Text(providerSummary)
+                Text(providerSummary).rowDetail()
             }
             if let setupProblem {
                 StatusRow(.waiting, Text(setupProblem)) { Button("Set Up…") { editingProvider = true } }
@@ -62,14 +62,16 @@ struct RewriteSettingsView: View {
                 .labelsHidden().fixedSize()
             } label: {
                 Text("Level")
-                Text(settings.cleanup.detail)
+                Text(settings.cleanup.detail).rowDetail()
             }
             if !settings.provider.runsOnDevice {
                 Toggle(isOn: Binding(get: { settings.usesScreenContext }, set: { on in
                     var next = settings; next.usesScreenContext = on; persist(next)
                 })) {
                     Text("Send text near the cursor")
-                    Text("Also sends the app, window title, the text around the cursor and nearby text such as the messages above it to \(settings.provider.title) with each take, to spell names and fit what's already there. Text in password fields and password managers is never sent.")
+                    Text("Sends the app, window title and nearby text to \(settings.provider.title) with each take.").rowDetail()
+                    Text("Nearby text is what's around the cursor, such as the messages above it. It helps spell names and fit what's already there.")
+                    Text("Text in password fields and password managers is never sent.")
                 }
             }
         } header: { Text("Style") }
@@ -83,20 +85,20 @@ struct RewriteSettingsView: View {
                             Text("\(Self.sample.split(whereSeparator: \.isWhitespace).count) → \(testOutput.split(whereSeparator: \.isWhitespace).count) words").monospacedDigit()
                         }
                     }
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.meta).foregroundStyle(.secondary)
                     Group {
                         if let testOutput { InlineDiff(from: Self.sample, to: testOutput) }
                         else { Text(Self.sample).foregroundStyle(.secondary) }
                     }
-                    .font(.system(size: 13.5))
+                    .font(.row)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.row, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
                 HStack(spacing: 10) {
                     Text(testMeta ?? (isOn ? (settings.provider.runsOnDevice ? "Runs this one sentence on this Mac." : "Sends this one sentence, nothing else.") : "Turn on AI cleanup to try it."))
-                        .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                        .font(.status).foregroundStyle(.secondary).monospacedDigit()
                     Spacer()
                     Button(testing ? "Testing…" : testOutput == nil ? "Run Test" : "Run Again") { testCleanup() }
                         .prominent()
@@ -105,8 +107,9 @@ struct RewriteSettingsView: View {
             }
             .padding(.vertical, 4)
             if let testFailure { StatusRow(.problem, Text(testFailure)) }
-            StatusRow(.waiting, Text("Slower than 4 s? I type what you said instead, and tell you in the bubble."))
-        } header: { Text("Try it") }
+        } header: { Text("Try it") } footer: {
+            Text("Slower than 4 s? I type what you said instead, and say so in the bubble.")
+        }
         .onAppear { refreshKeyStatus() }
         .onDisappear { testTask?.cancel(); testTask = nil; testing = false }
         .sheet(isPresented: $editingProvider, onDismiss: { turnOnAfterEdit = false }) {
