@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build --product GoblinApp
-binary_directory=$(swift build --show-bin-path)
+swift build --build-system native --product GoblinApp
+binary_directory=$(swift build --build-system native --show-bin-path)
 preview='.build/settings-capture/gob.lin Settings Capture.app'
 mkdir -p "$preview/Contents/MacOS" "$preview/Contents/Resources"
 objects="$binary_directory/settings-capture-objects.txt"

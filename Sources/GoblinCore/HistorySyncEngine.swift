@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// What History sync is doing, for each app to word in its own voice.
 public enum HistorySyncStatus: Sendable, Equatable {
@@ -37,9 +38,12 @@ public actor HistorySyncEngine {
     static let maximumBody = 900_000
     /// The smaller of the per-request limits Apple documents.
     static let maximumItems = 250
+    /// Counts and states only: never dictation text, device names or account identifiers.
+    static let log = Logger(subsystem: GoblinMetadata.bundleIdentifier + ".history-sync", category: "engine")
 
     /// Status changes and remote History changes. An `AsyncStream` has one consumer: an app that needs several fans
-    /// it out.
+    /// it out. It ends after `stop()`, or by itself when sync turns itself off (`purged`, `differentAccount`), after
+    /// the History changes that makes, so keep listening until it ends.
     public nonisolated let updates: AsyncStream<HistorySyncUpdate>
     private let continuation: AsyncStream<HistorySyncUpdate>.Continuation
     private let store: HistoryStore
@@ -122,6 +126,7 @@ public actor HistorySyncEngine {
         let transport = connect(serialization)
         self.transport = transport
         identified = false
+        Self.log.info("Connected, \(self.fullFetch ? "fetching everything" : "resuming", privacy: .public)")
         if fullFetch { await transport.queueZone() }
         _ = try await identify()
         // A different person is signed in, and sync has turned itself off.
@@ -145,9 +150,21 @@ public actor HistorySyncEngine {
         await transport?.fetch()
     }
 
-    /// Stops syncing. The saved state stays, so starting again resumes.
+    /// Fetches everything in iCloud again, from no saved state. Call when this device's Keep was raised: what the
+    /// earlier Keep left out comes back.
+    public func fetchAll() async {
+        guard transport != nil else { return }
+        saved.refetch = true
+        try? await persist()
+        try? await reconnect(from: nil)
+        publish()
+    }
+
+    /// Stops syncing. The saved state stays, so starting again resumes. Safe at any time: once sync has turned itself
+    /// off, `updates` ends only after the cleanup that follows has been reported.
     public func stop() async {
         await shutDown()
+        if saved.purged || saved.differentAccount { return }
         continuation.finish()
     }
 
@@ -172,6 +189,7 @@ public actor HistorySyncEngine {
         let status = status
         guard status != lastStatus else { return }
         lastStatus = status
+        Self.log.info("Status: \(String(describing: status), privacy: .public)")
         continuation.yield(.status(status))
     }
 
@@ -204,6 +222,7 @@ public actor HistorySyncEngine {
             }
         } catch {
             // ponytail: a store error leaves the change pending in History, and the next fetch or send tries again.
+            Self.log.error("History couldn't take a sync event: \(error.localizedDescription)")
         }
         publish()
     }
@@ -222,6 +241,7 @@ public actor HistorySyncEngine {
         }
         let result = try await store.applyRemote(saves: saves, deletions: deletions.compactMap(UUID.init(uuidString:)),
                                                  settings: settings, retention: await retention())
+        Self.log.info("Fetched \(saves.count) dictations and \(deletions.count) deletions: \(result.saved) saved, \(result.deleted) deleted, \(result.skippedNewer) newer, \(result.unreadable) unreadable")
         if result.saved + result.deleted > 0 { continuation.yield(.historyChanged) }
         // A page can drop records from before a Delete All, whose deletions go out.
         await queuePending()
@@ -232,13 +252,15 @@ public actor HistorySyncEngine {
     private func fetchFinished(_ succeeded: Bool) async throws {
         let complete = succeeded && !fetchFailed
         fetchFailed = false
-        guard complete else { return }
+        guard complete else { Self.log.error("Fetch didn't finish; sending nothing"); return }
         // Against someone else's iCloud, reconciling would remove this device's dictations, the purge would delete
         // theirs, and sending would hand them this device's. So all of it waits until iCloud says who's signed in.
-        guard try await identify() else { return }
+        guard try await identify() else { Self.log.info("Fetched, waiting for iCloud to say who's signed in"); return }
         if saved.refetch && !fullFetch { try await reconnect(from: nil); return }
         if fullFetch {
-            if try await store.deleteMissing(fetched: fetched) > 0 { continuation.yield(.historyChanged) }
+            let missing = try await store.deleteMissing(fetched: fetched)
+            Self.log.info("Full fetch done; \(missing) deleted elsewhere")
+            if missing > 0 { continuation.yield(.historyChanged) }
             fullFetch = false
             saved.refetch = false
             try await persist()
@@ -258,6 +280,7 @@ public actor HistorySyncEngine {
     private func purgeIfNeeded() async throws {
         guard let transport, let through = try await store.pendingChanges().purgeThrough else { return }
         let stale = try await transport.listDictations().filter { $0.value <= through }.keys
+        Self.log.info("Delete All: \(stale.count) dictations left in iCloud")
         if stale.isEmpty {
             try await store.markPurged(through: through)
         } else {
@@ -266,6 +289,8 @@ public actor HistorySyncEngine {
     }
 
     private func sent(_ sent: [HistorySyncSent], deleted: [String], failed: [HistorySyncFailure]) async throws {
+        Self.log.info("Sent \(sent.count) saves and \(deleted.count) deletions; \(failed.count) failed")
+        for failure in failed { Self.log.error("Save failed: \(failure.kind, privacy: .public)") }
         for record in sent {
             let revision = revisions.removeValue(forKey: record.name) ?? -1
             if record.name == HistorySync.settingsName {
@@ -312,7 +337,7 @@ public actor HistorySyncEngine {
             case .tooBig(let name):
                 if lastBatchCount > 1 {
                     // Once for the request, however many of its records it names.
-                    if !halved { byteBudget = max(byteBudget / 2, 1); halved = true }
+                    if !halved { byteBudget = max(byteBudget / 2, 1); halved = true; Self.log.info("Request too big; now \(self.byteBudget) bytes") }
                     resolved = true
                 } else if let id = UUID(uuidString: name) {
                     try await store.markLocalOnly(id: id)
@@ -327,10 +352,12 @@ public actor HistorySyncEngine {
     private func accountChanged(_ change: HistorySyncAccount) async throws {
         switch change {
         case .signedOut:
+            Self.log.info("iCloud signed out")
             account = false
             identified = false
             if try await store.removeOtherDevices() > 0 { continuation.yield(.historyChanged) }
         case .signedIn(let user) where saved.account == nil || saved.account == user:
+            Self.log.info("iCloud signed in, the same account")
             saved.account = user
             try await persist()
             // The engine dropped its pending changes when the account changed. Unless this transport is already on its
@@ -341,8 +368,10 @@ public actor HistorySyncEngine {
             identified = true
         case .signedIn(let user), .switched(let user):
             // Stop first, so nothing more goes to the new account even if the cleanup below fails.
+            Self.log.info("A different iCloud account; turning sync off")
             saved = Saved(account: user, differentAccount: true)
             await shutDown()
+            defer { continuation.finish() }
             try await store.setSyncEnabled(false)
             try await store.forgetServerState(keepingOthers: false)
             continuation.yield(.historyChanged)
@@ -381,11 +410,13 @@ public actor HistorySyncEngine {
     }
 
     private func zoneDeleted(_ deletion: HistorySyncZoneDeletion) async throws {
+        Self.log.info("iCloud's History zone was deleted: \(String(describing: deletion), privacy: .public)")
         switch Self.outcome(of: deletion) {
         case .keepAndTurnOff:
             // Stop first, so nothing more goes up even if the cleanup below fails.
             saved = Saved(account: saved.account, purged: true)
             await shutDown()
+            defer { continuation.finish() }
             try await store.setSyncEnabled(false)
             try await store.forgetServerState(keepingOthers: true)
             try await persist()
@@ -489,6 +520,19 @@ enum HistorySyncFailure: Sendable, Equatable {
     case full(String)
     case tooBig(String)
     case other(String)
+
+    /// What went wrong, for a log line, without the record.
+    var kind: String {
+        switch self {
+        case .conflict: "conflict"
+        case .missingZone: "no zone"
+        case .gone: "record gone"
+        case .zoneDeletedByPerson: "zone deleted by the person"
+        case .full: "iCloud full"
+        case .tooBig: "too big"
+        case .other: "other"
+        }
+    }
 }
 
 /// What `CKSyncEngine` reports, as plain values.

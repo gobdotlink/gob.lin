@@ -53,6 +53,8 @@ struct HistoryView: View {
                 if let entry = deleteCandidate { Task { await history.delete(entry) } }
             }
             Button("Cancel", role: .cancel) { deleteCandidate = nil }
+        } message: {
+            if model.historySync.isOn { Text("It's deleted from iCloud and your other devices too.") }
         }
         .onDisappear { history.stopAudio() }
         .sheet(isPresented: $showingRetention) { HistoryRetentionView(model: history) }

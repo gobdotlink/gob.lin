@@ -48,6 +48,17 @@ iCloud, as development builds do: those builds work and hide iCloud sync. A rene
 certificate needs a new Developer ID profile for `app.goblin.dictation` from the developer
 portal, saved over that file. `GOBLIN_PROVISIONING_PROFILE` names a different file.
 
+History sync also needs CloudKit and push notifications. `scripts/build.sh` claims them only
+when the profile lists the `iCloud.app.goblin.dictation` container, allows the CloudKit
+environment, and has push notifications; otherwise it prints what's missing and signs
+without History sync, whose switch then stays hidden. So the App ID needs iCloud with
+CloudKit and that container, and Push Notifications, before the profile is downloaded again.
+The environment is Production unless `GOBLIN_ICLOUD_ENVIRONMENT=Development`; naming an
+environment the profile doesn't allow stops the build. The Developer ID profile allows
+Production only. Production holds only the record types deployed to it from Development in
+the CloudKit console, so a Development build has to create the schema, and it has to be
+deployed, before a Production build can sync at all.
+
 The dedicated local certificate from `scripts/setup-signing.sh` is for development.
 Its builds pin that certificate, are not notarized and cannot update a Developer ID
 installation, or be updated by one. Installations from before notarized releases

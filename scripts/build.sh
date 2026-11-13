@@ -75,6 +75,37 @@ if "$developer_id"; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team.app.goblin.dictation" \
                 -c "Add :com.apple.developer.team-identifier string $team" \
                 -c "Add :com.apple.developer.ubiquity-kvstore-identifier string $team.app.goblin.dictation" "$entitlements"
+            # History sync needs CloudKit and push, which a profile grants only once its App ID has gob.lin's container.
+            # The environment is Production unless GOBLIN_ICLOUD_ENVIRONMENT says Development, and the profile must allow it.
+            container=iCloud.app.goblin.dictation
+            environment="${GOBLIN_ICLOUD_ENVIRONMENT:-Production}"
+            case "$environment" in
+                Development|Production) ;;
+                *) printf 'GOBLIN_ICLOUD_ENVIRONMENT must be Development or Production, not %s.\n' "$environment" >&2; exit 1 ;;
+            esac
+            granted() { /usr/libexec/PlistBuddy -c "Print :Entitlements:$1" "$staging/profile.plist" 2>/dev/null || true; }
+            containers=$(granted com.apple.developer.icloud-container-identifiers)
+            environments=$(granted com.apple.developer.icloud-container-environment)
+            push=$(granted com.apple.developer.aps-environment)
+            # The first thing missing, if any.
+            missing=""
+            [ -n "$push" ] || missing="the profile has no push notifications"
+            case "$environments" in *"$environment"*) ;; *) missing="the profile does not allow the $environment environment" ;; esac
+            case "$containers" in *"$container"*) ;; *) missing="the profile does not list $container" ;; esac
+            if [ -z "$missing" ]; then
+                /usr/libexec/PlistBuddy -c "Add :com.apple.developer.icloud-container-identifiers array" \
+                    -c "Add :com.apple.developer.icloud-container-identifiers:0 string $container" \
+                    -c "Add :com.apple.developer.icloud-services array" \
+                    -c "Add :com.apple.developer.icloud-services:0 string CloudKit" \
+                    -c "Add :com.apple.developer.icloud-container-environment string $environment" \
+                    -c "Add :com.apple.developer.aps-environment string $push" "$entitlements"
+                printf 'History sync: on, in the %s environment.\n' "$environment"
+            elif [ -n "${GOBLIN_ICLOUD_ENVIRONMENT:-}" ]; then
+                printf 'Cannot sign for the %s environment: %s.\n' "$environment" "$missing" >&2
+                exit 1
+            else
+                printf 'Signing without History sync: %s.\n' "$missing" >&2
+            fi
         else
             printf 'Signing without iCloud: %s was not issued for this certificate.\n' "$profile" >&2
         fi

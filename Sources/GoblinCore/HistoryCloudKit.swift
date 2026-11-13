@@ -93,7 +93,9 @@ extension HistorySync {
         case .userDeletedZone: return .zoneDeletedByPerson
         case .quotaExceeded: return .full(name)
         case .limitExceeded: return .tooBig(name)
-        default: return .other(name)
+        default:
+            HistorySyncEngine.log.error("Save failed with CloudKit error \(error.code.rawValue, privacy: .public)")
+            return .other(name)
         }
     }
 }
@@ -130,7 +132,11 @@ struct HistoryCloudKit: HistorySyncTransport {
     // this call's return says whether the fetch succeeded, after the engine has delivered all of its events.
     func fetch() async {
         Task { [engine, delegate] in
-            let succeeded = (try? await engine.fetchChanges()) != nil
+            var succeeded = true
+            do { try await engine.fetchChanges() } catch {
+                succeeded = false
+                HistorySyncEngine.log.error("Fetch failed with CloudKit error \((error as? CKError)?.code.rawValue ?? -1, privacy: .public)")
+            }
             await delegate.fetchFinished(succeeded: succeeded, engine: engine)
         }
     }
@@ -140,7 +146,9 @@ struct HistoryCloudKit: HistorySyncTransport {
     func stop() async { Task { [engine] in await engine.cancelOperations() } }
 
     func account() async -> HistorySyncAccount? {
-        switch try? await container.accountStatus() {
+        let status = try? await container.accountStatus()
+        HistorySyncEngine.log.info("iCloud account status \(status?.rawValue ?? -1, privacy: .public)")
+        return switch status {
         case .available: (try? await container.userRecordID()).map { .signedIn($0.recordName) }
         case .noAccount: .signedOut
         default: nil
@@ -206,7 +214,10 @@ struct HistoryCloudKit: HistorySyncTransport {
                                             deletions: changes.deletions.filter { $0.recordType == HistorySync.dictationType }
                                                 .map(\.recordID.recordName)))
             case .didFetchRecordZoneChanges(let result):
-                if result.zoneID == HistorySync.zoneID, result.error != nil { await owner.handle(.fetchFailed) }
+                if result.zoneID == HistorySync.zoneID, let error = result.error {
+                    HistorySyncEngine.log.error("Zone fetch failed with CloudKit error \(error.code.rawValue, privacy: .public)")
+                    await owner.handle(.fetchFailed)
+                }
             case .sentRecordZoneChanges(let sent):
                 await owner.handle(.sent(sent.savedRecords.map {
                                              HistorySyncSent(name: $0.recordID.recordName, serverFields: HistorySync.systemFields($0),

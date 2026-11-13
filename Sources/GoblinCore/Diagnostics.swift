@@ -98,12 +98,15 @@ public struct DiagnosticEnvironment: Equatable, Sendable {
     public var defaultMicrophoneName: String?
     public var secureInput: Bool
     public var engineStatus: DiagnosticEngineStatus
+    /// Nil in a build that isn't signed for gob.lin's iCloud container.
+    public var historySync: HistorySyncStatus?
 
     public init(microphonePermission: DiagnosticPermissionStatus = .unknown,
                 accessibilityPermission: DiagnosticPermissionStatus = .unknown,
                 inputMonitoringPermission: DiagnosticPermissionStatus = .unknown,
                 microphoneNames: [String] = [], defaultMicrophoneName: String? = nil,
-                secureInput: Bool = false, engineStatus: DiagnosticEngineStatus = .awaitingSelection) {
+                secureInput: Bool = false, engineStatus: DiagnosticEngineStatus = .awaitingSelection,
+                historySync: HistorySyncStatus? = nil) {
         self.microphonePermission = microphonePermission
         self.accessibilityPermission = accessibilityPermission
         self.inputMonitoringPermission = inputMonitoringPermission
@@ -111,6 +114,7 @@ public struct DiagnosticEnvironment: Equatable, Sendable {
         self.defaultMicrophoneName = defaultMicrophoneName
         self.secureInput = secureInput
         self.engineStatus = engineStatus
+        self.historySync = historySync
     }
 }
 
@@ -154,6 +158,7 @@ public enum DiagnosticsReport {
                      "Input Monitoring permission (not required): \(environment.inputMonitoringPermission.rawValue)",
                      "Secure Input: \(environment.secureInput ? "enabled" : "disabled")",
                      "Speech engine: \(environment.engineStatus.rawValue)",
+                     "History sync: " + (environment.historySync.map { "\($0)" } ?? "unavailable in this build, which isn't signed for gob.lin's iCloud container"),
                      "Microphones available: \(environment.microphoneNames.count)"]
         if includeDeviceNames {
             lines += environment.microphoneNames.map { "Microphone: " + safeDeviceName($0) }

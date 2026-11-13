@@ -38,6 +38,8 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var playingEntryID: UUID?
     @Published private(set) var lastFailure: DiagnosticFailure?
     var onRecorded: ((HistoryEntry) -> Void)?
+    /// Told about every write here, so iCloud hears about it.
+    weak var sync: HistorySyncModel?
     private(set) var store: HistoryStore?
     private let directory: URL?
     private let defaults: UserDefaults
@@ -67,6 +69,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             onRecorded?(saved)
             do { _ = try await store.applyRetention(retention) }
             catch { lastFailure = .historyOperationFailed; errorMessage = "Dictation saved, but retention cleanup failed: \(error.localizedDescription)" }
+            sync?.historyChanged()
             revision += 1
             await reload()
             return true
@@ -107,6 +110,12 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if id == requestID { isLoading = false }
     }
 
+    /// iCloud added or removed dictations.
+    func remoteChanged() async {
+        revision += 1
+        await reload()
+    }
+
     func loadMore() async {
         guard !isLoading, hasMore, let store else { return }
         let id = requestID
@@ -135,6 +144,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                                                   maximumEditDistance: result.maximumEditDistance,
                                                   editedText: result.editedText)
         } catch { return }
+        sync?.historyChanged()
         if let index = entries.firstIndex(where: { $0.id == result.entryID }) {
             entries[index].editOutcome = result.outcome
             entries[index].editDistance = result.editDistance
@@ -147,6 +157,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     func setStarred(_ starred: Bool, entry: HistoryEntry) async {
         do {
             try await store?.setStarred(starred, id: entry.id)
+            sync?.historyChanged()
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 if filter == .starred, !starred { entries.remove(at: index) }
                 else { entries[index].starred = starred }
@@ -161,6 +172,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         if playingEntryID == entry.id { stopAudio() }
         do {
             try await store?.delete(id: entry.id)
+            sync?.historyChanged()
             requestID = UUID()
             isLoading = false
             entries.removeAll { $0.id == entry.id }
@@ -175,7 +187,9 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
             _ = try await store.applyRetention(policy)
             revision += 1
             defaults.set(try JSONEncoder().encode(policy), forKey: "history.retention")
+            let raised = policy.keepsMore(than: retention)
             retention = policy
+            if raised { sync?.keepRaised() } else { sync?.historyChanged() }
             await reload()
         } catch { lastFailure = .historyOperationFailed; errorMessage = error.localizedDescription }
     }

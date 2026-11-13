@@ -106,6 +106,20 @@ struct SettingsCapture {
                                         size: NSSize(width: 460, height: 740), dark: dark)
                     }
                 }
+                if wanted("icloud") {
+                    // General's iCloud group with both switches, once for each History sync status.
+                    model.settingsSelection = .general
+                    model.dictionary.canSync = true
+                    let statuses: [(String, HistorySyncStatus)] = [("syncing", .syncing), ("waiting", .waitingForAccount), ("full", .iCloudFull),
+                                                                   ("update", .needsUpdate), ("purged", .purged), ("account", .differentAccount), ("off", .off)]
+                    for (name, status) in statuses {
+                        model.historySync.preview(status)
+                        for dark in [false, true] {
+                            try await shoot("settings-icloud-\(name)\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
+                                            size: NSSize(width: 1040, height: 1080), dark: dark)
+                        }
+                    }
+                }
                 if wanted("history") {
                     model.settingsSelection = .history
                     try await shoot("history", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1100, height: 720))

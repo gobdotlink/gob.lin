@@ -97,6 +97,13 @@ public struct HistoryRetention: Codable, Sendable, Equatable {
         self.maximumUnstarredCount = maximumUnstarredCount
         self.maximumAgeDays = maximumAgeDays
     }
+
+    /// Whether this keeps something `other` trims: a limit raised or lifted. A synced History then fetches everything
+    /// again, see `HistorySyncEngine.fetchAll()`.
+    public func keepsMore(than other: HistoryRetention) -> Bool {
+        func looser(_ new: Int?, _ old: Int?) -> Bool { old.map { old in new.map { $0 > old } ?? true } ?? false }
+        return looser(maximumUnstarredCount, other.maximumUnstarredCount) || looser(maximumAgeDays, other.maximumAgeDays)
+    }
 }
 
 public enum HistoryError: Error, LocalizedError, Sendable {

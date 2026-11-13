@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     let diagnostics: DiagnosticsModel
     let dictionary: DictionaryModel
     let history: HistoryModel
+    let historySync: HistorySyncModel
     let permissions: PermissionModel
     let hotkeys: HotkeyService
     let insertion: TextInsertionService
@@ -67,6 +68,8 @@ final class AppModel: ObservableObject {
         speechModels = SpeechModelService(defaults: defaults)
         diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
+        historySync = HistorySyncModel(history: history, enabled: servicesEnabled)
+        history.sync = historySync
         dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault,
                                      defaults: defaults)
         permissions = PermissionModel(snapshot: servicesEnabled ? nil : .init(microphone: .notDetermined, accessibility: false, inputMonitoring: false), monitorSystem: servicesEnabled, diagnostics: diagnostics)
@@ -216,6 +219,11 @@ final class AppModel: ObservableObject {
             await self.history.reload()
             if self.lastTranscript == nil { self.lastTranscript = self.history.entries.first?.finalText }
         }
+        historySync.onStatus = { [diagnostics] in diagnostics.setHistorySync($0) }
+        Task { [historySync] in await historySync.start() }
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { [weak self] _ in
+            Task { @MainActor in self?.historySync.syncNow() }
+        }.store(in: &subscriptions)
     }
 
     var canPasteLastTranscript: Bool { lastTranscript.map { !$0.isEmpty } ?? false }
@@ -869,6 +877,7 @@ final class AppModel: ObservableObject {
         editWatcher.cancel()
         insertion.shutdown()
         history.stopAudio()
+        await historySync.stop()
         audioPreview.stop(reason: .shutdown)
         overlay.shutdown()
         subscriptions.removeAll()

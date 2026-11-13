@@ -19,21 +19,28 @@ public enum HistorySync {
     static let starredKeys = ["starred"]
     static let editKeys = ["editOutcome", "editDistance", "maximumEditDistance", "editedText"]
 
-    /// The record body for an entry stored as `metadata`, naming `device` when the entry predates devices.
-    static func body(metadata: String, device: String) throws -> Data {
+    /// The record body for an entry stored as `metadata`, naming `device` when the entry predates devices. The
+    /// device's kind and name go with it, when known, so other devices can name it in Insights.
+    static func body(metadata: String, device: String, named: (kind: String, name: String)? = nil) throws -> Data {
         var object = try self.object(metadata)
         object["audioFilename"] = nil
         object["device"] = object["device"] ?? device
+        object["deviceKind"] = named?.kind
+        object["deviceName"] = named?.name
         return Data(try string(object).utf8)
     }
 
-    /// An incoming body as History stores it, and the entry it holds.
-    static func metadata(body: Data) throws -> (metadata: String, entry: HistoryEntry) {
+    /// An incoming body as History stores it, the entry it holds, and its device's kind and name if the body has
+    /// them. Those live in History's devices, not in the entry.
+    static func metadata(body: Data) throws -> (metadata: String, entry: HistoryEntry, named: (kind: String, name: String)?) {
         var object = try self.object(String(decoding: body, as: UTF8.self))
         object["audioFilename"] = nil
         object["device"] = object["device"] ?? unknownDevice
+        let named = (object["deviceKind"] as? String).flatMap { kind in (object["deviceName"] as? String).map { (kind: kind, name: $0) } }
+        object["deviceKind"] = nil
+        object["deviceName"] = nil
         let metadata = try string(object)
-        return (metadata, try JSONDecoder().decode(HistoryEntry.self, from: Data(metadata.utf8)))
+        return (metadata, try JSONDecoder().decode(HistoryEntry.self, from: Data(metadata.utf8)), named)
     }
 
     /// `target` with `keys` copied from `source`; a key `source` lacks is removed. Every other key, including any a
