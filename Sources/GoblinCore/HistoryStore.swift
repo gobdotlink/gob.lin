@@ -314,8 +314,8 @@ public actor HistoryStore {
         try database.setMeta(MetaKey.enabled, enabled ? "1" : nil)
     }
 
-    /// Call once the first complete fetch has been applied. Until then, a Delete All already in iCloud is recorded
-    /// but not applied to this device's own dictations, which weren't part of what was cleared.
+    /// Call once the first complete fetch has been applied. Until then, a Delete All already in iCloud isn't applied to
+    /// this device's own unsent dictations, which weren't part of what was cleared.
     public func markJoined() throws {
         try database.setMeta(MetaKey.joined, "1")
     }
@@ -340,8 +340,10 @@ public actor HistoryStore {
         return changes
     }
 
-    /// The record to send for a dictation, or nil when it's gone.
+    /// The record to send for a dictation, or nil when it's gone. It notes that the upload has started, so a change
+    /// made before iCloud answers is sent afterwards even if sync is turned off meanwhile.
     public func outgoingRecord(id: UUID) throws -> HistoryOutgoingRecord? {
+        try database.run("INSERT OR IGNORE INTO sync (id) SELECT id FROM entries WHERE id = ?", [.text(id.uuidString)])
         guard let row = try database.query("SELECT entries.metadata, sync.server, COALESCE(sync.revision, 0) FROM entries LEFT JOIN sync ON sync.id = entries.id WHERE entries.id = ?",
                                            [.text(id.uuidString)]).first, let metadata = row[0] else { return nil }
         return HistoryOutgoingRecord(body: try HistorySync.body(metadata: metadata, device: deviceID),
@@ -488,17 +490,17 @@ public actor HistoryStore {
         if merged == incoming { try database.setMeta(MetaKey.settingsPending, nil) }
         guard merged != local, let through = merged.clearedThrough else { return }
         try database.setMeta(MetaKey.clearedThrough, String(through.timeIntervalSince1970))
-        if try database.meta(MetaKey.joined) != nil { result.deleted += try clear(through: through) }
+        result.deleted += try clear(through: through, ownUnsent: database.meta(MetaKey.joined) != nil)
     }
 
-    /// Another device's Delete All: dictations iCloud saved at or before `through`, and this device's own unsent ones
-    /// started before it, starred or not. The device that deleted them purges iCloud, so nothing is sent.
-    private func clear(through: Date) throws -> Int {
+    /// Another device's Delete All: dictations iCloud saved at or before `through`, and, with `ownUnsent`, this device's
+    /// own unsent ones started before it, starred or not. The device that deleted them purges iCloud, so nothing is sent.
+    private func clear(through: Date, ownUnsent: Bool) throws -> Int {
         let time = SQLValue.number(through.timeIntervalSince1970)
         let rows = try database.query("""
             SELECT entries.id FROM entries LEFT JOIN sync ON sync.id = entries.id
-            WHERE sync.created <= ? OR (sync.server IS NULL AND entries.created_at <= ? AND \(Self.entryDevice) = ?)
-            """, [time, time, .text(deviceID), .text(deviceID)])
+            WHERE sync.created <= ? OR (? AND sync.server IS NULL AND entries.created_at <= ? AND \(Self.entryDevice) = ?)
+            """, [time, .number(ownUnsent ? 1 : 0), time, .text(deviceID), .text(deviceID)])
         for row in rows {
             guard let id = row[0].flatMap(UUID.init(uuidString:)) else { continue }
             _ = try removeEntry(id)
@@ -541,11 +543,11 @@ public actor HistoryStore {
         result.saved += 1
     }
 
-    /// Notes a change iCloud must hear about: always for a dictation it has, and while syncing for this device's own,
-    /// whose first upload may be on its way. With sync never turned on, nothing is written.
+    /// Notes a change iCloud must hear about: always for a dictation it has or whose upload has started, and while
+    /// syncing for this device's own, which is about to be sent. With sync never turned on, nothing is written.
     private func recordChange(_ id: String, _ bit: Int) throws {
-        let inCloud = try !database.query("SELECT 1 FROM sync WHERE id = ? AND server IS NOT NULL", [.text(id)]).isEmpty
-        guard try inCloud || (syncEnabled() && isOwn(id)) else { return }
+        let tracked = try !database.query("SELECT 1 FROM sync WHERE id = ?", [.text(id)]).isEmpty
+        guard try tracked || (syncEnabled() && isOwn(id)) else { return }
         try database.run("INSERT INTO sync (id, pending, revision) VALUES (?, ?, 1) ON CONFLICT(id) DO UPDATE SET pending = sync.pending | excluded.pending, revision = sync.revision + 1",
                          [.text(id), .number(Double(bit))])
     }

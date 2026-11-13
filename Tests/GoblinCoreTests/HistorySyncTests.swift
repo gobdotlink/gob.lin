@@ -158,6 +158,14 @@ final class HistorySyncTests {
         #expect(try await mac.pendingChanges().saves == [starred])
         #expect(try await mac.pendingChanges().deletions == [deleted])
         #expect(try await mac.outgoingRecord(id: starred)!.serverFields == Data("a".utf8))
+
+        // The same when sync is turned off before iCloud answers.
+        let late = try await add(mac)
+        let third = try await mac.outgoingRecord(id: late)!
+        try await mac.setSyncEnabled(false)
+        try await mac.setStarred(true, id: late)
+        try await mac.markSent(id: late, serverFields: Data("c".utf8), serverCreated: start, revision: third.revision)
+        #expect(Set(try await mac.pendingChanges().saves) == [starred, late])
     }
 
     @Test func aFullFetchAfterLostStateDeletesWhatWasDeletedElsewhereButNotWhatWasTrimmed() async throws {
@@ -248,7 +256,8 @@ final class HistorySyncTests {
         try await cloud.send(mac)
 
         // A record iCloud saved before the Delete All that the purge missed is dropped and deleted again.
-        let missed = HistoryRemoteRecord(id: stale, body: try HistorySync.body(metadata: #"{"id":"\#(stale.uuidString)"}"#, device: "x"),
+        let missedEntry = String(decoding: try JSONEncoder().encode(HistoryEntry(id: stale, rawText: "stale", finalText: "stale")), as: UTF8.self)
+        let missed = HistoryRemoteRecord(id: stale, body: try HistorySync.body(metadata: missedEntry, device: "phone"),
                                          formatVersion: 1, serverFields: Data(), serverCreated: start)
         try await mac.applyRemote(saves: [missed])
         #expect(try await ids(mac).isEmpty)
@@ -259,6 +268,8 @@ final class HistorySyncTests {
         cloud.now = start.addingTimeInterval(3600)
         let iPad = try await makeStore()
         let older = try await add(iPad, at: daysAgo(3))
+        // Its first fetch delivers that record on an earlier page than the Delete All; it goes all the same.
+        try await iPad.applyRemote(saves: [missed])
         try await cloud.fetch(iPad)
         try await iPad.markJoined()
         try await cloud.send(iPad)
