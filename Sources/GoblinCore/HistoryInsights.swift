@@ -33,6 +33,21 @@ public struct InsightApplication: Sendable, Identifiable {
     public var name: String
     public var bundleIdentifier: String?
     public var words: Int
+    /// Set when the row is a device rather than an app: an iPhone keyboard can't tell which app it types into,
+    /// so an iPhone's dictations count under the iPhone.
+    public var deviceKind: String?
+}
+
+/// The words, dictations and recorded audio from one kind and name of device. A reinstalled iPhone,
+/// with a new device ID, lands in the same row.
+public struct InsightDevice: Sendable, Identifiable {
+    public var id: String
+    /// `HistoryDevice.mac` or `.iPhone`; nil for a device History has no record of.
+    public var kind: String?
+    public var name: String
+    public var words = 0
+    public var dictations = 0
+    public var audioSeconds: Double = 0
 }
 
 public struct HistoryInsights: Sendable {
@@ -55,6 +70,8 @@ public struct HistoryInsights: Sendable {
     /// When the oldest entry with words started, so the week stepper knows where History ends.
     public var firstEntryDate: Date?
     public var applications: [InsightApplication] = []
+    /// Busiest first, like `applications`.
+    public var devices: [InsightDevice] = []
     /// The twelve calendar months ending with this one, oldest first.
     public var months: [InsightWords] = []
     /// Words by weekday and hour: seven rows of 24, the calendar's first weekday first.
@@ -91,6 +108,7 @@ struct HistoryInsightsAccumulator {
     private var weekHours: [Date: [Int]] = [:]
     private var monthWords: [Date: Int] = [:]
     private var applications: [String: InsightApplication] = [:]
+    private var devices: [String: InsightDevice] = [:]
 
     init(now: Date, week: Date, calendar: Calendar) {
         self.calendar = calendar
@@ -100,7 +118,9 @@ struct HistoryInsightsAccumulator {
         result = HistoryInsights(calendar: calendar)
     }
 
-    mutating func add(date: Date, words: Int, duration: Double?, bundle: String?, name: String?) {
+    /// A nil device kind and name is a device History has no record of.
+    mutating func add(date: Date, words: Int, duration: Double?, bundle: String?, name: String?,
+                      deviceKind: String? = nil, deviceName: String? = nil) {
         result.entryCount += 1
         guard words > 0 else { return }
         result.totalWords += words
@@ -116,25 +136,36 @@ struct HistoryInsightsAccumulator {
         if date >= shownWeek.start, date < shownWeek.end {
             weekHours[day, default: Array(repeating: 0, count: 24)][calendar.component(.hour, from: date)] += words
         }
-        if let duration, duration.isFinite, duration > 0 {
+        let seconds = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        if let seconds {
             result.timedEntryCount += 1
             result.timedWords += words
-            result.audioSeconds += duration
+            result.audioSeconds += seconds
             if thisWeek {
                 result.weekTimedWords += words
-                result.weekAudioSeconds += duration
+                result.weekAudioSeconds += seconds
             }
         }
         let bundle = bundle?.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         let label = name.flatMap { $0.isEmpty ? nil : $0 }
         let identifier = bundle.flatMap { $0.isEmpty ? nil : $0 }
-        let key = identifier.map { "bundle:" + $0 } ?? label.map { "name:" + $0 } ?? "unknown"
+        let known = deviceKind.flatMap { kind in deviceName.map { (kind: kind, name: $0) } }
+        let deviceKey = known.map { "\($0.kind):\($0.name)" } ?? "unknown"
+        var device = devices[deviceKey] ?? InsightDevice(id: deviceKey, kind: known?.kind, name: known?.name ?? "Another device")
+        device.words += words
+        device.dictations += 1
+        device.audioSeconds += seconds ?? 0
+        devices[deviceKey] = device
+        // An iPhone entry names no app, so its iPhone stands in for one.
+        let phone = known?.kind == HistoryDevice.iPhone ? known?.name : nil
+        let key = identifier.map { "bundle:" + $0 } ?? label.map { "name:" + $0 } ?? (phone == nil ? "unknown" : "device:" + deviceKey)
         if var app = applications[key] {
             app.words += words
             applications[key] = app
         } else {
-            applications[key] = InsightApplication(id: key, name: label ?? identifier ?? "Unknown app", bundleIdentifier: identifier, words: words)
+            applications[key] = InsightApplication(id: key, name: label ?? identifier ?? phone ?? "Unknown app", bundleIdentifier: identifier,
+                                                   words: words, deviceKind: key.hasPrefix("device:") ? HistoryDevice.iPhone : nil)
         }
     }
 
@@ -171,6 +202,11 @@ struct HistoryInsightsAccumulator {
             result.currentStreak = run
         }
         result.applications = applications.values.sorted {
+            if $0.words != $1.words { return $0.words > $1.words }
+            if $0.name != $1.name { return $0.name < $1.name }
+            return $0.id < $1.id
+        }
+        result.devices = devices.values.sorted {
             if $0.words != $1.words { return $0.words > $1.words }
             if $0.name != $1.name { return $0.name < $1.name }
             return $0.id < $1.id

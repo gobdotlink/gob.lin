@@ -209,6 +209,52 @@ struct HistoryInsightsTests {
         #expect(emptyCloud.entryCount == 0 && emptyCloud.words.isEmpty)
     }
 
+    @Test func devicesAndTheIPhoneRowShareThePeriodsWords() async throws {
+        let directory = try directory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try HistoryStore(directory: directory)
+        let now = date("2026-10-14T12:00:00Z")
+        let phone = UUID().uuidString, reinstalledPhone = UUID().uuidString, studio = UUID().uuidString
+        try await store.saveDevice(id: phone, kind: HistoryDevice.iPhone, name: "iPhone")
+        try await store.saveDevice(id: reinstalledPhone, kind: HistoryDevice.iPhone, name: "iPhone")
+        try await store.saveDevice(id: studio, kind: HistoryDevice.mac, name: "Synthetic studio Mac")
+        func entry(_ words: Int, app: String? = nil, seconds: Double = 0, device: String? = nil) -> HistoryEntry {
+            var value = HistoryEntry(rawText: "", finalText: Array(repeating: "chart", count: words).joined(separator: " "),
+                                     targetApplicationName: app, createdAt: now, audioDuration: seconds)
+            value.device = device
+            return value
+        }
+        let here = try await store.insert(entry(5, app: "Mail", seconds: 2))
+        #expect(here.device == store.deviceID)
+        for value in [entry(1), entry(3, seconds: 4, device: phone), entry(2, device: reinstalledPhone), entry(4, app: "Notes", device: phone),
+                      entry(6, app: "Xcode", seconds: 3, device: studio), entry(1, device: studio), entry(2, device: UUID().uuidString)] {
+            _ = try await store.insert(value)
+        }
+        let data = try await store.insights(now: now, week: now, calendar: calendar())
+        let devices = Dictionary(uniqueKeysWithValues: data.devices.map { ($0.name, $0) })
+        let thisMac = devices[HistoryDevice.current().name]
+        #expect(data.devices.count == 4 && data.devices.reduce(0) { $0 + $1.words } == data.totalWords)
+        #expect(thisMac?.kind == HistoryDevice.mac && thisMac?.words == 6 && thisMac?.dictations == 2 && thisMac?.audioSeconds == 2)
+        // A reinstalled iPhone has a new ID but the same kind and name, so it shares the row.
+        #expect(devices["iPhone"]?.kind == HistoryDevice.iPhone && devices["iPhone"]?.words == 9)
+        #expect(devices["iPhone"]?.dictations == 3 && devices["iPhone"]?.audioSeconds == 4)
+        #expect(devices["Synthetic studio Mac"]?.words == 7 && devices["Synthetic studio Mac"]?.audioSeconds == 3)
+        #expect(devices["Another device"]?.kind == nil && devices["Another device"]?.words == 2)
+        // The iPhone's dictations without an app count under the iPhone; any other device's stay under Unknown app.
+        let apps = Dictionary(uniqueKeysWithValues: data.applications.map { ($0.name, $0) })
+        #expect(apps["iPhone"]?.words == 5 && apps["iPhone"]?.deviceKind == HistoryDevice.iPhone && apps["iPhone"]?.bundleIdentifier == nil)
+        #expect(apps["Unknown app"]?.words == 4 && apps["Unknown app"]?.deviceKind == nil && apps["Notes"]?.words == 4)
+        #expect(data.applications.reduce(0) { $0 + $1.words } == data.totalWords)
+
+        let phoneOnly = try await store.insights(now: now, week: now, calendar: calendar(), device: phone)
+        #expect(phoneOnly.totalWords == 7 && phoneOnly.devices.map(\.name) == ["iPhone"])
+        #expect(Set(phoneOnly.applications.map(\.name)) == ["Notes", "iPhone"])
+        let local = try await store.insights(now: now, week: now, calendar: calendar(), device: store.deviceID)
+        #expect(local.totalWords == 6 && local.audioSeconds == 2)
+        #expect(try await store.spokenWords(now: now, calendar: calendar(), device: phone).entryCount == 2)
+        #expect(try await store.spokenWords(now: now, calendar: calendar(), device: UUID().uuidString).entryCount == 0)
+    }
+
     @Test func typingSavedComparesTypingTimeWithTalkingTime() {
         let now = date("2026-10-14T12:00:00Z")
         var aggregate = HistoryInsightsAccumulator(now: now, week: now, calendar: calendar())

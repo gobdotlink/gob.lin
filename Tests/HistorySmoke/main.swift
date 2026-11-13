@@ -72,6 +72,36 @@ struct HistorySmoke {
         do { _ = try HistoryStore(directory: newer); preconditionFailure("A future schema was accepted") }
         catch HistoryError.unsupportedSchema(99) { }
 
+        // History from a build before devices: version 1, no device tables, an entry with no device.
+        let older = temporary.appendingPathComponent("older", isDirectory: true)
+        try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
+        let before = HistoryEntry(rawText: "Said before the update", finalText: "Said before the update", createdAt: Date(timeIntervalSinceNow: -60), audioDuration: 2)
+        let metadata = String(decoding: try JSONEncoder().encode(before), as: UTF8.self)
+        check(!metadata.contains("\"device\""), "An entry without a device must be written as older builds wrote it")
+        check(sqlite3_open(older.appendingPathComponent("history.sqlite").path, &database) == SQLITE_OK)
+        check(sqlite3_exec(database, """
+            CREATE TABLE entries (id TEXT PRIMARY KEY NOT NULL, created_at REAL NOT NULL, raw_text TEXT NOT NULL, final_text TEXT NOT NULL, app_name TEXT NOT NULL, starred INTEGER NOT NULL DEFAULT 0, audio_filename TEXT, metadata TEXT NOT NULL);
+            CREATE INDEX entries_date ON entries(created_at DESC, id DESC);
+            PRAGMA user_version = 1;
+            INSERT INTO entries VALUES ('\(before.id.uuidString)', \(before.createdAt.timeIntervalSince1970), '\(before.rawText)', '\(before.finalText)', '', 0, NULL, '\(metadata)');
+            """, nil, nil, nil) == SQLITE_OK)
+        let upgraded = try HistoryStore(directory: older)
+        check(integer(database, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'devices')") == 2, "Opening must add the device tables")
+        check(try HistoryStore(directory: older).deviceID == upgraded.deviceID, "This device's ID must be made once")
+        check(try await upgraded.entry(id: before.id).device == nil, "An entry from before devices keeps no device")
+        let olderInsights = try await upgraded.insights()
+        check(olderInsights.devices.count == 1 && olderInsights.devices[0].kind == HistoryDevice.mac && olderInsights.devices[0].words == 4,
+              "An entry without a device counts as this Mac's")
+        check(try await upgraded.insights(device: upgraded.deviceID).totalWords == 4, "Filtering by this device must include entries without one")
+        check(try await upgraded.spokenWords(period: .allTime, device: upgraded.deviceID).entryCount == 1)
+        check(try await upgraded.insights(device: UUID().uuidString).totalWords == 0)
+        // An older build checks only that the version is at most 1, then writes rows as it always has.
+        check(integer(database, "PRAGMA user_version") == 1, "The device tables must leave the schema version for older builds")
+        check(sqlite3_exec(database, "INSERT INTO entries (id, created_at, raw_text, final_text, app_name, starred, audio_filename, metadata) SELECT '\(UUID().uuidString)', created_at, raw_text, final_text, app_name, starred, audio_filename, metadata FROM entries", nil, nil, nil) == SQLITE_OK,
+              "An older build must still save into upgraded History")
+        sqlite3_close(database)
+        check(try await upgraded.insights(device: upgraded.deviceID).totalWords == 8, "An older build's entries read as made here")
+
         for index in 0..<1000 {
             try await store.insert(HistoryEntry(rawText: "Synthetic transcript \(index)", finalText: "Synthetic transcript \(index)"))
         }
@@ -79,6 +109,14 @@ struct HistorySmoke {
         let pageTwo = try await store.entries(limit: 200, offset: 200)
         check(pageOne.count == 200 && pageTwo.count == 200)
         check(Set(pageOne.map(\.id)).isDisjoint(with: pageTwo.map(\.id)), "History pagination must not duplicate entries")
-        print("History safety smoke passed: persistence, original audio, stars, retention, deletion bounds, migration refusal, 1,000-entry pagination.")
+        print("History safety smoke passed: persistence, original audio, stars, retention, deletion bounds, migration refusal, device tables on older History, 1,000-entry pagination.")
+    }
+
+    static func integer(_ database: OpaquePointer?, _ sql: String) -> Int {
+        var statement: OpaquePointer?
+        check(sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        check(sqlite3_step(statement) == SQLITE_ROW)
+        return Int(sqlite3_column_int64(statement, 0))
     }
 }

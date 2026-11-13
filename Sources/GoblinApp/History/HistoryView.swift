@@ -1,5 +1,6 @@
 import AppKit
 import GoblinCore
+import GoblinEngines
 import SwiftUI
 
 /// Dictations and their detail, inside the shared app window.
@@ -448,7 +449,8 @@ private struct EntryDetail: View {
             Divider()
             fact("Cleanup", entry.polished ? "Cleaned up" : "As spoken")
             Divider()
-            fact("Speech model", entry.model.isEmpty ? "—" : entry.model.hasPrefix("parakeet-tdt-v3") ? "Parakeet v3" : entry.model)
+            fact("Speech model", entry.model.isEmpty ? "—" : entry.model.hasPrefix("parakeet-tdt-v3") ? "Parakeet v3"
+                 : entry.model == SpeechModelCatalog.builtInRecognizerID ? SpeechModelCatalog.builtInRecognizerName : entry.model)
         }
         .fixedSize(horizontal: false, vertical: true)
         .background(GoblinBrand.caseBackground.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
@@ -525,6 +527,8 @@ struct EmptyHistoryView: View {
 struct AppIcon: View {
     let bundleIdentifier: String?
     var size: CGFloat = 20
+    /// Drawn on the placeholder tile when there is no app icon.
+    var symbol = "app"
     @MainActor private static var cache: [String: NSImage] = [:]
 
     var body: some View {
@@ -532,7 +536,7 @@ struct AppIcon: View {
             if let icon { Image(nsImage: icon).resizable().interpolation(.high) }
             else {
                 RoundedRectangle(cornerRadius: size * 0.24, style: .continuous).fill(.quaternary)
-                    .overlay(Image(systemName: "app").font(.system(size: size * 0.5)).foregroundStyle(.secondary))
+                    .overlay(Image(systemName: symbol).font(.system(size: size * 0.5)).foregroundStyle(.secondary))
             }
         }
         .frame(width: size, height: size)
