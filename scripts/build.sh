@@ -100,6 +100,9 @@ if "$developer_id"; then
                     -c "Add :com.apple.developer.icloud-container-environment string $environment" \
                     -c "Add :com.apple.developer.aps-environment string $push" "$entitlements"
                 printf 'History sync: on, in the %s environment.\n' "$environment"
+            elif [ -n "${GOBLIN_ICLOUD_ENVIRONMENT:-}" ]; then
+                printf 'Cannot sign for the %s environment: %s.\n' "$environment" "$missing" >&2
+                exit 1
             else
                 printf 'Signing without History sync: %s.\n' "$missing" >&2
             fi
