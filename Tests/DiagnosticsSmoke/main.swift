@@ -49,6 +49,10 @@ precondition(report.contains("ASR: 200.0 ms") && report.contains("Rewrite: unava
 precondition(report.components(separatedBy: "\n").filter { $0.hasPrefix("1970-") }.count == 50)
 let withNames = DiagnosticsReport.render(environment: environment, activeFailures: [], events: [], timings: nil, includeDeviceNames: true)
 precondition(withNames.contains("Microphone: Private device name"))
+precondition(report.contains("History sync: unavailable in this build"))
+var syncing = environment
+syncing.historySync = .waitingForAccount
+precondition(DiagnosticsReport.render(environment: syncing, activeFailures: [], events: [], timings: nil).contains("History sync: waitingForAccount"))
 precondition(!DiagnosticFailure.rewriteHTTPStatus(Int.max).message.contains(String(Int.max)))
 print("Diagnostics smoke passed: typed errors, redaction, bounded report, permissions, and stage timings.")
 

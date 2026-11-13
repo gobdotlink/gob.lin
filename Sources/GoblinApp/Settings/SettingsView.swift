@@ -143,6 +143,7 @@ private struct GeneralSettingsView: View {
     @ObservedObject private var insertion: TextInsertionService
     @ObservedObject private var permissions: PermissionModel
     @ObservedObject private var dictionary: DictionaryModel
+    @ObservedObject private var historySync: HistorySyncModel
     @AppStorage("feedbackSoundsEnabled") private var sounds = true
     @AppStorage("audio.pauseMediaWhileDictating") private var pauseMedia = false
     @AppStorage("audio.muteWhileDictating") private var muteAudio = false
@@ -157,6 +158,7 @@ private struct GeneralSettingsView: View {
         _insertion = ObservedObject(wrappedValue: model.insertion)
         _permissions = ObservedObject(wrappedValue: model.permissions)
         _dictionary = ObservedObject(wrappedValue: model.dictionary)
+        _historySync = ObservedObject(wrappedValue: model.historySync)
     }
 
     var body: some View {
@@ -219,14 +221,24 @@ private struct GeneralSettingsView: View {
                 Text("I watch for 30 seconds. Password fields and password managers are never watched.")
             }
         } header: { CapsHeader("Behaviour") }
-        if dictionary.canSync {
+        if dictionary.canSync || historySync.isAvailable {
             Section {
-                Toggle(isOn: $dictionary.syncsWithICloud) {
-                    Text("Sync with iCloud")
-                    Text("Shares your dictionary with your other devices.").rowDetail()
-                    Text("I keep your dictionary in your own iCloud. Your dictations, recordings and settings stay on this Mac.")
+                if dictionary.canSync {
+                    Toggle(isOn: $dictionary.syncsWithICloud) {
+                        Text("Sync Dictionary")
+                        Text("Shares your dictionary with your other devices.").rowDetail()
+                        Text("I keep your dictionary in your own iCloud. Your recordings and settings stay on this Mac.")
+                    }
+                    if let error = dictionary.syncError { StatusRow(.problem, Text("I couldn't sync your dictionary: \(error)")) }
                 }
-                if let error = dictionary.syncError { StatusRow(.problem, Text("I couldn't sync your dictionary: \(error)")) }
+                if historySync.isAvailable {
+                    Toggle(isOn: Binding(get: { historySync.isOn }, set: { on in Task { await historySync.setOn(on) } })) {
+                        Text("Sync History")
+                        Text("Your dictations' text and stars, in your own iCloud. Recordings stay here.").rowDetail()
+                        Text("Keep trims only this Mac. Deleting a dictation deletes it on every device. Each dictation names the device that made it. Turning this off leaves the copy in iCloud.")
+                    }
+                    historySyncStatus
+                }
             } header: { CapsHeader("iCloud") }
         }
         Section {
@@ -275,6 +287,33 @@ private struct GeneralSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
     }
 
+
+    @ViewBuilder private var historySyncStatus: some View {
+        switch historySync.status {
+        case .off: EmptyView()
+        case .syncing: StatusRow(.ready, Text("I'm syncing History with your iCloud."))
+        case .waitingForAccount:
+            StatusRow(.waiting, Text("I'm waiting for iCloud. Nothing leaves this Mac until it's back.")) {
+                // Undocumented, but the address System Settings answers to for its iCloud page.
+                Button("Open iCloud Settings…") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.systempreferences.AppleIDSettings?iCloud")!)
+                }
+            }
+        case .iCloudFull:
+            StatusRow(.waiting, Text("Your iCloud is full, so I've stopped sending dictations. They're safe here.")) {
+                Button("Try Again") { historySync.syncNow() }
+            }
+        case .needsUpdate:
+            StatusRow(.waiting, Text("Some dictations come from a newer gob.lin, so I'm leaving them out until you update.")) {
+                // The check's result shows on About.
+                Button("Check for Updates…") { model.settingsSelection = .about; model.updates.check() }
+            }
+        case .purged:
+            StatusRow(.off, Text("Your gob.lin data was deleted from iCloud, so I turned History sync off. Everything on this Mac stayed."))
+        case .differentAccount:
+            StatusRow(.off, Text("A different iCloud account signed in, so I turned History sync off. This Mac's dictations stayed."))
+        }
+    }
 
     private var keyLight: LightState {
         if hotkeys.secureInput || hotkeys.status == "Waiting for permissions" { return .waiting }

@@ -27,15 +27,15 @@ final class DictionaryModel: ObservableObject {
             reviewSuggestions()
         }
     }
-    /// Whether gob.lin syncs through the person's iCloud, set on the General page; off by default. The dictionary is the
-    /// only thing that syncs so far.
+    /// Whether the dictionary syncs through the person's iCloud, set on the General page; off by default.
     @Published var syncsWithICloud: Bool {
         didSet { defaults.set(syncsWithICloud, forKey: Self.syncsWithICloudKey); sync() }
     }
     /// Why the last sync failed, in words for the General page.
     @Published private(set) var syncError: String?
-    /// Only a build signed for iCloud can reach it; development builds can't, and never touch iCloud.
-    let canSync = SecTaskCreateFromSelf(nil).flatMap {
+    /// Only a build signed for iCloud can reach it; development builds can't, and never touch iCloud. Settable only so
+    /// screenshots can show the switch.
+    var canSync = SecTaskCreateFromSelf(nil).flatMap {
         SecTaskCopyValueForEntitlement($0, "com.apple.developer.ubiquity-kvstore-identifier" as CFString, nil)
     } != nil
     private let defaults: UserDefaults

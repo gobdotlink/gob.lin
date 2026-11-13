@@ -200,7 +200,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **General:**
   - Talk key: a big keycap card with the key, one sentence on how it works, and Record New Key…. Quick picks: fn / Globe, Right ⌥, ⌥ Space. Cancel a take: esc, or the overlay's × when esc is the talk key. A status row for the Globe key setting.
   - Behaviour: Open at login, Click sounds, Add a space after each take.
-  - iCloud: one Sync with iCloud switch, off by default, with a line under it saying what syncs and an explanation that dictations stay on this Mac. The group shows only in builds signed for iCloud. A red status row appears while the last sync failed.
+  - iCloud: Sync Dictionary and Sync History switches, off by default, each with a line under it saying what syncs and the rest behind its ⓘ. Each shows only in builds signed for it, and the group only when one does. A red status row appears while the last dictionary sync failed. Sync History ends with one status row: green while syncing; amber with the one button that fixes it while waiting for iCloud, while iCloud is full, or while dictations from a newer gob.lin are left out; hollow when sync turned itself off because gob.lin's iCloud data was deleted or a different account signed in.
   - Reduce audio while dictating: independent Pause current media and Mute audio switches. Explain that pause preserves the current player's position, mute lets playback advance, and both can be enabled. Preserve the existing pause preference; mute starts off.
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
 - **Audio:** Microphones is the ranked list. Each row has a light (green in use, amber silenced by the lid, hollow otherwise), the name, and its transport and state, plus a menu with the same moves as dragging. The System Default row is the line: mics above it are used in order, mics below it ("Only when picked") never on their own. A status row names the mic in use and the one it's standing in for.
@@ -257,7 +257,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 ## Before you call a UI change done
 
 1. Build and run the signed app with `scripts/build.sh`.
-2. Screenshot every surface you changed in light and in dark. Shoot the overlay over a light app and over a dark app. `scripts/capture-settings.sh <folder> [settings|history|popover|onboarding|overlay]` renders every surface from synthetic data without a microphone, and `scripts/check-mascot.sh` checks the overlay's sprite rules.
+2. Screenshot every surface you changed in light and in dark. Shoot the overlay over a light app and over a dark app. `scripts/capture-settings.sh <folder> [settings|icloud|history|popover|onboarding|overlay]` renders every surface from synthetic data without a microphone, and `scripts/check-mascot.sh` checks the overlay's sprite rules.
 3. Repeat with Reduce Motion and Increase Contrast on.
 4. Check the change against every rule above. Each one either holds, or the pull request says why it doesn't.
 

@@ -79,7 +79,8 @@ final class DiagnosticsModel: ObservableObject {
             microphoneNames: microphones.names,
             defaultMicrophoneName: microphones.defaultName,
             secureInput: secureInput ?? IsSecureEventInputEnabled(),
-            engineStatus: engineStatus ?? environment.engineStatus)
+            engineStatus: engineStatus ?? environment.engineStatus,
+            historySync: environment.historySync)
         if current != previous { environment = current }
         if previous.microphonePermission != environment.microphonePermission || previous.accessibilityPermission != environment.accessibilityPermission || previous.inputMonitoringPermission != environment.inputMonitoringPermission {
             var details = DevelopmentDetails()
@@ -100,6 +101,10 @@ final class DiagnosticsModel: ObservableObject {
         else if activeFailures[.permissions] == .requiredPermissionsMissing { resolve(.permissions) }
         if environment.secureInput { report(.secureInputEnabled) }
         else if activeFailures[.secureInput] == .secureInputEnabled { resolve(.secureInput) }
+    }
+
+    func setHistorySync(_ status: HistorySyncStatus?) {
+        environment.historySync = status
     }
 
     func copyDiagnostics(includeDeviceNames: Bool = false) {
