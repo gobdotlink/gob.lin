@@ -86,7 +86,7 @@ struct HistorySmoke {
             INSERT INTO entries VALUES ('\(before.id.uuidString)', \(before.createdAt.timeIntervalSince1970), '\(before.rawText)', '\(before.finalText)', '', 0, NULL, '\(metadata)');
             """, nil, nil, nil) == SQLITE_OK)
         let upgraded = try HistoryStore(directory: older)
-        check(integer(database, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'devices')") == 2, "Opening must add the device tables")
+        check(integer(database, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('meta', 'devices', 'sync')") == 3, "Opening must add the device and sync tables")
         check(try HistoryStore(directory: older).deviceID == upgraded.deviceID, "This device's ID must be made once")
         check(try await upgraded.entry(id: before.id).device == nil, "An entry from before devices keeps no device")
         let olderInsights = try await upgraded.insights()
@@ -101,6 +101,30 @@ struct HistorySmoke {
               "An older build must still save into upgraded History")
         sqlite3_close(database)
         check(try await upgraded.insights(device: upgraded.deviceID).totalWords == 8, "An older build's entries read as made here")
+        // An older build trims a dictation iCloud has, leaving its sync row behind. Trimming must not delete it everywhere.
+        try await upgraded.markSent(id: before.id, serverFields: Data([1]), serverCreated: Date(), revision: 0)
+        check(sqlite3_open(older.appendingPathComponent("history.sqlite").path, &database) == SQLITE_OK)
+        check(sqlite3_exec(database, "DELETE FROM entries WHERE id = '\(before.id.uuidString)'", nil, nil, nil) == SQLITE_OK)
+        check(try await HistoryStore(directory: older).pendingChanges().deletions.isEmpty, "A row an older build left behind must not become a deletion")
+        check(integer(database, "SELECT COUNT(*) FROM sync") == 0 && integer(database, "PRAGMA user_version") == 1)
+        sqlite3_close(database)
+
+        // A first fetch of a long History, in pages of 250 as the engine hands them over.
+        let synced = try HistoryStore(directory: temporary.appendingPathComponent("synced", isDirectory: true))
+        try await synced.setSyncEnabled(true)
+        let records = try (0..<20_000).map { index in
+            var entry = HistoryEntry(rawText: "Fetched \(index)", finalText: "Fetched \(index)", createdAt: Date(timeIntervalSinceNow: -Double(index)))
+            entry.device = "phone"
+            return HistoryRemoteRecord(id: entry.id, body: try JSONEncoder().encode(entry), formatVersion: 1, serverFields: Data([1]), serverCreated: Date())
+        }
+        let clock = ContinuousClock(), started = clock.now
+        for page in stride(from: 0, to: records.count, by: 250) {
+            try await synced.applyRemote(saves: Array(records[page..<min(page + 250, records.count)]))
+        }
+        let fetchTime = clock.now - started
+        check(fetchTime < .seconds(30), "Applying 20,000 fetched records took \(fetchTime)")
+        check(try await synced.counts().total == 20_000, "Every fetched record must be kept")
+        check(try await synced.pendingChanges().saves.isEmpty, "Fetched dictations must not be sent back")
 
         for index in 0..<1000 {
             try await store.insert(HistoryEntry(rawText: "Synthetic transcript \(index)", finalText: "Synthetic transcript \(index)"))
@@ -109,7 +133,7 @@ struct HistorySmoke {
         let pageTwo = try await store.entries(limit: 200, offset: 200)
         check(pageOne.count == 200 && pageTwo.count == 200)
         check(Set(pageOne.map(\.id)).isDisjoint(with: pageTwo.map(\.id)), "History pagination must not duplicate entries")
-        print("History safety smoke passed: persistence, original audio, stars, retention, deletion bounds, migration refusal, device tables on older History, 1,000-entry pagination.")
+        print("History safety smoke passed: persistence, original audio, stars, retention, deletion bounds, migration refusal, device and sync tables on older History, 1,000-entry pagination, 20,000 fetched records in \(fetchTime.formatted(.units(allowed: [.seconds], fractionalPart: .show(length: 1)))).")
     }
 
     static func integer(_ database: OpaquePointer?, _ sql: String) -> Int {
