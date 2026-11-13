@@ -1,3 +1,5 @@
+// Capture follows Mac input devices; the iPhone app records through its own audio session.
+#if os(macOS)
 import AudioToolbox
 import AVFoundation
 import CoreAudio
@@ -344,3 +346,4 @@ final class AudioInputUnit: @unchecked Sendable {
         chunk.frameLength = 0; delivered = true
     }
 }
+#endif

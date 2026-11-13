@@ -85,24 +85,19 @@ final class DictionaryModel: ObservableObject {
 
     // MARK: iCloud
 
-    private static let cloudKey = "dictionary"
-
     /// Merges this Mac's dictionary with the copy in iCloud and writes back whatever iCloud is missing.
     // ponytail: iCloud refuses a copy over 1 MB without telling this code; watch for
     // NSUbiquitousKeyValueStoreQuotaViolationChange if dictionaries reach thousands of entries.
     private func sync() {
         guard syncsWithICloud, canSync, available else { return }
         let cloud = NSUbiquitousKeyValueStore.default
-        let stateURL = repository.url.deletingLastPathComponent().appendingPathComponent("dictionary-sync.json")
+        var synced = entries
+        // Also after a failure: the merged entries may be saved even when the sync state then isn't.
+        defer { if synced != entries { entries = synced } }
         do {
-            let state = FileManager.default.fileExists(atPath: stateURL.path) ? try SyncedDictionary(data: Data(contentsOf: stateURL)) : SyncedDictionary()
-            let remote = try cloud.data(forKey: Self.cloudKey).map(SyncedDictionary.init(data:))
-            let result = try SyncedDictionary.reconcile(entries: entries, state: state, remote: remote)
-            // The entries before the state: the other order can delete words everywhere after a crash (see `reconcile`).
-            if result.entries != entries { try repository.save(result.entries); entries = result.entries }
-            let data = try result.state.data()
-            try data.write(to: stateURL, options: .atomic)
-            if result.push { cloud.set(data, forKey: Self.cloudKey) }
+            if let push = try repository.syncRound(&synced, remote: cloud.data(forKey: SyncedDictionary.cloudKey)) {
+                cloud.set(push, forKey: SyncedDictionary.cloudKey)
+            }
             syncError = nil
         } catch { syncError = error.localizedDescription }
     }

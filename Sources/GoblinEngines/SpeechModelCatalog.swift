@@ -96,6 +96,8 @@ public enum SpeechModelCatalog {
         whisperTinyEnglish, whisperBase, whisperBaseEnglish, whisperSmall, whisperSmallEnglish, whisperMedium, whisperMediumEnglish]
     public static var recommended: [SpeechModelDescriptor] { supported.filter(\.recommended) }
     public static let defaultModel = parakeet
+    /// The speech runtimes' and models' licences and model cards: folders of text files that ship with the app.
+    public static var noticesDirectory: URL? { SpeechModelAssets.bundle.url(forResource: "Notices", withExtension: nil) }
 
     public static func model(id: String) -> SpeechModelDescriptor? { supported.first { $0.id == id } }
 
@@ -162,11 +164,12 @@ struct SpeechModelManifest: Codable, Sendable {
 }
 
 enum SpeechModelAssets {
+    // Signed apps keep SwiftPM bundles in Contents/Resources rather than beside the executable.
+    static let bundle = Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("Goblin_GoblinEngines.bundle", isDirectory: true)) }
+        ?? Bundle.module
+
     private static let manifests: [String: SpeechModelManifest] = {
         do {
-            // Signed apps keep SwiftPM bundles in Contents/Resources rather than beside the executable.
-            let packaged = Bundle.main.resourceURL?.appendingPathComponent("Goblin_GoblinEngines.bundle", isDirectory: true)
-            let bundle = packaged.flatMap(Bundle.init(url:)) ?? Bundle.module
             let url = bundle.url(forResource: "speech-model-assets", withExtension: "json")!
             return try JSONDecoder().decode([String: SpeechModelManifest].self, from: Data(contentsOf: url))
         } catch { preconditionFailure("Invalid bundled speech model catalog: \(error)") }

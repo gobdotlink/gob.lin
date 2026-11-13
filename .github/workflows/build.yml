@@ -23,3 +23,5 @@ jobs:
         run: scripts/check-audio-capture.sh && scripts/check-feedback-media.sh
       - name: Build Xcode app without local signing credentials
         run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
+      - name: Build the shared libraries for iPhone
+        run: xcodebuild -scheme GoblinEngines -destination generic/platform=iOS -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build

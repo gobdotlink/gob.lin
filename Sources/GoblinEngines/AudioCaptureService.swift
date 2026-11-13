@@ -1,3 +1,5 @@
+// Capture follows Mac input devices; the iPhone app records through its own audio session.
+#if os(macOS)
 import AppKit
 import AVFoundation
 import Darwin
@@ -368,3 +370,4 @@ private final class CapturePreviewDelivery: @unchecked Sendable {
         }
     }
 }
+#endif

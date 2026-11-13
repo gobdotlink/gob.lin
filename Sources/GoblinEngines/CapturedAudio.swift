@@ -89,6 +89,7 @@ public enum InputSilenceMonitor {
     }
 }
 
+#if os(macOS)
 public enum AudioCaptureEvent: Sendable {
     case ready(sessionID: UUID, device: AudioInputResolution)
     case frame(AudioCaptureFrame)
@@ -108,3 +109,4 @@ public enum AudioPreviewEvent: Sendable {
     case silence(InputSilence?)
     case failed(AudioCaptureFailure)
 }
+#endif

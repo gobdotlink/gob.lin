@@ -4,6 +4,9 @@ import Foundation
 /// deleted one. Merging keeps the newer side of each entry, so copies can meet in any order, any number of times, and
 /// every device settles on the same words. iCloud keeps only the last copy written, which is why the copy itself merges.
 public struct SyncedDictionary: Codable, Equatable, Sendable {
+    /// Where the copy lives in the iCloud key-value store, shared by every device.
+    public static let cloudKey = "dictionary"
+
     struct Record: Codable, Equatable, Sendable {
         var modified: Date
         /// Nil once deleted. The marker stays, so a device that still has the entry learns it is gone.
@@ -102,6 +105,24 @@ public struct SyncedDictionary: Codable, Equatable, Sendable {
         let known = Set(entries.map(\.id.uuidString))
         let added = shown.filter { !known.contains($0.key) }.sorted { ($0.value.modified, $0.key) < ($1.value.modified, $1.key) }
         return entries.compactMap { shown[$0.id.uuidString]?.entry } + added.compactMap(\.value.entry)
+    }
+}
+
+extension DictionaryRepository {
+    /// One round of syncing this dictionary with `remote`, the copy in iCloud, if any. Reconciles `entries` with the
+    /// sync state saved beside the dictionary, saves the merged entries and updates `entries` to them, then saves the
+    /// state. Returns the copy to write to iCloud, or nil when iCloud is already up to date. Throws before writing
+    /// anything when either saved copy can't be read, such as one from a newer gob.lin.
+    public func syncRound(_ entries: inout [DictionaryEntry], remote: Data?) throws -> Data? {
+        let stateURL = url.deletingLastPathComponent().appendingPathComponent("dictionary-sync.json")
+        let state = FileManager.default.fileExists(atPath: stateURL.path) ? try SyncedDictionary(data: Data(contentsOf: stateURL)) : SyncedDictionary()
+        let remote = try remote.map(SyncedDictionary.init(data:))
+        let result = try SyncedDictionary.reconcile(entries: entries, state: state, remote: remote)
+        // The entries before the state: the other order can delete words everywhere after a crash (see `reconcile`).
+        if result.entries != entries { try save(result.entries); entries = result.entries }
+        let data = try result.state.data()
+        try data.write(to: stateURL, options: .atomic)
+        return result.push ? data : nil
     }
 }
 

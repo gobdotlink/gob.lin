@@ -1,18 +1,6 @@
 import GoblinCore
 import SwiftUI
 
-/// Why these settings can't run cleanup yet, or nil when they can.
-func cleanupSetupProblem(_ settings: RewriteSettings, hasKey: Bool) -> String? {
-    if settings.provider.runsOnDevice { return OnDeviceCleanup.availability.problem }
-    let endpoint: URL
-    do { endpoint = try settings.endpoint() } catch { return error.localizedDescription }
-    if settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Choose a model before turning on AI cleanup." }
-    if !hasKey, !isLocalHost(endpoint.host) { return "Add an API key before turning on AI cleanup." }
-    return nil
-}
-
-func isLocalHost(_ host: String?) -> Bool { ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host ?? "") }
-
 /// Service, address, model, reasoning and key, edited together and applied on Save.
 struct CleanupProviderSheet: View {
     @Environment(\.dismiss) private var dismiss

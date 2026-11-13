@@ -155,6 +155,9 @@ public enum TermSuggestions {
 
     /// The tool's standard output, or nil if it fails or takes longer than two seconds.
     private static func run(_ executable: String, _ arguments: [String]) -> String? {
+        #if os(iOS)
+        return nil // iOS runs no other programs.
+        #else
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -170,6 +173,7 @@ public enum TermSuggestions {
         timeout.cancel()
         guard process.terminationReason == .exit, process.terminationStatus == 0 else { return nil }
         return String(decoding: data, as: UTF8.self)
+        #endif
     }
 
     // MARK: Corrections

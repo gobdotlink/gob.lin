@@ -45,7 +45,7 @@ public actor RewriteModelCatalog {
             }
             var request = URLRequest(url: components.url!)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("gob.lin/\(GoblinMetadata.version) (macOS dictation)", forHTTPHeaderField: "User-Agent")
+            request.setValue(GoblinMetadata.userAgent, forHTTPHeaderField: "User-Agent")
             for (field, value) in settings.provider.authorizationHeaders(apiKey: apiKey) { request.setValue(value, forHTTPHeaderField: field) }
             let data: Data, response: URLResponse
             do { (data, response) = try await session.data(for: request) }

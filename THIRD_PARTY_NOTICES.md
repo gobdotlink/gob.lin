@@ -12,7 +12,7 @@ The original goblin sprites come from the owner's gob.lin brand kit. Only visual
 
 ## Speech runtime
 
-- FluidAudio by FluidInference — exact version 0.17.7, Apache License 2.0. [Pinned source and licence](https://github.com/FluidInference/FluidAudio/tree/v0.17.7). Goblin uses its local Core ML ASR runtime; the optional NeMo binary/text-processing trait is disabled. The complete upstream licence and bundled third-party notices (including fastcluster) are retained in `Sources/GoblinApp/Assets/FluidAudio-Notices/`, copied into the app bundle. Upstream source is unmodified.
+- FluidAudio by FluidInference — exact version 0.17.7, Apache License 2.0. [Pinned source and licence](https://github.com/FluidInference/FluidAudio/tree/v0.17.7). Goblin uses its local Core ML ASR runtime; the optional NeMo binary/text-processing trait is disabled. The complete upstream licence and bundled third-party notices (including fastcluster) are retained in `Sources/GoblinEngines/Notices/FluidAudio-Notices/`, copied into the app bundle. Upstream source is unmodified.
 - NVIDIA Parakeet TDT v3 — Creative Commons Attribution 4.0. [Model card and attribution](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3). Models must be downloaded at runtime, never committed. Goblin uses the [FluidInference Core ML conversion](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml), with the int8 encoder, from NVIDIA's original model. We do not modify those downloaded components. Model weights are acquired separately and stay outside Git. The original and conversion model cards and complete [CC BY 4.0 licence](https://creativecommons.org/licenses/by/4.0/) are retained in the bundled `FluidAudio-Notices` assets.
 
 

@@ -29,8 +29,15 @@ public actor WhisperSpeechEngine: PCMSpeechEngine {
         guard PinnedSpeechModelStore.isDownloaded(model: model, directory: directory) else { throw SpeechRuntimeError.modelNotInstalled }
         _ = try await Self.validateLocalTokenizer(model: model, directory: directory)
         let detector = try SpeechActivityDetector.load(beside: directory)
+        #if os(iOS)
+        // The SDK's mel stage defaults to CPU and GPU, and iOS refuses GPU work from an app in the background,
+        // where iPhone takes are recognised. The encoder and decoder already stay on CPU and Neural Engine.
+        let computeOptions: ModelComputeOptions? = ModelComputeOptions(melCompute: .cpuOnly)
+        #else
+        let computeOptions: ModelComputeOptions? = nil
+        #endif
         let runtime = try await WhisperKit(WhisperKitConfig(modelFolder: directory.path, tokenizerFolder: directory,
-            segmentSeeker: WhisperDictionarySegmentSeeker(),
+            computeOptions: computeOptions, segmentSeeker: WhisperDictionarySegmentSeeker(),
             verbose: false, prewarm: false, load: false, download: false))
         do {
             // Tokenizer injection would skip the SDK's model capability initialization.
