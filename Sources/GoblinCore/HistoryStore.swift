@@ -26,8 +26,27 @@ public struct HistoryCounts: Sendable, Equatable {
     }
 }
 
+/// Device kinds as History records them, and this device's own kind and name.
+public enum HistoryDevice {
+    public static let mac = "mac"
+    public static let iPhone = "iphone"
+
+    /// Read each time History opens, so a renamed Mac shows its new name.
+    static func current() -> (kind: String, name: String) {
+        #if os(macOS)
+        (mac, Host.current().localizedName ?? "Mac")
+        #else
+        // ponytail: iOS names every iPhone "iPhone" without the user-assigned-device-name entitlement, so two iPhones
+        // share one Insights row. Once it's granted, let the app pass UIDevice.current.name in.
+        (iPhone, "iPhone")
+        #endif
+    }
+}
+
 public actor HistoryStore {
     public nonisolated let directory: URL
+    /// This install's device, made once and kept in History's database. Entries saved here carry it.
+    public nonisolated let deviceID: String
     private let database: HistoryDatabase
 
     public static func defaultDirectory() throws -> URL {
@@ -47,6 +66,12 @@ public actor HistoryStore {
             throw HistoryError.database("History database must stay inside its data folder")
         }
         self.database = try HistoryDatabase(url: databaseURL)
+        self.deviceID = database.deviceID
+    }
+
+    /// Records a device's kind and name, so Insights can name the entries it made.
+    public func saveDevice(id: String, kind: String, name: String) throws {
+        try database.saveDevice(id: id, kind: kind, name: name)
     }
 
     /// Copy the original capture before trimming; the caller keeps it until this succeeds.
@@ -54,6 +79,7 @@ public actor HistoryStore {
     public func insert(_ entry: HistoryEntry, untrimmedAudioURL: URL? = nil) throws -> HistoryEntry {
         var saved = entry
         saved.audioFilename = nil
+        saved.device = saved.device ?? deviceID
         var copiedAudio: URL?
         if let source = untrimmedAudioURL {
             let sourceURL = source.resolvingSymlinksInPath()
@@ -130,35 +156,33 @@ public actor HistoryStore {
 
     /// A single read snapshot of retained entries, independent of History search and pagination.
     /// `week` is any date in the calendar week the Activity charts show.
-    /// Supply a lower date bound for summaries that do not need all-time metrics.
-    public func insights(now: Date = Date(), week: Date = Date(), calendar: Calendar = .current, since: Date? = nil) throws -> HistoryInsights {
+    /// Supply a lower date bound for summaries that do not need all-time metrics, and a device ID for one device's entries.
+    public func insights(now: Date = Date(), week: Date = Date(), calendar: Calendar = .current, since: Date? = nil,
+                         device: String? = nil) throws -> HistoryInsights {
         var accumulator = HistoryInsightsAccumulator(now: now, week: week, calendar: calendar)
-        let lowerBound = since == nil ? "" : " AND created_at >= ?"
-        var values: [SQLValue] = [.number(now.timeIntervalSince1970)]
-        if let since { values.append(.number(since.timeIntervalSince1970)) }
+        let scope = insightScope(now: now, since: since, device: device)
         // Project only metrics; stream rows so transcripts and the full store never collect in memory.
         try database.forEachRow("""
             SELECT created_at, json_extract(metadata, '$.wordCount'), json_extract(metadata, '$.audioDuration'),
-                   json_extract(metadata, '$.targetBundleIdentifier'), app_name
-            FROM entries WHERE created_at <= ?\(lowerBound) ORDER BY created_at DESC, id DESC
-            """, values) { row in
+                   json_extract(metadata, '$.targetBundleIdentifier'), app_name, devices.kind, devices.name
+            FROM entries LEFT JOIN devices ON devices.id = \(Self.entryDevice)
+            WHERE \(scope.sql) ORDER BY created_at DESC, entries.id DESC
+            """, [.text(deviceID)] + scope.values) { row in
             try Task.checkCancellation()
             guard let timestamp = Double(row[0] ?? ""), timestamp.isFinite else { return }
             accumulator.add(date: Date(timeIntervalSince1970: timestamp), words: max(0, Int(row[1] ?? "") ?? 0),
-                            duration: row[2].flatMap(Double.init), bundle: row[3], name: row[4])
+                            duration: row[2].flatMap(Double.init), bundle: row[3], name: row[4], deviceKind: row[5], deviceName: row[6])
         }
         return accumulator.finish()
     }
 
     /// Reads saved final text in the requested period, retaining only word counts.
-    public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40) throws -> InsightWordCloud {
-        let since = period.start(now: now, calendar: calendar)
-        let lowerBound = since == nil ? "" : " AND created_at >= ?"
-        var values: [SQLValue] = [.number(now.timeIntervalSince1970)]
-        if let since { values.append(.number(since.timeIntervalSince1970)) }
+    public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40,
+                            device: String? = nil) throws -> InsightWordCloud {
+        let scope = insightScope(now: now, since: period.start(now: now, calendar: calendar), device: device)
         let counter = SpokenWordCounter()
         var counts: [String: Int] = [:], cloud = InsightWordCloud()
-        try database.forEachRow("SELECT final_text FROM entries WHERE created_at <= ?\(lowerBound)", values) { row in
+        try database.forEachRow("SELECT final_text FROM entries WHERE \(scope.sql)", scope.values) { row in
             try Task.checkCancellation()
             guard let text = row[0], !text.isEmpty else { return }
             cloud.entryCount += 1
@@ -168,6 +192,17 @@ public actor HistoryStore {
         }
         cloud.words = SpokenWordCounter.top(counts, limit: limit)
         return cloud
+    }
+
+    /// The device that made an entry, binding this device's ID for entries saved before devices were recorded.
+    private static let entryDevice = "COALESCE(json_extract(metadata, '$.device'), ?)"
+
+    /// Insights' WHERE clause: started by `now`, from `since`, and made on `device`.
+    private func insightScope(now: Date, since: Date?, device: String?) -> (sql: String, values: [SQLValue]) {
+        var sql = "created_at <= ?", values: [SQLValue] = [.number(now.timeIntervalSince1970)]
+        if let since { sql += " AND created_at >= ?"; values.append(.number(since.timeIntervalSince1970)) }
+        if let device { sql += " AND \(Self.entryDevice) = ?"; values += [.text(deviceID), .text(device)] }
+        return (sql, values)
     }
 
     /// Record what became of the pasted text. `editedText` is stored only for
@@ -258,6 +293,7 @@ private enum SQLValue { case text(String), number(Double), null }
 // This connection belongs exclusively to HistoryStore's actor after initialization.
 private final class HistoryDatabase {
     private var handle: OpaquePointer?
+    private(set) var deviceID = ""
 
     init(url: URL) throws {
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -277,6 +313,16 @@ private final class HistoryDatabase {
                     try run("CREATE INDEX entries_date ON entries(created_at DESC, id DESC)")
                     try run("PRAGMA user_version = 1")
                 }
+                // Added tables leave user_version at 1, so older builds still open History and ignore them.
+                try run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)")
+                try run("CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL)")
+                try run("INSERT OR IGNORE INTO meta (key, value) VALUES ('device', ?)", [.text(UUID().uuidString)])
+                guard let device = try query("SELECT value FROM meta WHERE key = 'device'").first?[0] else {
+                    throw HistoryError.database("Missing device ID")
+                }
+                let current = HistoryDevice.current()
+                try saveDevice(id: device, kind: current.kind, name: current.name)
+                deviceID = device
             }
             try run("PRAGMA journal_mode = WAL")
         } catch {
@@ -287,6 +333,11 @@ private final class HistoryDatabase {
     }
 
     deinit { sqlite3_close(handle) }
+
+    func saveDevice(id: String, kind: String, name: String) throws {
+        try run("INSERT INTO devices (id, kind, name) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name",
+                [.text(id), .text(kind), .text(name)])
+    }
 
     func transaction(_ body: () throws -> Void) throws {
         try run("BEGIN IMMEDIATE")

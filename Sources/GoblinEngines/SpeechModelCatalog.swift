@@ -94,6 +94,10 @@ public enum SpeechModelCatalog {
     public static let supported = [parakeet, whisperTiny, whisperTurbo, whisperLarge,
         parakeetRedux, parakeetUltra, phonon, parakeetCompact, senseVoice, nemotron,
         whisperTinyEnglish, whisperBase, whisperBaseEnglish, whisperSmall, whisperSmallEnglish, whisperMedium, whisperMediumEnglish]
+    /// The recogniser built into iOS, as an iPhone records it in an entry's model. It downloads nothing, so it isn't
+    /// in `supported`; History names it with `builtInRecognizerName`.
+    public static let builtInRecognizerID = "apple-speech-transcriber"
+    public static let builtInRecognizerName = "Built into iPhone"
     public static var recommended: [SpeechModelDescriptor] { supported.filter(\.recommended) }
     public static let defaultModel = parakeet
     /// The speech runtimes' and models' licences and model cards: folders of text files that ship with the app.

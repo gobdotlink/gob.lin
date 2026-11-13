@@ -59,7 +59,7 @@ struct SettingsCapture {
                 @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false) async throws {
                     // A fresh window per shot, so one view's toolbar never leaks into the next capture.
                     window.orderOut(nil)
-                    window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                    window = CaptureWindow(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
                     window.isReleasedWhenClosed = false
                     window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -116,6 +116,17 @@ struct SettingsCapture {
                     empty.settingsSelection = .history
                     try await shoot("history-empty", SettingsView(model: empty), size: NSSize(width: 970, height: 620))
                     try await shoot("history-narrow", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 970, height: 620))
+                    // The whole Insights page with this Mac alone, then with an iPhone's dictations too.
+                    let devices = AppModel(dataDirectory: directory.appendingPathComponent("devices", isDirectory: true), defaults: defaults, servicesEnabled: false)
+                    try await seedHistory(devices.history)
+                    try await seedPhone(devices.history)
+                    model.settingsSelection = .insights
+                    devices.settingsSelection = .insights
+                    for dark in [false, true] {
+                        try await shoot("history-insights-full\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1100, height: 1500), dark: dark)
+                        try await shoot("history-insights-devices\(dark ? "-dark" : "")", SettingsView(model: devices, speechModels: devices.speechModels), size: NSSize(width: 1100, height: 1500), dark: dark)
+                    }
+                    model.settingsSelection = .history
                 }
                 if wanted("popover") {
                     try await shoot("popover", popover(model), size: NSSize(width: 420, height: 720))
@@ -188,6 +199,22 @@ struct SettingsCapture {
                                      createdAt: now.addingTimeInterval(-age), audioDuration: duration, model: "parakeet-tdt-v3",
                                      latencies: DictationTimings(captureMilliseconds: duration * 1000, asrMilliseconds: 142, rewriteMilliseconds: raw != final ? 386 : 0, insertionMilliseconds: 9),
                                      starred: starred, processingWarning: warning)
+            guard await history.record(entry) else { throw CaptureError.seed }
+        }
+    }
+
+    /// Dictations from an iPhone, whose keyboard can't name the app it types into.
+    @MainActor private static func seedPhone(_ history: HistoryModel) async throws {
+        guard let store = history.store else { throw CaptureError.seed }
+        let phone = UUID().uuidString, now = Date()
+        // A fixed name for this Mac, so the picture never shows the real computer's.
+        try await store.saveDevice(id: store.deviceID, kind: HistoryDevice.mac, name: "MacBook Pro")
+        try await store.saveDevice(id: phone, kind: HistoryDevice.iPhone, name: "iPhone")
+        for (text, duration, age) in [("Running ten minutes late, start without me and I'll catch up on the notes.", 5.0, 900.0),
+                                      ("Remind me to book the train for Friday morning.", 3, 5400),
+                                      ("The overlay copy reads well on the phone too, ship it.", 0, 30_000)] {
+            var entry = HistoryEntry(rawText: text, finalText: text, createdAt: now.addingTimeInterval(-age), audioDuration: duration)
+            entry.device = phone
             guard await history.record(entry) else { throw CaptureError.seed }
         }
     }
@@ -275,6 +302,11 @@ struct SettingsCapture {
     }
 
     enum CaptureError: Error { case screenshot, seed }
+}
+
+/// Keeps the size it's given, so a whole page can be shot taller than the screen.
+private final class CaptureWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 /// A desktop-ish backdrop so translucent surfaces have something to sit on.

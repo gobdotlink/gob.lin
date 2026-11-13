@@ -91,15 +91,31 @@ struct InsightsView: View {
         Section("What you talked about") {
             cloudRow(shown)
         }
+        // One device is the whole story, so the plate shows only when the period has more than one.
+        if shown.insights.devices.count > 1 {
+            Section("Where you talked") {
+                ForEach(shown.insights.devices) { device in
+                    shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
+                             total: shown.insights.totalWords)
+                }
+            }
+        }
         Section("Where I typed") {
             if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
-            ForEach(shown.insights.applications) { app in appRow(app, total: shown.insights.totalWords) }
+            ForEach(shown.insights.applications) { app in
+                shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
+                         words: app.words, total: shown.insights.totalWords)
+            }
         }
         Section {
             DisclosureGroup("How I count") {
-                Text("Based on \(all.entryCount.formatted()) saved History entries. Deleting entries and retention lower these totals. Words come from each entry's saved final text, so re-transcriptions and rewrites count again.")
+                let devices = all.devices.count > 1 ? " from \(all.devices.count.formatted()) devices" : ""
+                Text("Based on \(all.entryCount.formatted()) saved History entries\(devices). Deleting entries and retention lower these totals. Words come from each entry's saved final text, so re-transcriptions and rewrites count again.")
                 Text("Typing saved is how long the words would take to type at \(HistoryInsights.typingWordsPerMinute.formatted()) words a minute, less the time you spent talking. Talking time is recorded audio, silence included. Speaking pace divides words by that time. Both leave out entries without usable audio.")
                 Text("The period at the top sets everything except Streak, which always counts back from today. App percentages use that period's total words. The cloud shows the nouns you said most and counts \"chart\" and \"charts\" as one word.")
+                if all.devices.contains(where: { $0.kind == HistoryDevice.iPhone }) {
+                    Text("An iPhone keyboard can't tell which app it types into, so iPhone dictations count under the iPhone. Older iPhone dictations have no recorded length, so they count as words but not towards typing saved or speaking pace.")
+                }
                 Text("Days and hours use when each dictation started, in \(all.calendar.timeZone.identifier). Weeks begin on \(weekStart(all).formatted(.dateTime.weekday(.wide))). A streak needs words on consecutive days and can end today or yesterday.")
                 Text("Everything is counted on this Mac. Insights never send transcripts or statistics anywhere.")
             }
@@ -281,18 +297,30 @@ struct InsightsView: View {
         UInt64(Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0) &* 3 + UInt64(period.rawValue)
     }
 
-    // MARK: Apps
+    // MARK: Devices and apps
 
-    private func appRow(_ app: InsightApplication, total: Int) -> some View {
-        let share = Double(app.words) / Double(max(1, total))
+    private func symbol(_ deviceKind: String?) -> String {
+        switch deviceKind {
+        case HistoryDevice.mac: "laptopcomputer"
+        case HistoryDevice.iPhone: "iphone"
+        default: "laptopcomputer.and.iphone"
+        }
+    }
+
+    /// An app or a device with its share of the period's words. Devices add their dictations.
+    private func shareRow(_ name: String, bundleIdentifier: String? = nil, symbol: String, words: Int, dictations: Int? = nil,
+                          total: Int) -> some View {
+        let share = Double(words) / Double(max(1, total))
         let percent = share > 0 && share < 0.01 ? "<1%" : share.formatted(.percent.precision(.fractionLength(0)))
+        let counts = ["\(words.formatted()) \(words == 1 ? "word" : "words")",
+                      dictations.map { "\($0.formatted()) \($0 == 1 ? "dictation" : "dictations")" }].compactMap { $0 }
         return HStack(spacing: 10) {
-            AppIcon(bundleIdentifier: app.bundleIdentifier, size: 24)
+            AppIcon(bundleIdentifier: bundleIdentifier, size: 24, symbol: symbol)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(app.name).fontWeight(.medium).textSelection(.enabled)
+                    Text(name).fontWeight(.medium).textSelection(.enabled)
                     Spacer()
-                    Text("\(app.words.formatted()) \(app.words == 1 ? "word" : "words") · \(percent)")
+                    Text((counts + [percent]).joined(separator: " · "))
                         .font(.status).foregroundStyle(.secondary).monospacedDigit()
                 }
                 Capsule().fill(GoblinBrand.moss.opacity(0.16)).frame(height: 4)
@@ -302,8 +330,8 @@ struct InsightsView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(app.name)
-        .accessibilityValue("\(app.words) words, \(percent)")
+        .accessibilityLabel(name)
+        .accessibilityValue((counts + [percent]).joined(separator: ", "))
     }
 
     // MARK: Loading

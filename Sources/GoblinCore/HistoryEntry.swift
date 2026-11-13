@@ -50,6 +50,9 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
     /// The pasted span's final text. Stored only when the outcome is `edited`:
     /// beyond the edit threshold the field may hold unrelated typing.
     public var editedText: String?
+    /// The ID of the device that made this entry. Nil means it was made here, before devices were recorded,
+    /// so every reader treats nil as this device.
+    public var device: String?
     public internal(set) var audioFilename: String?
 
     public init(id: UUID = UUID(), rawText: String, finalText: String, tone: String = "formal",
