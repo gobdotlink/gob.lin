@@ -90,6 +90,15 @@ public enum DiagnosticEngineStatus: String, Sendable {
     case loading, ready, unavailable
 }
 
+/// History sync as Diagnostics reports it.
+public enum DiagnosticHistorySync: Equatable, Sendable {
+    /// This build isn't signed for gob.lin's iCloud container.
+    case unsigned
+    /// History couldn't be opened when gob.lin started, so sync couldn't start either.
+    case historyUnopened
+    case status(HistorySyncStatus)
+}
+
 public struct DiagnosticEnvironment: Equatable, Sendable {
     public var microphonePermission: DiagnosticPermissionStatus
     public var accessibilityPermission: DiagnosticPermissionStatus
@@ -98,15 +107,14 @@ public struct DiagnosticEnvironment: Equatable, Sendable {
     public var defaultMicrophoneName: String?
     public var secureInput: Bool
     public var engineStatus: DiagnosticEngineStatus
-    /// Nil in a build that isn't signed for gob.lin's iCloud container.
-    public var historySync: HistorySyncStatus?
+    public var historySync: DiagnosticHistorySync
 
     public init(microphonePermission: DiagnosticPermissionStatus = .unknown,
                 accessibilityPermission: DiagnosticPermissionStatus = .unknown,
                 inputMonitoringPermission: DiagnosticPermissionStatus = .unknown,
                 microphoneNames: [String] = [], defaultMicrophoneName: String? = nil,
                 secureInput: Bool = false, engineStatus: DiagnosticEngineStatus = .awaitingSelection,
-                historySync: HistorySyncStatus? = nil) {
+                historySync: DiagnosticHistorySync = .unsigned) {
         self.microphonePermission = microphonePermission
         self.accessibilityPermission = accessibilityPermission
         self.inputMonitoringPermission = inputMonitoringPermission
@@ -158,7 +166,7 @@ public enum DiagnosticsReport {
                      "Input Monitoring permission (not required): \(environment.inputMonitoringPermission.rawValue)",
                      "Secure Input: \(environment.secureInput ? "enabled" : "disabled")",
                      "Speech engine: \(environment.engineStatus.rawValue)",
-                     "History sync: " + (environment.historySync.map { "\($0)" } ?? "unavailable in this build, which isn't signed for gob.lin's iCloud container"),
+                     "History sync: " + historySyncLine(environment.historySync),
                      "Microphones available: \(environment.microphoneNames.count)"]
         if includeDeviceNames {
             lines += environment.microphoneNames.map { "Microphone: " + safeDeviceName($0) }
@@ -174,6 +182,14 @@ public enum DiagnosticsReport {
         let formatter = ISO8601DateFormatter()
         lines += recent.map { "\(formatter.string(from: $0.date)) [\($0.failure.area.title)] \($0.failure.message)" }
         return lines.joined(separator: "\n")
+    }
+
+    private static func historySyncLine(_ sync: DiagnosticHistorySync) -> String {
+        switch sync {
+        case .unsigned: "unavailable in this build, which isn't signed for gob.lin's iCloud container"
+        case .historyUnopened: "unavailable, because History couldn't be opened when gob.lin started"
+        case .status(let status): "\(status)"
+        }
     }
 
     private static func milliseconds(_ value: Double) -> String {

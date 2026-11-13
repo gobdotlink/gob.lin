@@ -103,7 +103,7 @@ final class DiagnosticsModel: ObservableObject {
         else if activeFailures[.secureInput] == .secureInputEnabled { resolve(.secureInput) }
     }
 
-    func setHistorySync(_ status: HistorySyncStatus?) {
+    func setHistorySync(_ status: DiagnosticHistorySync) {
         environment.historySync = status
     }
 

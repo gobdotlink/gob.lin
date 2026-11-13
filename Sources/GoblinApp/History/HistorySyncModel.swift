@@ -9,7 +9,7 @@ final class HistorySyncModel: ObservableObject {
     private(set) var isAvailable: Bool
     @Published private(set) var isOn = false
     @Published private(set) var status: HistorySyncStatus = .off
-    var onStatus: ((HistorySyncStatus?) -> Void)?
+    var onStatus: ((DiagnosticHistorySync) -> Void)?
     private let history: HistoryModel
     private var engine: HistorySyncEngine?
     private var connecting = false
@@ -22,7 +22,8 @@ final class HistorySyncModel: ObservableObject {
 
     /// At launch: reads the switch, and syncs if it's on.
     func start() async {
-        guard isAvailable, let store = history.store else { onStatus?(nil); return }
+        guard isAvailable else { onStatus?(.unsigned); return }
+        guard let store = history.store else { onStatus?(.historyUnopened); return }
         isOn = (try? await store.isSyncEnabled()) == true
         show(await HistorySyncEngine.status(of: store))
         if isOn { await connect(store) }
@@ -98,6 +99,6 @@ final class HistorySyncModel: ObservableObject {
         self.status = status
         // Sync turned itself off; the status row says why.
         if status == .purged || status == .differentAccount { isOn = false }
-        onStatus?(status)
+        onStatus?(.status(status))
     }
 }
