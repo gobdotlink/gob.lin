@@ -13,6 +13,8 @@ final class HistorySyncModel: ObservableObject {
     private let history: HistoryModel
     private var engine: HistorySyncEngine?
     private var connecting = false
+    /// Keep was raised while no engine was running: fetch everything once one is.
+    private var keepRaisedMeanwhile = false
     private static let log = Logger(subsystem: GoblinMetadata.bundleIdentifier + ".history-sync", category: "app")
 
     init(history: HistoryModel, enabled: Bool) {
@@ -58,8 +60,10 @@ final class HistorySyncModel: ObservableObject {
     }
 
     /// Keep was raised: what the old Keep left out comes back from iCloud.
+    // ponytail: remembered until quit only, so a raise made while sync is off is lost if gob.lin quits before the
+    // switch goes on. Save it with the engine's state if that matters.
     func keepRaised() {
-        guard let engine else { return }
+        guard let engine else { keepRaisedMeanwhile = true; return }
         Task { await engine.fetchAll() }
     }
 
@@ -79,6 +83,10 @@ final class HistorySyncModel: ObservableObject {
         // The switch went off while it was starting.
         guard isOn else { return await started.stop() }
         engine = started
+        if keepRaisedMeanwhile {
+            keepRaisedMeanwhile = false
+            Task { await started.fetchAll() }
+        }
         Task { [weak self] in
             for await update in started.updates {
                 switch update {
