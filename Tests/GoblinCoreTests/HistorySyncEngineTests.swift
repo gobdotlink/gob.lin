@@ -27,6 +27,7 @@ private actor FakeCloud: HistorySyncTransport {
     var fetchFails = false
     var maximumBatchBytes = Int.max
     var beforeAcknowledging: (@Sendable () async throws -> Void)?
+    var onStop: (@Sendable () async -> Void)?
     private(set) var fetches = 0, zonesQueued = 0, stops = 0
     private(set) var batches: [Int] = []
     /// Every record name ever saved.
@@ -62,7 +63,10 @@ private actor FakeCloud: HistorySyncTransport {
     func fetch() { adopt(); schedule(.fetch) }
     func send() { adopt(); schedule(.send) }
     func account() -> HistorySyncAccount? { adopt(); return user }
-    func stop() { stops += 1 }
+    func stop() async {
+        stops += 1
+        if let hook = onStop { onStop = nil; await hook() }
+    }
 
     func listDictations() throws -> [String: Date] {
         if listingFails { throw CancellationError() }
@@ -178,6 +182,7 @@ private actor FakeCloud: HistorySyncTransport {
     func set(user: HistorySyncAccount?) { self.user = user }
     func set(fetchFails: Bool) { self.fetchFails = fetchFails }
     func set(beforeAcknowledging: @escaping @Sendable () async throws -> Void) { self.beforeAcknowledging = beforeAcknowledging }
+    func set(onStop: @escaping @Sendable () async -> Void) { self.onStop = onStop }
     func set(failing name: UUID, _ failure: HistorySyncFailure?) { failing[name.uuidString] = failure }
     func set(listingFails: Bool) { self.listingFails = listingFails }
     func set(maximumBatchBytes: Int) { self.maximumBatchBytes = maximumBatchBytes }
@@ -186,6 +191,13 @@ private actor FakeCloud: HistorySyncTransport {
 }
 
 private func ids(_ store: HistoryStore) async throws -> Set<UUID> { Set(try await store.entries(limit: 10_000).map(\.id)) }
+
+/// This device's Keep, which the person can change while sync runs.
+private actor Keep {
+    var retention: HistoryRetention
+    init(_ retention: HistoryRetention) { self.retention = retention }
+    func set(_ retention: HistoryRetention) { self.retention = retention }
+}
 
 @discardableResult
 private func add(_ store: HistoryStore, _ text: String = "mine", at date: Date = start) async throws -> UUID {
@@ -484,6 +496,44 @@ final class HistorySyncEngineTests {
         #expect(cloud.connections.last! == nil)
         #expect(await cloud.run(engine))
         #expect(try await ids(store) == [newer])
+        #expect(await engine.status == .syncing)
+    }
+
+    @Test func stoppingWhileSyncTurnsItselfOffStillReportsTheCleanup() async throws {
+        let (store, cloud, engine, mine, _) = try await synced()
+        // The app stops the engine as soon as it hears the status, while the engine is still removing their dictations.
+        await cloud.set(onStop: { await engine.stop() })
+        await engine.handle(.account(.switched("someone else")))
+        var updates: [HistorySyncUpdate] = []
+        for await update in engine.updates { updates.append(update) }
+        #expect(updates.suffix(2) == [.status(.differentAccount), .historyChanged])
+        #expect(try await ids(store) == [mine])
+    }
+
+    @Test func raisingKeepFetchesEverythingAgainAndBringsBackWhatItLeftOut() async throws {
+        #expect(HistoryRetention(maximumUnstarredCount: 2).keepsMore(than: HistoryRetention(maximumUnstarredCount: 1)))
+        #expect(HistoryRetention(maximumAgeDays: 7).keepsMore(than: HistoryRetention(maximumAgeDays: 7)) == false)
+        #expect(HistoryRetention().keepsMore(than: HistoryRetention(maximumAgeDays: 30)))
+        #expect(HistoryRetention(maximumAgeDays: 7).keepsMore(than: HistoryRetention()) == false)
+
+        let store = try await makeStore(), cloud = FakeCloud(), keep = Keep(HistoryRetention(maximumUnstarredCount: 1))
+        try await cloud.put("older")
+        try await cloud.put("newer")
+        let engine = HistorySyncEngine(store: store, retention: { await keep.retention })
+        try await engine.begin { cloud.connect($0) }
+        #expect(await cloud.run(engine))
+        #expect(try await ids(store).count == 1)
+
+        // Fetching changes alone can't bring it back: iCloud has nothing new.
+        await keep.set(HistoryRetention())
+        await engine.syncNow()
+        #expect(await cloud.run(engine))
+        #expect(try await ids(store).count == 1)
+
+        await engine.fetchAll()
+        #expect(cloud.connections.last! == nil)
+        #expect(await cloud.run(engine))
+        #expect(try await ids(store) == (await cloud.dictations))
         #expect(await engine.status == .syncing)
     }
 

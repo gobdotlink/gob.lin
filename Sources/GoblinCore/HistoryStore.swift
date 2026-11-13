@@ -458,9 +458,9 @@ public actor HistoryStore {
     /// - A save of a dictation with unsent edits keeps the server's record with this device's changed keys on top,
     ///   still to be sent. A save conflict goes through here too, with the server's record.
     /// - A record iCloud saved at or before the last Delete All is dropped here and its deletion queued.
-    /// - `retention` is this device's Keep. A fetched dictation it would trim isn't kept, so a later fetch, even a full
-    ///   one, never brings back what was trimmed. Raising Keep doesn't bring trimmed dictations back either: that
-    ///   would need a full fetch, which the app step decides on.
+    /// - `retention` is this device's Keep. A fetched dictation it would trim isn't kept, so a later fetch under the
+    ///   same Keep, even a full one, never brings back what was trimmed. After Keep is raised,
+    ///   `HistorySyncEngine.fetchAll()` does.
     @discardableResult
     public func applyRemote(saves: [HistoryRemoteRecord] = [], deletions: [UUID] = [], settings: HistoryRemoteSettings? = nil,
                             retention: HistoryRetention = HistoryRetention(), now: Date = Date()) throws -> HistoryRemoteResult {

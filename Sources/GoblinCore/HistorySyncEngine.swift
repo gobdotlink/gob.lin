@@ -39,7 +39,8 @@ public actor HistorySyncEngine {
     static let maximumItems = 250
 
     /// Status changes and remote History changes. An `AsyncStream` has one consumer: an app that needs several fans
-    /// it out.
+    /// it out. It ends after `stop()`, or by itself when sync turns itself off (`purged`, `differentAccount`), after
+    /// the History changes that makes, so keep listening until it ends.
     public nonisolated let updates: AsyncStream<HistorySyncUpdate>
     private let continuation: AsyncStream<HistorySyncUpdate>.Continuation
     private let store: HistoryStore
@@ -145,9 +146,21 @@ public actor HistorySyncEngine {
         await transport?.fetch()
     }
 
-    /// Stops syncing. The saved state stays, so starting again resumes.
+    /// Fetches everything in iCloud again, from no saved state. Call when this device's Keep was raised: what the
+    /// earlier Keep left out comes back.
+    public func fetchAll() async {
+        guard transport != nil else { return }
+        saved.refetch = true
+        try? await persist()
+        try? await reconnect(from: nil)
+        publish()
+    }
+
+    /// Stops syncing. The saved state stays, so starting again resumes. Safe at any time: once sync has turned itself
+    /// off, `updates` ends only after the cleanup that follows has been reported.
     public func stop() async {
         await shutDown()
+        if saved.purged || saved.differentAccount { return }
         continuation.finish()
     }
 
@@ -343,6 +356,7 @@ public actor HistorySyncEngine {
             // Stop first, so nothing more goes to the new account even if the cleanup below fails.
             saved = Saved(account: user, differentAccount: true)
             await shutDown()
+            defer { continuation.finish() }
             try await store.setSyncEnabled(false)
             try await store.forgetServerState(keepingOthers: false)
             continuation.yield(.historyChanged)
@@ -386,6 +400,7 @@ public actor HistorySyncEngine {
             // Stop first, so nothing more goes up even if the cleanup below fails.
             saved = Saved(account: saved.account, purged: true)
             await shutDown()
+            defer { continuation.finish() }
             try await store.setSyncEnabled(false)
             try await store.forgetServerState(keepingOthers: true)
             try await persist()
