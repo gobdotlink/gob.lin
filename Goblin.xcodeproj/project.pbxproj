@@ -37,6 +37,7 @@
 		705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */; };
 		70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 207BD8F4E044F60F721FB22C /* InsertionSettingsView.swift */; };
 		722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD14CC141C14EE017D44E28D /* HistoryModel.swift */; };
+		6C80FAC86E09E529E620AAFE /* HistorySyncModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3698E8EBA1CA5C72213CF9D3 /* HistorySyncModel.swift */; };
 		7260C18615F4E0E5A0F6A077 /* OverlaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BE891A8C745EA83E98C8DC /* OverlaySettingsView.swift */; };
 		75603E9EA9B586CFE778063E /* Goblin.icns in Resources */ = {isa = PBXBuildFile; fileRef = 8C7DC821C59D20E3BD8E9846 /* Goblin.icns */; };
 		7A570615D99771B775D264EF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD3A88B3315580E9F903DD8 /* SettingsView.swift */; };
@@ -110,6 +111,7 @@
 		C4F9320537C5DBC8DE439C48 /* t3-a2feae1a */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "t3-a2feae1a"; path = .; sourceTree = SOURCE_ROOT; };
 		C6772E9F3CB47679C0B563E6 /* StatusMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusMenu.swift; sourceTree = "<group>"; };
 		CD14CC141C14EE017D44E28D /* HistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryModel.swift; sourceTree = "<group>"; };
+		3698E8EBA1CA5C72213CF9D3 /* HistorySyncModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySyncModel.swift; sourceTree = "<group>"; };
 		D2CADA2FD0B5602E82686E92 /* EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTap.swift; sourceTree = "<group>"; };
 		D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToneSettingsView.swift; sourceTree = "<group>"; };
 		D61CB02F720D7AE745147AE0 /* DictationOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationOverlay.swift; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 			children = (
 				CD14CC141C14EE017D44E28D /* HistoryModel.swift */,
 				C411F12B06D1390B82A0A8D4 /* HistoryRetentionView.swift */,
+				3698E8EBA1CA5C72213CF9D3 /* HistorySyncModel.swift */,
 				5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */,
 				AAC73565C924F4F70CD7F9BB /* InsightsView.swift */,
 				2745F4B71BDEC692D53F93C8 /* PixelWordCloud.swift */,
@@ -409,6 +412,7 @@
 				90BA4272E95E7192F6993A4E /* GoblinApplicationDelegate.swift in Sources */,
 				17DE722B8188E72BD1744DFA /* GoblinBrand.swift in Sources */,
 				722F4A7DD03FB2B20842851A /* HistoryModel.swift in Sources */,
+				6C80FAC86E09E529E620AAFE /* HistorySyncModel.swift in Sources */,
 				9AE239E8FD294A935F51AEEC /* HistoryRetentionView.swift in Sources */,
 				F80F9DD8AE1771A3DE51D7BA /* HistoryView.swift in Sources */,
 				B0790DF17C16F4F6F82B99D8 /* HotkeyService.swift in Sources */,
