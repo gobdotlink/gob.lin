@@ -48,9 +48,12 @@ final class HistorySyncModel: ObservableObject {
         Task { await engine.historyChanged() }
     }
 
-    /// Coming to the front, or Try Again.
+    /// Coming to the front, or Try Again. With the switch on and no engine, starting failed: it tries again.
     func syncNow() {
-        guard let engine else { return }
+        guard let engine else {
+            if isOn, let store = history.store { Task { await connect(store) } }
+            return
+        }
         Task { await engine.syncNow() }
     }
 
