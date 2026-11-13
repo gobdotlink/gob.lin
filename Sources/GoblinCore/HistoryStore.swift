@@ -286,7 +286,8 @@ public actor HistoryStore {
         var removed = 0
         let rows = try database.query("""
             SELECT entries.id, entries.created_at, entries.audio_filename,
-                   (sync.server IS NULL AND \(Self.entryDevice) = ?) OR (COALESCE(sync.pending, 0) & \(SyncPending.edits)) != 0
+                   ((sync.server IS NULL AND \(Self.entryDevice) = ?) OR (COALESCE(sync.pending, 0) & \(SyncPending.edits)) != 0)
+                   AND (COALESCE(sync.pending, 0) & \(SyncPending.localOnly)) = 0
             FROM entries LEFT JOIN sync ON sync.id = entries.id
             WHERE entries.starred = 0 ORDER BY entries.created_at DESC, entries.id DESC
             """, [.text(deviceID), .text(deviceID)])
@@ -294,9 +295,9 @@ public actor HistoryStore {
             let tooMany = policy.maximumUnstarredCount.map { index >= $0 } ?? false
             let tooOld = cutoff.map { (Double(row[1] ?? "") ?? .infinity) < $0.timeIntervalSince1970 } ?? false
             guard tooMany || tooOld else { continue }
-            // While syncing, a dictation iCloud hasn't confirmed may be the only copy of it, so it waits until it's sent.
-            // ponytail: Keep isn't enforced while uploads can't happen (signed out, iCloud full); the step that adds
-            // the engine marks a dictation too big to ever upload as local only, so it stops waiting here.
+            // While syncing, a dictation iCloud hasn't confirmed may be the only copy of it, so it waits until it's sent,
+            // unless it's too big to ever be sent. ponytail: Keep isn't enforced while uploads can't happen (signed
+            // out, iCloud full).
             if syncing && row[3] == "1" { continue }
             let audio = try row[2].map { try audioURL(filename: $0) }
             if let audio { try removeAudioIfPresent(audio) }
@@ -314,6 +315,35 @@ public actor HistoryStore {
         try database.setMeta(MetaKey.enabled, enabled ? "1" : nil)
     }
 
+    public func isSyncEnabled() throws -> Bool { try syncEnabled() }
+
+    /// The sync engine's own saved state, which History keeps without reading.
+    func engineState() throws -> Data? { try database.meta(MetaKey.engine).flatMap { Data(base64Encoded: $0) } }
+
+    func setEngineState(_ state: Data?) throws { try database.setMeta(MetaKey.engine, state?.base64EncodedString()) }
+
+    /// A dictation too big for one iCloud record stays on this device: it's never sent, and Keep stops waiting for it.
+    func markLocalOnly(id: UUID) throws {
+        try database.run("INSERT INTO sync (id, pending) VALUES (?, \(SyncPending.localOnly)) ON CONFLICT(id) DO UPDATE SET pending = sync.pending | \(SyncPending.localOnly)",
+                         [.text(id.uuidString)])
+    }
+
+    /// After signing out of iCloud: other devices' dictations belong to the account that left, so they go. This
+    /// device's own stay with what iCloud knows of them, and so do unsent deletions and a Delete All's purge, in case
+    /// the same account signs back in.
+    @discardableResult
+    func removeOtherDevices() throws -> Int {
+        var removed = 0
+        try database.transaction {
+            for row in try database.query("SELECT id FROM entries WHERE \(Self.entryDevice) != ?", [.text(deviceID), .text(deviceID)]) {
+                guard let id = row[0].flatMap(UUID.init(uuidString:)), try removeEntry(id) else { continue }
+                try database.run("DELETE FROM sync WHERE id = ? AND (pending & \(SyncPending.delete)) = 0", [.text(id.uuidString)])
+                removed += 1
+            }
+        }
+        return removed
+    }
+
     /// Call once the first complete fetch has been applied. Until then, a Delete All already in iCloud isn't applied to
     /// this device's own unsent dictations, which weren't part of what was cleared.
     public func markJoined() throws {
@@ -326,11 +356,11 @@ public actor HistoryStore {
     /// and drops its own unsent dictations from before it; sending first would put them back on every device.
     public func pendingChanges() throws -> HistoryPendingChanges {
         var changes = HistoryPendingChanges()
-        // A dictation too big for one record will be marked local only by the engine step and left out here.
         changes.saves = try database.query("""
             SELECT entries.id FROM entries LEFT JOIN sync ON sync.id = entries.id
-            WHERE (sync.server IS NULL AND \(Self.entryDevice) = ?)
-               OR (sync.server IS NOT NULL AND (sync.pending & \(SyncPending.edits)) != 0)
+            WHERE ((sync.server IS NULL AND \(Self.entryDevice) = ?)
+               OR (sync.server IS NOT NULL AND (sync.pending & \(SyncPending.edits)) != 0))
+              AND (COALESCE(sync.pending, 0) & \(SyncPending.localOnly)) = 0
             ORDER BY entries.created_at DESC, entries.id DESC
             """, [.text(deviceID), .text(deviceID)]).compactMap { $0[0].flatMap(UUID.init(uuidString:)) }
         changes.deletions = try database.query("SELECT id FROM sync WHERE (pending & \(SyncPending.delete)) != 0")
@@ -476,7 +506,7 @@ public actor HistoryStore {
                 }
             }
             try database.run("DELETE FROM sync")
-            for key in [MetaKey.joined, MetaKey.clearedThrough, MetaKey.settingsServer, MetaKey.settingsPending,
+            for key in [MetaKey.joined, MetaKey.engine, MetaKey.clearedThrough, MetaKey.settingsServer, MetaKey.settingsPending,
                         MetaKey.settingsRevision, MetaKey.purgeThrough] { try database.setMeta(key, nil) }
         }
     }
@@ -599,13 +629,14 @@ private enum SQLValue { case text(String), number(Double), null }
 
 /// Bits in `sync.pending`: what iCloud hasn't confirmed yet.
 private enum SyncPending {
-    static let starred = 1, edit = 2, delete = 4
+    static let starred = 1, edit = 2, delete = 4, localOnly = 8
     static let edits = starred | edit
 }
 
 private enum MetaKey {
     static let enabled = "sync.enabled"
     static let joined = "sync.joined"
+    static let engine = "sync.engine"
     static let purgeThrough = "sync.purgeThrough"
     static let clearedThrough = "settings.clearedThrough"
     static let settingsServer = "settings.server"
