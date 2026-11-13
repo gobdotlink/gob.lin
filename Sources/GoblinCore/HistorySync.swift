@@ -9,6 +9,9 @@ public enum HistorySync {
     /// The body format this build writes and understands. A record with a higher one is left out of History.
     public static let formatVersion = 1
 
+    /// The name of the one record holding the shared settings; every other record is named by its entry's UUID.
+    static let settingsName = "Settings"
+
     /// Stands for the device of an incoming dictation that names none, so it is never read as this device's.
     static let unknownDevice = "unknown"
 
@@ -74,7 +77,7 @@ struct HistorySyncSettings: Codable, Sendable, Equatable {
 }
 
 /// A dictation record fetched from iCloud, or returned by it when a save conflicts.
-public struct HistoryRemoteRecord: Sendable {
+public struct HistoryRemoteRecord: Sendable, Equatable {
     public var id: UUID
     public var body: Data
     public var formatVersion: Int
@@ -90,7 +93,7 @@ public struct HistoryRemoteRecord: Sendable {
 }
 
 /// The shared settings record fetched from iCloud.
-public struct HistoryRemoteSettings: Sendable {
+public struct HistoryRemoteSettings: Sendable, Equatable {
     public var body: Data
     public var formatVersion: Int
     public var serverFields: Data
