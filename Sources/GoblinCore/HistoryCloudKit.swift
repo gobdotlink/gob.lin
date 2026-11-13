@@ -126,17 +126,23 @@ struct HistoryCloudKit: HistorySyncTransport {
         engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: HistorySync.zoneID))])
     }
 
-    // Started, not awaited: the engine delivers their events to the delegate, which may be waiting on this call.
-    func fetch() async { Task { [engine] in try? await engine.fetchChanges() } }
+    // Started, not awaited: the engine delivers their events to the delegate, which may be waiting on this call. Only
+    // this call's return says whether the fetch succeeded, after the engine has delivered all of its events.
+    func fetch() async {
+        Task { [engine, delegate] in
+            let succeeded = (try? await engine.fetchChanges()) != nil
+            await delegate.fetchFinished(succeeded: succeeded, engine: engine)
+        }
+    }
 
     func send() async { Task { [engine] in try? await engine.sendChanges() } }
 
     func stop() async { Task { [engine] in await engine.cancelOperations() } }
 
-    func hasAccount() async -> Bool? {
+    func account() async -> HistorySyncAccount? {
         switch try? await container.accountStatus() {
-        case .available: true
-        case .noAccount: false
+        case .available: (try? await container.userRecordID()).map { .signedIn($0.recordName) }
+        case .noAccount: .signedOut
         default: nil
         }
     }
@@ -146,9 +152,10 @@ struct HistoryCloudKit: HistorySyncTransport {
         do {
             while more {
                 let page = try await container.privateCloudDatabase.recordZoneChanges(inZoneWith: HistorySync.zoneID, since: token, desiredKeys: [])
+                // A record that didn't come back fails the listing, so the purge waits for one that's complete.
                 for (id, change) in page.modificationResultsByID {
-                    guard case .success(let change) = change, change.record.recordType == HistorySync.dictationType,
-                          let created = change.record.creationDate else { continue }
+                    let record = try change.get().record
+                    guard record.recordType == HistorySync.dictationType, let created = record.creationDate else { continue }
                     result[id.recordName] = created
                 }
                 token = page.changeToken
@@ -200,8 +207,6 @@ struct HistoryCloudKit: HistorySyncTransport {
                                                 .map(\.recordID.recordName)))
             case .didFetchRecordZoneChanges(let result):
                 if result.zoneID == HistorySync.zoneID, result.error != nil { await owner.handle(.fetchFailed) }
-            case .didFetchChanges:
-                await owner.handle(.fetchFinished)
             case .sentRecordZoneChanges(let sent):
                 await owner.handle(.sent(sent.savedRecords.map {
                                              HistorySyncSent(name: $0.recordID.recordName, serverFields: HistorySync.systemFields($0),
@@ -217,6 +222,11 @@ struct HistoryCloudKit: HistorySyncTransport {
             default:
                 break
             }
+        }
+
+        func fetchFinished(succeeded: Bool, engine: CKSyncEngine) async {
+            guard await owner.isCurrent(engine) else { return }
+            await owner.handle(.fetchFinished(succeeded: succeeded))
         }
 
         func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext,

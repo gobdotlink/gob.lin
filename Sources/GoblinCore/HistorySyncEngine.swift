@@ -43,7 +43,7 @@ public actor HistorySyncEngine {
     private let continuation: AsyncStream<HistorySyncUpdate>.Continuation
     private let store: HistoryStore
     private let retention: @Sendable () async -> HistoryRetention
-    private var connect: (@Sendable (Data?) async throws -> any HistorySyncTransport)?
+    private var connect: (@Sendable (Data?) -> any HistorySyncTransport)?
     private(set) var transport: (any HistorySyncTransport)?
     private var saved = Saved()
     private var lastStatus: HistorySyncStatus?
@@ -93,8 +93,9 @@ public actor HistorySyncEngine {
     }
 
     /// Loads the saved state and connects. `connect` makes the transport, resuming from the state it's given; nil means
-    /// start over with a full fetch.
-    func begin(connect: @escaping @Sendable (Data?) async throws -> any HistorySyncTransport) async throws {
+    /// start over with a full fetch. It runs on this actor without suspending, so the transport is current before its
+    /// engine can deliver anything.
+    func begin(connect: @escaping @Sendable (Data?) -> any HistorySyncTransport) async throws {
         self.connect = connect
         if let data = try await store.engineState() { saved = (try? JSONDecoder().decode(Saved.self, from: data)) ?? Saved() }
         // The switch is on, so the person turned sync back on after it turned itself off.
@@ -110,15 +111,23 @@ public actor HistorySyncEngine {
     private func reconnect(from serialization: Data?) async throws {
         guard let connect else { return }
         await transport?.stop()
-        let transport = try await connect(serialization)
-        self.transport = transport
         fetchedSinceSend = false
         sending = false
         attempted = []
         fullFetch = serialization == nil
         fetched = []
+        let transport = connect(serialization)
+        self.transport = transport
         if fullFetch { await transport.queueZone() }
-        account = await transport.hasAccount()
+        // Who's signed in, without waiting for the engine to say: a different person turns sync off before anything
+        // moves.
+        let current = await transport.account()
+        account = current.map { $0 != .signedOut }
+        if case .signedIn(let user)? = current, saved.account != user {
+            guard saved.account == nil else { try await accountChanged(.switched(user)); return }
+            saved.account = user
+            try await persist()
+        }
         await queuePending()
         publish()
         await transport.fetch()
@@ -188,7 +197,7 @@ public actor HistorySyncEngine {
                     try await persist()
                 }
             case .fetchFailed: fetchFailed = true
-            case .fetchFinished: try await fetchFinished()
+            case .fetchFinished(let succeeded): try await fetchFinished(succeeded)
             case .sent(let sent, let deleted, let failed): try await self.sent(sent, deleted: deleted, failed: failed)
             case .sendFinished:
                 if sending { fetchedSinceSend = false }
@@ -220,9 +229,12 @@ public actor HistorySyncEngine {
         await queuePending()
     }
 
-    private func fetchFinished() async throws {
-        // Without a complete fetch this device may not know about a Delete All, so nothing goes up yet.
-        guard !fetchFailed else { fetchFailed = false; return }
+    /// A fetch this engine asked for has returned. Unless it succeeded, with every zone and page applied, this device
+    /// may not know about a Delete All or a deletion, so nothing is reconciled here and nothing goes up.
+    private func fetchFinished(_ succeeded: Bool) async throws {
+        let complete = succeeded && !fetchFailed
+        fetchFailed = false
+        guard complete else { return }
         account = true
         if saved.refetch && !fullFetch { try await reconnect(from: nil); return }
         if fullFetch {
@@ -264,9 +276,18 @@ public actor HistorySyncEngine {
         }
         if !sent.isEmpty { full = false }
         try await store.markDeleted(ids: deleted.compactMap(UUID.init(uuidString:)))
+        // A change made while its record was on its way is still pending here, but the engine has just let go of the
+        // record, so it goes back in the queue.
+        let names = Set(sent.map(\.name))
+        if !names.isEmpty {
+            let pending = try await store.pendingChanges()
+            var again = pending.saves.map(\.uuidString).filter(names.contains).map(HistorySyncChange.save)
+            if pending.settings, names.contains(HistorySync.settingsName) { again.append(.save(HistorySync.settingsName)) }
+            if !again.isEmpty { await transport?.queue(again) }
+        }
         // Failures this device can resolve go out again with the engine's next send. Others wait for a later fetch,
         // `syncNow()` or the next launch, so a send that keeps failing never becomes a loop.
-        var resolved = false
+        var resolved = false, halved = false
         for failure in failed {
             switch failure {
             case .conflict(.dictation(let server)):
@@ -290,7 +311,8 @@ public actor HistorySyncEngine {
                 full = true
             case .tooBig(let name):
                 if lastBatchCount > 1 {
-                    byteBudget = max(byteBudget / 2, 1)
+                    // Once for the request, however many of its records it names.
+                    if !halved { byteBudget = max(byteBudget / 2, 1); halved = true }
                     resolved = true
                 } else if let id = UUID(uuidString: name) {
                     try await store.markLocalOnly(id: id)
@@ -315,12 +337,13 @@ public actor HistorySyncEngine {
             // first full fetch, start a fresh one, so deletions made while signed out are applied here too.
             if fullFetch { await queuePending() } else { saved.refetch = true; try await persist(); try await reconnect(from: nil) }
         case .signedIn(let user), .switched(let user):
-            try await store.forgetServerState(keepingOthers: false)
+            // Stop first, so nothing more goes to the new account even if the cleanup below fails.
             saved = Saved(account: user, differentAccount: true)
-            try await persist()
-            try await store.setSyncEnabled(false)
-            continuation.yield(.historyChanged)
             await shutDown()
+            try await store.setSyncEnabled(false)
+            try await store.forgetServerState(keepingOthers: false)
+            continuation.yield(.historyChanged)
+            try await persist()
         }
     }
 
@@ -338,17 +361,21 @@ public actor HistorySyncEngine {
     }
 
     private func zoneDeleted(_ deletion: HistorySyncZoneDeletion) async throws {
-        try await store.forgetServerState(keepingOthers: true)
         switch Self.outcome(of: deletion) {
         case .keepAndTurnOff:
+            // Stop first, so nothing more goes up even if the cleanup below fails.
             saved = Saved(account: saved.account, purged: true)
-            try await persist()
-            try await store.setSyncEnabled(false)
             await shutDown()
-        case .uploadAgain:
+            try await store.setSyncEnabled(false)
+            try await store.forgetServerState(keepingOthers: true)
             try await persist()
-            await transport?.queueZone()
-            await queuePending()
+        case .uploadAgain:
+            // Start over from no engine state, so only what History says is pending goes up, not what was queued.
+            try await store.forgetServerState(keepingOthers: true)
+            saved.serialization = nil
+            saved.refetch = true
+            try await persist()
+            try await reconnect(from: nil)
         }
     }
 
@@ -451,7 +478,9 @@ enum HistorySyncEvent: Sendable {
     case zoneDeleted(HistorySyncZoneDeletion)
     case fetched([HistoryRemote], deletions: [String])
     case fetchFailed
-    case fetchFinished
+    /// A fetch this engine asked for returned. The engine's own end-of-fetch event carries no error, so only this says
+    /// whether it succeeded.
+    case fetchFinished(succeeded: Bool)
     case sent([HistorySyncSent], deleted: [String], failed: [HistorySyncFailure])
     case sendFinished
 }
@@ -468,13 +497,13 @@ protocol HistorySyncTransport: Sendable {
     func queue(_ changes: [HistorySyncChange]) async
     func unqueue(_ changes: [HistorySyncChange]) async
     func queueZone() async
-    /// Starts a fetch; its changes arrive as events, ending with `.fetchFinished`.
+    /// Starts a fetch. Its changes arrive as events, then `.fetchFinished` once the fetch has returned.
     func fetch() async
     /// Starts a send; batches come from `nextBatch`, results arrive as events, ending with `.sendFinished`.
     func send() async
     /// Every dictation record in the zone, by name, with when iCloud first saved it.
     func listDictations() async throws -> [String: Date]
-    /// True with an account, false without one, nil when iCloud can't say right now.
-    func hasAccount() async -> Bool?
+    /// Who's signed in: their user record name, `.signedOut` with no account, nil when iCloud can't say right now.
+    func account() async -> HistorySyncAccount?
     func stop() async
 }

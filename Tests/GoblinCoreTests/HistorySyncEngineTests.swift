@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import GoblinCore
 #if canImport(CloudKit)
@@ -20,35 +21,47 @@ private actor FakeCloud: HistorySyncTransport {
     var pending: [HistorySyncChange] = []
     var operations: [Operation] = []
     var now = start
-    var account: Bool? = true
+    var user: HistorySyncAccount? = .signedIn("person")
     var failing: [String: HistorySyncFailure] = [:]
     var listingFails = false
+    var fetchFails = false
     var maximumBatchBytes = Int.max
+    var beforeAcknowledging: (@Sendable () async throws -> Void)?
     private(set) var fetches = 0, zonesQueued = 0, stops = 0
     private(set) var batches: [Int] = []
     /// Every record name ever saved.
     private(set) var everSaved: Set<String> = []
-    private(set) var connections: [Data?] = []
+    /// Recorded as `connect` runs, which can't wait for this actor; the engine's side starts over from each one.
+    private nonisolated let connectionLog = Mutex<[Data?]>([])
+    private var adopted = 0
+    nonisolated var connections: [Data?] { connectionLog.withLock { $0 } }
 
-    func connect(_ serialization: Data?) -> FakeCloud {
-        connections.append(serialization)
-        token = serialization.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
-        pending = []
-        operations = []
+    nonisolated func connect(_ serialization: Data?) -> FakeCloud {
+        connectionLog.withLock { $0.append(serialization) }
         return self
     }
 
+    private func adopt() {
+        let connections = connections
+        guard connections.count > adopted else { return }
+        adopted = connections.count
+        token = connections.last!.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
+        pending = []
+        operations = []
+    }
+
     func queue(_ changes: [HistorySyncChange]) {
+        adopt()
         let new = changes.filter { !pending.contains($0) }
         pending += new
         if !new.isEmpty { schedule(.send) }
     }
 
-    func unqueue(_ changes: [HistorySyncChange]) { pending.removeAll(where: changes.contains) }
-    func queueZone() { zonesQueued += 1 }
-    func fetch() { schedule(.fetch) }
-    func send() { schedule(.send) }
-    func hasAccount() -> Bool? { account }
+    func unqueue(_ changes: [HistorySyncChange]) { adopt(); pending.removeAll(where: changes.contains) }
+    func queueZone() { adopt(); zonesQueued += 1 }
+    func fetch() { adopt(); schedule(.fetch) }
+    func send() { adopt(); schedule(.send) }
+    func account() -> HistorySyncAccount? { adopt(); return user }
     func stop() { stops += 1 }
 
     func listDictations() throws -> [String: Date] {
@@ -64,6 +77,7 @@ private actor FakeCloud: HistorySyncTransport {
     @discardableResult
     func run(_ engine: HistorySyncEngine, limit: Int = 100) async -> Bool {
         for _ in 0..<limit {
+            adopt()
             guard !operations.isEmpty else { return true }
             switch operations.removeFirst() {
             case .fetch: await fetch(into: engine)
@@ -75,6 +89,7 @@ private actor FakeCloud: HistorySyncTransport {
 
     private func fetch(into engine: HistorySyncEngine) async {
         fetches += 1
+        guard !fetchFails else { await engine.handle(.fetchFinished(succeeded: false)); return }
         // From no state, iCloud returns what exists and no deletions.
         var changes: [HistoryRemote] = [], deletions: [String] = []
         for name in Set(log[min(token, log.count)...]) {
@@ -83,13 +98,14 @@ private actor FakeCloud: HistorySyncTransport {
         token = log.count
         if !changes.isEmpty || !deletions.isEmpty { await engine.handle(.fetched(changes, deletions: deletions)) }
         await engine.handle(.state(Data(String(token).utf8)))
-        await engine.handle(.fetchFinished)
+        await engine.handle(.fetchFinished(succeeded: true))
     }
 
     private func send(from engine: HistorySyncEngine) async {
         guard !pending.isEmpty else { return }
         while !pending.isEmpty, let batch = await engine.nextBatch(pending) {
             batches.append(batch.count)
+            if let hook = beforeAcknowledging { beforeAcknowledging = nil; try? await hook() }
             var sent: [HistorySyncSent] = [], failed: [HistorySyncFailure] = []
             let tooBig = batch.saves.map(\.record.body.count).reduce(0, +) > maximumBatchBytes
             for (name, outgoing) in batch.saves {
@@ -159,7 +175,9 @@ private actor FakeCloud: HistorySyncTransport {
     /// iCloud's copy is gone, as after a reset.
     func wipe() { records = [:]; log = []; token = 0 }
 
-    func set(account: Bool?) { self.account = account }
+    func set(user: HistorySyncAccount?) { self.user = user }
+    func set(fetchFails: Bool) { self.fetchFails = fetchFails }
+    func set(beforeAcknowledging: @escaping @Sendable () async throws -> Void) { self.beforeAcknowledging = beforeAcknowledging }
     func set(failing name: UUID, _ failure: HistorySyncFailure?) { failing[name.uuidString] = failure }
     func set(listingFails: Bool) { self.listingFails = listingFails }
     func set(maximumBatchBytes: Int) { self.maximumBatchBytes = maximumBatchBytes }
@@ -186,7 +204,7 @@ final class HistorySyncEngineTests {
 
     private func makeEngine(_ store: HistoryStore, _ cloud: FakeCloud, keep: HistoryRetention = HistoryRetention()) async throws -> HistorySyncEngine {
         let engine = HistorySyncEngine(store: store, retention: { keep })
-        try await engine.begin { await cloud.connect($0) }
+        try await engine.begin { cloud.connect($0) }
         return engine
     }
 
@@ -195,7 +213,6 @@ final class HistorySyncEngineTests {
         let store = try await makeStore(), cloud = FakeCloud()
         let theirs = try await cloud.put(), mine = try await add(store)
         let engine = try await makeEngine(store, cloud)
-        await engine.handle(.account(.signedIn("person")))
         #expect(await cloud.run(engine))
         #expect(try await ids(store) == [mine, theirs])
         #expect(await cloud.dictations == [mine, theirs])
@@ -338,7 +355,10 @@ final class HistorySyncEngineTests {
         #expect(updates.last == .status(.purged))
         #expect(await HistorySyncEngine.status(of: store) == .purged)
 
+        // A star on another device's dictation was queued before the reset; only what History says is pending goes up.
         let (other, otherCloud, otherEngine, otherMine, otherTheirs) = try await synced()
+        try await other.setStarred(true, id: otherTheirs)
+        await otherEngine.historyChanged()
         await otherCloud.wipe()
         await otherEngine.handle(.zoneDeleted(.encryptedDataReset))
         #expect(await otherCloud.run(otherEngine))
@@ -357,7 +377,7 @@ final class HistorySyncEngineTests {
 
         // iCloud can't say, or the account is restricted: wait, removing nothing.
         await engine.stop()
-        await cloud.set(account: nil)
+        await cloud.set(user: nil)
         engine = try await makeEngine(store, cloud)
         #expect(await engine.status == .waitingForAccount)
         #expect(try await ids(store) == [mine, theirs])
@@ -369,10 +389,10 @@ final class HistorySyncEngineTests {
 
         // The same person signs back in, after another device deleted this one's dictation.
         await cloud.remove(mine)
-        let connections = await cloud.connections.count
+        let connections = cloud.connections.count
         await engine.handle(.account(.signedIn("person")))
-        #expect(await cloud.connections.count == connections + 1)
-        #expect(await cloud.connections.last! == nil)
+        #expect(cloud.connections.count == connections + 1)
+        #expect(cloud.connections.last! == nil)
         #expect(await cloud.run(engine))
         #expect(try await ids(store) == [theirs])
         #expect(await cloud.dictations == [theirs])
@@ -434,12 +454,15 @@ final class HistorySyncEngineTests {
         #expect(try await store.applyRetention(HistoryRetention(maximumUnstarredCount: 300)) == 1)
         #expect(try await !ids(store).contains(big))
 
-        // iCloud says a request is too big: smaller batches until it fits.
+        // iCloud says a request is too big: smaller batches until it fits, halving once per request.
         await cloud.set(maximumBatchBytes: 40_000)
         for _ in 0..<100 { try await add(store, String(repeating: "b", count: 1000)) }
+        let batches = await cloud.batches.count
         await engine.historyChanged()
         #expect(await cloud.run(engine))
         #expect(await cloud.dictations.count == 400)
+        let smaller = Array(await cloud.batches.dropFirst(batches))
+        #expect(smaller.count < 20, "\(smaller)")
     }
 
     @Test func dictationsFromANewerBuildWaitForAnUpdateThenArriveWithAFullFetch() async throws {
@@ -458,10 +481,55 @@ final class HistorySyncEngineTests {
         try await store.setEngineState(JSONEncoder().encode(saved))
         await cloud.set(format: HistorySync.formatVersion, of: newer)
         engine = try await makeEngine(store, cloud)
-        #expect(await cloud.connections.last! == nil)
+        #expect(cloud.connections.last! == nil)
         #expect(await cloud.run(engine))
         #expect(try await ids(store) == [newer])
         #expect(await engine.status == .syncing)
+    }
+
+    @Test func theAccountIsKnownFromTheStartAndADifferentOneTurnsSyncOff() async throws {
+        let (store, cloud, engine, mine, _) = try await synced()
+        let saved = try JSONDecoder().decode(HistorySyncEngine.Saved.self, from: try #require(try await store.engineState()))
+        #expect(saved.account == "person")
+        await engine.stop()
+
+        // Someone else is signed in at the next launch, and the engine never says so.
+        await cloud.set(user: .signedIn("someone else"))
+        let batches = await cloud.batches.count
+        let next = try await makeEngine(store, cloud)
+        #expect(await next.status == .differentAccount)
+        #expect(try await ids(store) == [mine])
+        #expect(try await !store.isSyncEnabled())
+        #expect(await cloud.run(next))
+        #expect(await cloud.batches.count == batches)
+    }
+
+    @Test func aFetchThatFailsRemovesNothingAndSendsNothing() async throws {
+        let (store, cloud, engine, mine, theirs) = try await synced()
+        let new = try await add(store, "new")
+        await cloud.set(fetchFails: true)
+        // The same person signing back in starts a full fetch, which fails without naming a zone.
+        await engine.handle(.account(.signedIn("person")))
+        #expect(await cloud.run(engine))
+        #expect(try await ids(store) == [mine, theirs, new])
+        #expect(await !cloud.dictations.contains(new))
+
+        await cloud.set(fetchFails: false)
+        await engine.syncNow()
+        #expect(await cloud.run(engine))
+        #expect(try await ids(store) == [mine, theirs, new])
+        #expect(await cloud.dictations == [mine, theirs, new])
+    }
+
+    @Test func aChangeMadeWhileItsRecordIsOnItsWayStillGoesOut() async throws {
+        let (store, cloud, engine, mine, _) = try await synced()
+        try await store.setStarred(true, id: mine)
+        await engine.historyChanged()
+        await cloud.set(beforeAcknowledging: { try await store.setStarred(false, id: mine) })
+        #expect(await cloud.run(engine))
+        let body = try JSONSerialization.jsonObject(with: await cloud.records[mine.uuidString]!.body) as! [String: Any]
+        #expect(body["starred"] as? Bool == false)
+        #expect(try await store.pendingChanges() == HistoryPendingChanges())
     }
 
     @Test func aFullFetchCutShortStartsOverAtTheNextLaunch() async throws {
@@ -471,12 +539,12 @@ final class HistorySyncEngineTests {
         await engine.stop()
 
         engine = try await makeEngine(store, cloud)
-        #expect(await cloud.connections == [nil, nil])
+        #expect(cloud.connections == [nil, nil])
         #expect(await cloud.run(engine))
         await engine.stop()
 
         engine = try await makeEngine(store, cloud)
-        #expect(await cloud.connections.last! != nil)
+        #expect(cloud.connections.last! != nil)
         await engine.stop()
     }
 }
