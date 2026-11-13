@@ -56,14 +56,13 @@ struct SettingsCapture {
                                                      scope: DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin"))
                 }
                 var window = window
-                @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false, contrast: Bool = false) async throws {
+                @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false) async throws {
                     // A fresh window per shot, so one view's toolbar never leaks into the next capture.
                     window.orderOut(nil)
                     window = CaptureWindow(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
                     window.isReleasedWhenClosed = false
-                    window.appearance = NSAppearance(named: contrast ? (dark ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua)
-                                                                     : (dark ? .darkAqua : .aqua))
+                    window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                     window.title = "gob.lin — \(name)"
                     window.setContentSize(size)
                     window.contentView = NSHostingView(rootView: view.allowsHitTesting(false))
@@ -115,9 +114,9 @@ struct SettingsCapture {
                                                                    ("update", .needsUpdate), ("purged", .purged), ("account", .differentAccount), ("off", .off)]
                     for (name, status) in statuses {
                         model.historySync.preview(status)
-                        for (suffix, dark, contrast) in [("", false, false), ("-dark", true, false), ("-contrast", false, true), ("-contrast-dark", true, true)] {
-                            try await shoot("settings-icloud-\(name)\(suffix)", SettingsView(model: model, speechModels: model.speechModels),
-                                            size: NSSize(width: 1040, height: 1080), dark: dark, contrast: contrast)
+                        for dark in [false, true] {
+                            try await shoot("settings-icloud-\(name)\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
+                                            size: NSSize(width: 1040, height: 1080), dark: dark)
                         }
                     }
                 }
