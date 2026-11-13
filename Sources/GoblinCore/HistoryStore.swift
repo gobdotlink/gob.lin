@@ -374,9 +374,12 @@ public actor HistoryStore {
     /// made before iCloud answers is sent afterwards even if sync is turned off meanwhile.
     public func outgoingRecord(id: UUID) throws -> HistoryOutgoingRecord? {
         try database.run("INSERT OR IGNORE INTO sync (id) SELECT id FROM entries WHERE id = ?", [.text(id.uuidString)])
-        guard let row = try database.query("SELECT entries.metadata, sync.server, COALESCE(sync.revision, 0) FROM entries LEFT JOIN sync ON sync.id = entries.id WHERE entries.id = ?",
-                                           [.text(id.uuidString)]).first, let metadata = row[0] else { return nil }
-        return HistoryOutgoingRecord(body: try HistorySync.body(metadata: metadata, device: deviceID),
+        guard let row = try database.query("""
+            SELECT entries.metadata, sync.server, COALESCE(sync.revision, 0), devices.kind, devices.name FROM entries
+            LEFT JOIN sync ON sync.id = entries.id LEFT JOIN devices ON devices.id = \(Self.entryDevice) WHERE entries.id = ?
+            """, [.text(deviceID), .text(id.uuidString)]).first, let metadata = row[0] else { return nil }
+        let named = row[3].flatMap { kind in row[4].map { (kind: kind, name: $0) } }
+        return HistoryOutgoingRecord(body: try HistorySync.body(metadata: metadata, device: deviceID, named: named),
                                      serverFields: row[1].flatMap { Data(base64Encoded: $0) }, revision: Int(row[2] ?? "") ?? 0)
     }
 
@@ -552,6 +555,11 @@ public actor HistoryStore {
             return
         }
         guard let incoming = try? HistorySync.metadata(body: record.body), incoming.entry.id == record.id else { result.unreadable += 1; return }
+        // ponytail: the last record applied names its device, so after a rename a full fetch may show the old name
+        // until that device sends again. Keep the date each device was named if that matters.
+        if let device = incoming.entry.device, device != deviceID, let named = incoming.named {
+            try database.saveDevice(id: device, kind: named.kind, name: named.name)
+        }
         var metadata = incoming.metadata
         if let local = try database.query("SELECT metadata FROM entries WHERE id = ?", [.text(id)]).first?[0] {
             // The recording stays where it is; keys this device changed and iCloud hasn't confirmed go back on top.

@@ -297,6 +297,37 @@ final class HistorySyncTests {
         #expect(try await mac.pendingChanges() == HistoryPendingChanges())
     }
 
+    @Test func eachDictationNamesItsDeviceSoInsightsCanShowIt() async throws {
+        var cloud = Cloud()
+        let mac = try await makeStore(), phone = try await makeStore()
+        try await mac.saveDevice(id: mac.deviceID, kind: HistoryDevice.mac, name: "Studio")
+        try await phone.saveDevice(id: phone.deviceID, kind: HistoryDevice.iPhone, name: "Pocket")
+        let id = try await add(phone)
+        try await cloud.send(phone)
+        try await cloud.fetch(mac)
+        // Insights tells devices apart by kind and name.
+        let devices = { (store: HistoryStore) async throws in
+            Set(try await store.insights(now: start.addingTimeInterval(3600)).devices.map(\.id))
+        }
+        #expect(try await devices(mac) == ["iphone:Pocket"])
+
+        // A record names the device that made it, whichever device sends it; the name isn't kept in the dictation.
+        try await mac.setStarred(true, id: id)
+        try await cloud.send(mac)
+        let body = try JSONSerialization.jsonObject(with: cloud.records[id]!.body) as! [String: Any]
+        #expect(body["device"] as? String == phone.deviceID && body["deviceName"] as? String == "Pocket")
+        #expect(try await mac.entry(id: id).starred)
+
+        // A renamed device's next dictation carries the new name, and nobody can rename this device.
+        try await phone.saveDevice(id: phone.deviceID, kind: HistoryDevice.iPhone, name: "Pocket 2")
+        try await add(phone)
+        try await add(mac)
+        try await cloud.send(phone)
+        try cloud.edit(id) { $0["device"] = mac.deviceID; $0["deviceName"] = "Impostor" }
+        try await cloud.fetch(mac)
+        #expect(try await devices(mac) == ["iphone:Pocket 2", "mac:Studio"])
+    }
+
     @Test func recordsFromANewerBuildOrThatCantBeReadAreLeftOut() async throws {
         let mac = try await makeStore()
         let body = try HistorySync.body(metadata: String(decoding: try JSONEncoder().encode(HistoryEntry(rawText: "a", finalText: "a")), as: UTF8.self), device: "x")
