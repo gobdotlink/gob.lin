@@ -6,7 +6,8 @@ public enum HistorySyncStatus: Sendable, Equatable {
     case off
     /// On, and sending and fetching as it can.
     case syncing
-    /// There's no iCloud account to sync with, or it isn't available right now. Nothing here is removed while waiting.
+    /// There's no iCloud account to sync with, or iCloud can't say who's signed in right now. Nothing here is removed
+    /// and nothing is sent while waiting.
     case waitingForAccount
     /// iCloud refused a dictation for lack of space. Sending waits for the next launch or `syncNow()`.
     case iCloudFull
@@ -48,6 +49,8 @@ public actor HistorySyncEngine {
     private var saved = Saved()
     private var lastStatus: HistorySyncStatus?
     private var account: Bool? = true
+    /// iCloud has said who's signed in on this connection, and it's the person History syncs with.
+    private var identified = false
     private var full = false
     /// The transport started from no saved state and its first fetch hasn't finished: when it does, whatever iCloud
     /// didn't return was deleted elsewhere.
@@ -118,16 +121,11 @@ public actor HistorySyncEngine {
         fetched = []
         let transport = connect(serialization)
         self.transport = transport
+        identified = false
         if fullFetch { await transport.queueZone() }
-        // Who's signed in, without waiting for the engine to say: a different person turns sync off before anything
-        // moves.
-        let current = await transport.account()
-        account = current.map { $0 != .signedOut }
-        if case .signedIn(let user)? = current, saved.account != user {
-            guard saved.account == nil else { try await accountChanged(.switched(user)); return }
-            saved.account = user
-            try await persist()
-        }
+        _ = try await identify()
+        // A different person is signed in, and sync has turned itself off.
+        guard self.transport != nil else { return }
         await queuePending()
         publish()
         await transport.fetch()
@@ -235,7 +233,9 @@ public actor HistorySyncEngine {
         let complete = succeeded && !fetchFailed
         fetchFailed = false
         guard complete else { return }
-        account = true
+        // Against someone else's iCloud, reconciling would remove this device's dictations, the purge would delete
+        // theirs, and sending would hand them this device's. So all of it waits until iCloud says who's signed in.
+        guard try await identify() else { return }
         if saved.refetch && !fullFetch { try await reconnect(from: nil); return }
         if fullFetch {
             if try await store.deleteMissing(fetched: fetched) > 0 { continuation.yield(.historyChanged) }
@@ -328,14 +328,17 @@ public actor HistorySyncEngine {
         switch change {
         case .signedOut:
             account = false
+            identified = false
             if try await store.removeOtherDevices() > 0 { continuation.yield(.historyChanged) }
         case .signedIn(let user) where saved.account == nil || saved.account == user:
-            account = true
             saved.account = user
             try await persist()
             // The engine dropped its pending changes when the account changed. Unless this transport is already on its
             // first full fetch, start a fresh one, so deletions made while signed out are applied here too.
             if fullFetch { await queuePending() } else { saved.refetch = true; try await persist(); try await reconnect(from: nil) }
+            // The engine has said who's signed in, so this connection needn't ask.
+            account = true
+            identified = true
         case .signedIn(let user), .switched(let user):
             // Stop first, so nothing more goes to the new account even if the cleanup below fails.
             saved = Saved(account: user, differentAccount: true)
@@ -345,6 +348,23 @@ public actor HistorySyncEngine {
             continuation.yield(.historyChanged)
             try await persist()
         }
+    }
+
+    /// Asks iCloud who's signed in, without waiting for the engine to say, until this connection knows. The first
+    /// person is remembered; a different one turns sync off before anything moves. False while iCloud can't say.
+    private func identify() async throws -> Bool {
+        guard !identified else { return true }
+        guard let transport else { return false }
+        let current = await transport.account()
+        account = current.map { $0 != .signedOut }
+        guard case .signedIn(let user)? = current else { return false }
+        if let known = saved.account, known != user {
+            try await accountChanged(.switched(user))
+            return false
+        }
+        if saved.account == nil { saved.account = user; try await persist() }
+        identified = true
+        return true
     }
 
     enum ZoneOutcome: Equatable { case keepAndTurnOff, uploadAgain }

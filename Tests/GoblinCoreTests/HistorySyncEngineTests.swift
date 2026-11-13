@@ -504,6 +504,30 @@ final class HistorySyncEngineTests {
         #expect(await cloud.batches.count == batches)
     }
 
+    @Test func nothingIsSentUntilICloudSaysWhoIsSignedIn() async throws {
+        for (next, sends) in [("someone else", false), ("person", true)] {
+            let (store, cloud, engine, _, _) = try await synced()
+            await engine.stop()
+            let new = try await add(store, "new")
+
+            // iCloud has an account but can't say whose: fetched changes may arrive, nothing goes up.
+            await cloud.set(user: nil)
+            let fetches = await cloud.fetches, batches = await cloud.batches.count
+            let relaunched = try await makeEngine(store, cloud)
+            #expect(await cloud.run(relaunched))
+            #expect(await cloud.fetches > fetches)
+            #expect(await cloud.batches.count == batches)
+            #expect(await relaunched.status == .waitingForAccount)
+
+            await cloud.set(user: .signedIn(next))
+            await relaunched.syncNow()
+            #expect(await cloud.run(relaunched))
+            #expect(await cloud.dictations.contains(new) == sends)
+            #expect(try await store.isSyncEnabled() == sends)
+            #expect(await relaunched.status == (sends ? .syncing : .differentAccount))
+        }
+    }
+
     @Test func aFetchThatFailsRemovesNothingAndSendsNothing() async throws {
         let (store, cloud, engine, mine, theirs) = try await synced()
         let new = try await add(store, "new")
