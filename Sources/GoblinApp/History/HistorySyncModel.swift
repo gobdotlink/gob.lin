@@ -9,10 +9,12 @@ final class HistorySyncModel: ObservableObject {
     private(set) var isAvailable: Bool
     @Published private(set) var isOn = false
     @Published private(set) var status: HistorySyncStatus = .off
-    var onStatus: ((HistorySyncStatus?) -> Void)?
+    var onStatus: ((DiagnosticHistorySync) -> Void)?
     private let history: HistoryModel
     private var engine: HistorySyncEngine?
     private var connecting = false
+    /// Keep was raised while no engine was running: fetch everything once one is.
+    private var keepRaisedMeanwhile = false
     private static let log = Logger(subsystem: GoblinMetadata.bundleIdentifier + ".history-sync", category: "app")
 
     init(history: HistoryModel, enabled: Bool) {
@@ -22,7 +24,8 @@ final class HistorySyncModel: ObservableObject {
 
     /// At launch: reads the switch, and syncs if it's on.
     func start() async {
-        guard isAvailable, let store = history.store else { onStatus?(nil); return }
+        guard isAvailable else { onStatus?(.unsigned); return }
+        guard let store = history.store else { onStatus?(.historyUnopened); return }
         isOn = (try? await store.isSyncEnabled()) == true
         show(await HistorySyncEngine.status(of: store))
         if isOn { await connect(store) }
@@ -47,15 +50,20 @@ final class HistorySyncModel: ObservableObject {
         Task { await engine.historyChanged() }
     }
 
-    /// Coming to the front, or Try Again.
+    /// Coming to the front, or Try Again. With the switch on and no engine, starting failed: it tries again.
     func syncNow() {
-        guard let engine else { return }
+        guard let engine else {
+            if isOn, let store = history.store { Task { await connect(store) } }
+            return
+        }
         Task { await engine.syncNow() }
     }
 
     /// Keep was raised: what the old Keep left out comes back from iCloud.
+    // ponytail: remembered until quit only, so a raise made while sync is off is lost if gob.lin quits before the
+    // switch goes on. Save it with the engine's state if that matters.
     func keepRaised() {
-        guard let engine else { return }
+        guard let engine else { keepRaisedMeanwhile = true; return }
         Task { await engine.fetchAll() }
     }
 
@@ -75,6 +83,10 @@ final class HistorySyncModel: ObservableObject {
         // The switch went off while it was starting.
         guard isOn else { return await started.stop() }
         engine = started
+        if keepRaisedMeanwhile {
+            keepRaisedMeanwhile = false
+            Task { await started.fetchAll() }
+        }
         Task { [weak self] in
             for await update in started.updates {
                 switch update {
@@ -98,6 +110,6 @@ final class HistorySyncModel: ObservableObject {
         self.status = status
         // Sync turned itself off; the status row says why.
         if status == .purged || status == .differentAccount { isOn = false }
-        onStatus?(status)
+        onStatus?(.status(status))
     }
 }

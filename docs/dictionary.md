@@ -33,7 +33,7 @@ Exact aliases continue to work for every model and every active entry. When Clea
 
 ## iCloud sync
 
-"Sync Dictionary" in Settings → General is off by default, and shows only in builds signed for iCloud. When on, the dictionary is kept in the person's iCloud key-value store, where their other devices read and write it. Nothing else syncs.
+"Sync Dictionary" in Settings → General is off by default, and shows only in builds signed for iCloud. When on, the dictionary is kept in the person's iCloud key-value store, where their other devices read and write it. This switch syncs nothing else; History has its own, "Sync History".
 
 iCloud keeps whichever copy was written last, so the copy itself has to merge. `SyncedDictionary` holds every entry with the time it last changed, plus a marker for each deleted entry. `SyncedDictionary.reconcile` notes what changed on this device since its last sync, merges the iCloud copy entry by entry with the newer side winning, and says whether iCloud is missing anything. A deletion is a change like any other, so a deleted word isn't brought back by a device that still has it.
 

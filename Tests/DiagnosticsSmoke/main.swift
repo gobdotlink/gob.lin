@@ -51,8 +51,10 @@ let withNames = DiagnosticsReport.render(environment: environment, activeFailure
 precondition(withNames.contains("Microphone: Private device name"))
 precondition(report.contains("History sync: unavailable in this build"))
 var syncing = environment
-syncing.historySync = .waitingForAccount
+syncing.historySync = .status(.waitingForAccount)
 precondition(DiagnosticsReport.render(environment: syncing, activeFailures: [], events: [], timings: nil).contains("History sync: waitingForAccount"))
+syncing.historySync = .historyUnopened
+precondition(DiagnosticsReport.render(environment: syncing, activeFailures: [], events: [], timings: nil).contains("History sync: unavailable, because History couldn't be opened"))
 precondition(!DiagnosticFailure.rewriteHTTPStatus(Int.max).message.contains(String(Int.max)))
 print("Diagnostics smoke passed: typed errors, redaction, bounded report, permissions, and stage timings.")
 

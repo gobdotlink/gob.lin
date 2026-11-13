@@ -4,6 +4,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 configuration="${1:-release}"
 case "$configuration" in debug|release) ;; *) printf 'Usage: scripts/build.sh [debug|release]\n' >&2; exit 2 ;; esac
+# History sync's CloudKit environment is Production unless GOBLIN_ICLOUD_ENVIRONMENT says Development. Naming one
+# asks for History sync, so a build that can't have it stops instead of signing without it.
+environment="${GOBLIN_ICLOUD_ENVIRONMENT:-Production}"
+case "$environment" in
+    Development|Production) ;;
+    *) printf 'GOBLIN_ICLOUD_ENVIRONMENT must be Development or Production, not %s.\n' "$environment" >&2; exit 1 ;;
+esac
+without_history_sync() {
+    if [ -n "${GOBLIN_ICLOUD_ENVIRONMENT:-}" ]; then
+        printf 'Cannot sign for the %s environment: %s.\n' "$environment" "$1" >&2
+        exit 1
+    fi
+}
 
 identity="${GOBLIN_SIGNING_IDENTITY:-gob.lin Local Development}"
 if [ "$identity" = '-' ]; then
@@ -75,14 +88,9 @@ if "$developer_id"; then
             /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team.app.goblin.dictation" \
                 -c "Add :com.apple.developer.team-identifier string $team" \
                 -c "Add :com.apple.developer.ubiquity-kvstore-identifier string $team.app.goblin.dictation" "$entitlements"
-            # History sync needs CloudKit and push, which a profile grants only once its App ID has gob.lin's container.
-            # The environment is Production unless GOBLIN_ICLOUD_ENVIRONMENT says Development, and the profile must allow it.
+            # History sync needs CloudKit and push, which a profile grants only once its App ID has gob.lin's container,
+            # and the profile must allow the environment.
             container=iCloud.app.goblin.dictation
-            environment="${GOBLIN_ICLOUD_ENVIRONMENT:-Production}"
-            case "$environment" in
-                Development|Production) ;;
-                *) printf 'GOBLIN_ICLOUD_ENVIRONMENT must be Development or Production, not %s.\n' "$environment" >&2; exit 1 ;;
-            esac
             granted() { /usr/libexec/PlistBuddy -c "Print :Entitlements:$1" "$staging/profile.plist" 2>/dev/null || true; }
             containers=$(granted com.apple.developer.icloud-container-identifiers)
             environments=$(granted com.apple.developer.icloud-container-environment)
@@ -100,17 +108,19 @@ if "$developer_id"; then
                     -c "Add :com.apple.developer.icloud-container-environment string $environment" \
                     -c "Add :com.apple.developer.aps-environment string $push" "$entitlements"
                 printf 'History sync: on, in the %s environment.\n' "$environment"
-            elif [ -n "${GOBLIN_ICLOUD_ENVIRONMENT:-}" ]; then
-                printf 'Cannot sign for the %s environment: %s.\n' "$environment" "$missing" >&2
-                exit 1
             else
+                without_history_sync "$missing"
                 printf 'Signing without History sync: %s.\n' "$missing" >&2
             fi
         else
+            without_history_sync "$profile was not issued for this certificate"
             printf 'Signing without iCloud: %s was not issued for this certificate.\n' "$profile" >&2
         fi
+    else
+        without_history_sync "there's no profile at $profile"
     fi
 else
+    without_history_sync "the signing certificate isn't Developer ID"
     # A self-signed certificate has no Apple anchor: pin its public identity, not the executable hash.
     signing=(--timestamp=none --requirements "=designated => identifier \"app.goblin.dictation\" and certificate leaf = H\"$certificate\"")
 fi
