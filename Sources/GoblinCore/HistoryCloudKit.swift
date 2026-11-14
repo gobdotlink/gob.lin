@@ -130,8 +130,10 @@ struct HistoryCloudKit: HistorySyncTransport {
 
     // Started, not awaited: the engine delivers their events to the delegate, which may be waiting on this call. Only
     // this call's return says whether the fetch succeeded, after the engine has delivered all of its events.
+    // Detached, because these are often asked for from inside a delegate callback: a task started there inherits the
+    // engine's mark that it's in one, and the engine stops the app when it's called back with that mark.
     func fetch() async {
-        Task { [engine, delegate] in
+        Task.detached { [engine, delegate] in
             var succeeded = true
             do { try await engine.fetchChanges() } catch {
                 succeeded = false
@@ -141,9 +143,9 @@ struct HistoryCloudKit: HistorySyncTransport {
         }
     }
 
-    func send() async { Task { [engine] in try? await engine.sendChanges() } }
+    func send() async { Task.detached { [engine] in try? await engine.sendChanges() } }
 
-    func stop() async { Task { [engine] in await engine.cancelOperations() } }
+    func stop() async { Task.detached { [engine] in await engine.cancelOperations() } }
 
     func account() async -> HistorySyncAccount? {
         let status = try? await container.accountStatus()
