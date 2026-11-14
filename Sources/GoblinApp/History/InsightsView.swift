@@ -284,17 +284,12 @@ struct InsightsView: View {
             .frame(maxWidth: .infinity, minHeight: 120)
         } else {
             VStack(spacing: 4) {
-                PixelWordCloud(words: shown.cloud.words, seed: cloudSeed(shown.period), period: description(shown.period))
+                PixelWordCloud(words: shown.cloud.words, seed: WordCloudLayout.seed(for: shown.period), period: description(shown.period))
                 Text("From \(entries.formatted()) \(entries == 1 ? "dictation" : "dictations") \(description(shown.period)). Hover a word to see how often you said it.")
                     .font(.meta).foregroundStyle(.secondary).monospacedDigit()
                     .frame(maxWidth: .infinity)
             }
         }
-    }
-
-    /// One picture per day and period, so the cloud doesn't reshuffle on every visit.
-    private func cloudSeed(_ period: InsightPeriod) -> UInt64 {
-        UInt64(Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0) &* 3 + UInt64(period.rawValue)
     }
 
     // MARK: Devices and apps
