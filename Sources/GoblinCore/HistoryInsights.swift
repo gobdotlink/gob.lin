@@ -228,6 +228,9 @@ public struct InsightWord: Sendable, Identifiable, Hashable {
 public struct InsightWordCloud: Sendable {
     public var words: [InsightWord] = []
     public var entryCount = 0
+    /// Some text was in a language without word classes on this device, so all its words counted. The system may still
+    /// be loading them: counting again with a `wordClassWait` waits for them.
+    public var missingWordClasses = false
 }
 
 /// Picks the nouns out of dictated text, by dictionary form, so "chart" and "charts" count as one word.
@@ -263,7 +266,7 @@ struct SpokenWordCounter {
         NLTagger.availableTagSchemes(for: .word, language: language).contains(.lexicalClass)
     }
 
-    /// When each language was first asked for this launch stops being waited for.
+    /// When each language's word classes were first asked for this launch.
     private static let asked = Mutex<[NLLanguage: ContinuousClock.Instant]>([:])
 
     /// Asks the system to load word classes and dictionary forms for `languages`, once a launch, and waits until one
@@ -272,8 +275,8 @@ struct SpokenWordCounter {
         let now = ContinuousClock.now
         let (new, deadline) = asked.withLock { asked in
             let new = languages.filter { asked[$0] == nil }
-            for language in new { asked[language] = now + limit }
-            return (new, languages.compactMap { asked[$0] }.max() ?? now)
+            for language in new { asked[language] = now }
+            return (new, (languages.compactMap { asked[$0] }.max() ?? now) + limit)
         }
         for language in new {
             for scheme in [NLTagScheme.lexicalClass, .lemma] { NLTagger.requestAssets(for: language, tagScheme: scheme) { _, _ in } }

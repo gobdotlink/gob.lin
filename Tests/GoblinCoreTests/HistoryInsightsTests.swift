@@ -173,14 +173,17 @@ struct HistoryInsightsTests {
         #expect(cloud.words.allSatisfy { !$0.word.hasSuffix(".") })
         // A one-character Chinese noun counts; Japanese particles, which the tagger cannot classify, do not.
         #expect(cloud.words.contains { $0.word == "书" } && !cloud.words.contains { ["と", "が", "は"].contains($0.word) })
+        // Japanese has no word classes here, so the cloud says some words were counted without them.
+        #expect(cloud.missingWordClasses && !today.missingWordClasses)
     }
 
     @Test func askingForWordClassesWaitsOnlyUntilTheLimitOnceALaunch() async {
         // Greek has no word classes, and asking for them never answers, so only the limit ends the wait.
         let clock = ContinuousClock()
         let first = await clock.measure { _ = await SpokenWordCounter.load([.greek], waitingAtMost: .milliseconds(300)) }
-        let again = await clock.measure { _ = await SpokenWordCounter.load([.greek], waitingAtMost: .seconds(30)) }
-        #expect(first < .seconds(3) && again < .seconds(1))
+        // The limit counts from the first ask this launch, which has passed.
+        let again = await clock.measure { _ = await SpokenWordCounter.load([.greek], waitingAtMost: .milliseconds(300)) }
+        #expect(first < .seconds(3) && again < .milliseconds(200))
     }
 
     @Test func selectedPeriodsKeepAppSharesAndCloudWithinTheSameDates() async throws {

@@ -185,8 +185,8 @@ public actor HistoryStore {
     }
 
     /// Reads saved final text in the requested period, retaining only word counts. A language whose word classes the
-    /// system hasn't loaded is counted word by word while they're asked for; `wordClassWait` is how long, at most, to
-    /// wait for them and count again, once a launch.
+    /// system hasn't loaded is counted word by word while they're asked for; `wordClassWait` is how long after they
+    /// were first asked for this launch to keep waiting for them, and count again once they arrive.
     public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40,
                             device: String? = nil, wordClassWait: Duration = .zero) async throws -> InsightWordCloud {
         let (cloud, unclassified) = try countWords(now: now, calendar: calendar, period: period, limit: limit, device: device)
@@ -208,6 +208,7 @@ public actor HistoryStore {
             }
         }
         cloud.words = SpokenWordCounter.top(counts, limit: limit)
+        cloud.missingWordClasses = !counter.unclassified.isEmpty
         return (cloud, counter.unclassified)
     }
 
