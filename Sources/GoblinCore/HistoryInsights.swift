@@ -228,9 +228,15 @@ public struct InsightWord: Sendable, Identifiable, Hashable {
 public struct InsightWordCloud: Sendable {
     public var words: [InsightWord] = []
     public var entryCount = 0
-    /// Some text was in a language without word classes on this device, so all its words counted. The system may still
-    /// be loading them: counting again with a `wordClassWait` waits for them.
-    public var missingWordClasses = false
+    /// Languages whose text counted every word, because this device has no word classes for them or hasn't loaded them
+    /// yet. Counting asked the system for them.
+    public var languagesWithoutWordClasses: Set<NLLanguage> = []
+
+    /// Waits until word classes arrive for one of those languages, at most `limit` after they were first asked for this
+    /// launch, and says whether they did. Counting again then finds the nouns.
+    public func wordClassesArrive(within limit: Duration) async -> Bool {
+        await SpokenWordCounter.wait(for: languagesWithoutWordClasses, limit: limit)
+    }
 }
 
 /// Picks the nouns out of dictated text, by dictionary form, so "chart" and "charts" count as one word.
@@ -269,18 +275,24 @@ struct SpokenWordCounter {
     /// When each language's word classes were first asked for this launch.
     private static let asked = Mutex<[NLLanguage: ContinuousClock.Instant]>([:])
 
-    /// Asks the system to load word classes and dictionary forms for `languages`, once a launch, and waits until one
-    /// of them has word classes, at most `limit` after it was first asked for. Returns whether one has them now.
-    static func load(_ languages: Set<NLLanguage>, waitingAtMost limit: Duration) async -> Bool {
+    /// Asks the system to load word classes and dictionary forms for `languages`, once a launch.
+    static func ask(_ languages: Set<NLLanguage>) {
         let now = ContinuousClock.now
-        let (new, deadline) = asked.withLock { asked in
+        let new = asked.withLock { asked in
             let new = languages.filter { asked[$0] == nil }
             for language in new { asked[language] = now }
-            return (new, (languages.compactMap { asked[$0] }.max() ?? now) + limit)
+            return new
         }
         for language in new {
             for scheme in [NLTagScheme.lexicalClass, .lemma] { NLTagger.requestAssets(for: language, tagScheme: scheme) { _, _ in } }
         }
+    }
+
+    /// Waits until one of `languages` has word classes, at most `limit` after they were first asked for this launch.
+    static func wait(for languages: Set<NLLanguage>, limit: Duration) async -> Bool {
+        guard !languages.isEmpty else { return false }
+        ask(languages)
+        let deadline = (asked.withLock { asked in languages.compactMap { asked[$0] }.max() } ?? .now) + limit
         // ponytail: polls, because a request for a language that has no word classes never answers.
         while !languages.contains(where: classifies), ContinuousClock.now < deadline,
               (try? await Task.sleep(for: .milliseconds(250))) != nil {}
