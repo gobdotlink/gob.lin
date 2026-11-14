@@ -159,8 +159,9 @@ final class AppModel: ObservableObject {
                 else if self.dictionary.available { self.diagnostics.resolve(.dictionary) }
             }
         }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).sink { [weak self] _ in
-            Task { @MainActor in self?.refreshConfiguration() }
+        // Posted on whichever thread changed a default, and CloudKit changes some off the main one.
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: DispatchQueue.main).sink { [weak self] _ in
+            self?.refreshConfiguration()
         }.store(in: &subscriptions)
         hotkeys.$recording.sink { [weak self] recording in
             Task { @MainActor in self?.overlay.model.handsFree = recording == .handsFree }
