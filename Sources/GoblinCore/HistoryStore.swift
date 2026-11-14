@@ -1,5 +1,6 @@
 import CSQLite
 import Foundation
+import NaturalLanguage
 
 public enum HistoryFilter: Sendable, Hashable {
     case all, starred, withWarnings, application(String)
@@ -183,11 +184,20 @@ public actor HistoryStore {
         return accumulator.finish()
     }
 
-    /// Reads saved final text in the requested period, retaining only word counts.
+    /// Reads saved final text in the requested period, retaining only word counts. A language whose word classes the
+    /// system hasn't loaded is counted word by word while they're asked for; `wordClassWait` is how long, at most, to
+    /// wait for them and count again, once a launch.
     public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40,
-                            device: String? = nil) throws -> InsightWordCloud {
+                            device: String? = nil, wordClassWait: Duration = .zero) async throws -> InsightWordCloud {
+        let (cloud, unclassified) = try countWords(now: now, calendar: calendar, period: period, limit: limit, device: device)
+        guard !unclassified.isEmpty, await SpokenWordCounter.load(unclassified, waitingAtMost: wordClassWait) else { return cloud }
+        return try countWords(now: now, calendar: calendar, period: period, limit: limit, device: device).cloud
+    }
+
+    private func countWords(now: Date, calendar: Calendar, period: InsightPeriod, limit: Int,
+                            device: String?) throws -> (cloud: InsightWordCloud, unclassified: Set<NLLanguage>) {
         let scope = insightScope(now: now, since: period.start(now: now, calendar: calendar), device: device)
-        let counter = SpokenWordCounter()
+        var counter = SpokenWordCounter()
         var counts: [String: Int] = [:], cloud = InsightWordCloud()
         try database.forEachRow("SELECT final_text FROM entries WHERE \(scope.sql)", scope.values) { row in
             try Task.checkCancellation()
@@ -198,7 +208,7 @@ public actor HistoryStore {
             }
         }
         cloud.words = SpokenWordCounter.top(counts, limit: limit)
-        return cloud
+        return (cloud, counter.unclassified)
     }
 
     /// The device that made an entry, binding this device's ID for entries saved before devices were recorded.
