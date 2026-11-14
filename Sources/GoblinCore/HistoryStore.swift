@@ -74,6 +74,13 @@ public actor HistoryStore {
         try database.saveDevice(id: id, kind: kind, name: name)
     }
 
+    /// Every recorded device's name, by its ID, so a dictation can say where it was made.
+    public func deviceNames() throws -> [String: String] {
+        try database.query("SELECT id, name FROM devices").reduce(into: [:]) { names, row in
+            if let id = row[0], let name = row[1] { names[id] = name }
+        }
+    }
+
     /// Copy the original capture before trimming; the caller keeps it until this succeeds.
     @discardableResult
     public func insert(_ entry: HistoryEntry, untrimmedAudioURL: URL? = nil) throws -> HistoryEntry {
@@ -176,11 +183,12 @@ public actor HistoryStore {
         return accumulator.finish()
     }
 
-    /// Reads saved final text in the requested period, retaining only word counts.
+    /// Reads saved final text in the requested period, retaining only word counts. Text in a language whose word classes
+    /// the system hasn't loaded counts every word, and they're asked for; see `InsightWordCloud.wordClassesArrive`.
     public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40,
                             device: String? = nil) throws -> InsightWordCloud {
         let scope = insightScope(now: now, since: period.start(now: now, calendar: calendar), device: device)
-        let counter = SpokenWordCounter()
+        var counter = SpokenWordCounter()
         var counts: [String: Int] = [:], cloud = InsightWordCloud()
         try database.forEachRow("SELECT final_text FROM entries WHERE \(scope.sql)", scope.values) { row in
             try Task.checkCancellation()
@@ -191,6 +199,8 @@ public actor HistoryStore {
             }
         }
         cloud.words = SpokenWordCounter.top(counts, limit: limit)
+        cloud.languagesWithoutWordClasses = counter.unclassified
+        SpokenWordCounter.ask(counter.unclassified)
         return cloud
     }
 
