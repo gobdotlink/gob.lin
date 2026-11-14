@@ -74,6 +74,13 @@ public actor HistoryStore {
         try database.saveDevice(id: id, kind: kind, name: name)
     }
 
+    /// Every recorded device's name, by its ID, so a dictation can say where it was made.
+    public func deviceNames() throws -> [String: String] {
+        try database.query("SELECT id, name FROM devices").reduce(into: [:]) { names, row in
+            if let id = row[0], let name = row[1] { names[id] = name }
+        }
+    }
+
     /// Copy the original capture before trimming; the caller keeps it until this succeeds.
     @discardableResult
     public func insert(_ entry: HistoryEntry, untrimmedAudioURL: URL? = nil) throws -> HistoryEntry {
