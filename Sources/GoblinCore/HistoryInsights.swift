@@ -239,17 +239,20 @@ struct SpokenWordCounter {
 
     mutating func nouns(in text: String) -> [String] {
         tagger.string = text
+        // On iOS, asking which schemes a language has is what loads word classes the device has downloaded; tagging
+        // without asking gave every word OtherWord. The answer itself can be wrong, so the tags decide below.
+        let language = tagger.dominantLanguage
+        if let language { _ = NLTagger.availableTagSchemes(for: .word, language: language) }
         var tokens: [(tag: NLTag?, range: Range<String.Index>)] = []
         tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
                              options: [.omitWhitespace, .omitPunctuation, .omitOther]) { tag, range in
             tokens.append((tag, range))
             return true
         }
-        // The tags, not the system's list of schemes, say whether this device has the language's word classes: the
-        // list can be wrong either way, and without them every word is OtherWord.
+        // Without the language's word classes, every word is OtherWord.
         // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
         let classified = tokens.contains { $0.tag != nil && $0.tag != .otherWord }
-        if !classified, !tokens.isEmpty, let language = tagger.dominantLanguage { unclassified.insert(language) }
+        if !classified, !tokens.isEmpty, let language { unclassified.insert(language) }
         return tokens.compactMap { tag, range in
             guard !classified || tag == .noun else { return nil }
             let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
