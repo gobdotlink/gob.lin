@@ -1,5 +1,6 @@
 import CSQLite
 import Foundation
+import NaturalLanguage
 
 public enum HistoryFilter: Sendable, Hashable {
     case all, starred, withWarnings, application(String)
@@ -183,14 +184,21 @@ public actor HistoryStore {
         return accumulator.finish()
     }
 
-    /// Reads saved final text in the requested period, retaining only word counts. Text in a language whose word classes
-    /// this device hasn't loaded counts every word, and they're asked for.
+    /// Reads saved final text in the requested period, retaining only word counts. Text in a language this device has no
+    /// word classes for counts every word.
     public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40,
-                            device: String? = nil) throws -> InsightWordCloud {
+                            device: String? = nil) async throws -> InsightWordCloud {
         let scope = insightScope(now: now, since: period.start(now: now, calendar: calendar), device: device)
-        var counter = SpokenWordCounter()
+        let query = "SELECT final_text FROM entries WHERE \(scope.sql)"
+        // Word classes are settled before any tagging: a tagger that ran before they loaded gave every word OtherWord.
+        var languages: Set<NLLanguage> = []
+        try database.forEachRow(query, scope.values) { row in
+            try Task.checkCancellation()
+            languages.formUnion(SpokenWordCounter.paragraphs(of: row[0] ?? "").compactMap(\.language))
+        }
+        let counter = SpokenWordCounter(classified: await SpokenWordCounter.classified(languages))
         var counts: [String: Int] = [:], cloud = InsightWordCloud()
-        try database.forEachRow("SELECT final_text FROM entries WHERE \(scope.sql)", scope.values) { row in
+        try database.forEachRow(query, scope.values) { row in
             try Task.checkCancellation()
             guard let text = row[0], !text.isEmpty else { return }
             cloud.entryCount += 1
@@ -199,7 +207,6 @@ public actor HistoryStore {
             }
         }
         cloud.words = SpokenWordCounter.top(counts, limit: limit)
-        SpokenWordCounter.ask(counter.unclassified)
         return cloud
     }
 

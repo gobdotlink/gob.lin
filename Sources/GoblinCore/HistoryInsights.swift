@@ -1,5 +1,6 @@
 import Foundation
 import NaturalLanguage
+import os
 import Synchronization
 
 public enum InsightPeriod: Int, Sendable {
@@ -233,36 +234,35 @@ public struct InsightWordCloud: Sendable {
 /// Picks the nouns out of dictated text, by dictionary form, so "chart" and "charts" count as one word.
 struct SpokenWordCounter {
     private let tagger = NLTagger(tagSchemes: [.lexicalClass, .lemma])
-    /// Languages met without word classes on this device, either because they have none or because the system
-    /// hasn't loaded them yet.
-    private(set) var unclassified: Set<NLLanguage> = []
+    /// Languages whose request for word classes answered that they're here. Text in them keeps only its nouns, even
+    /// when the tagger finds none.
+    let classified: Set<NLLanguage>
 
-    mutating func nouns(in text: String) -> [String] {
+    /// Each paragraph of `text` and the language the tagger reads it in. Word classes come a paragraph at a time, in
+    /// that language, so a Japanese paragraph has none beside an English one that has them.
+    static func paragraphs(of text: String) -> [(range: Range<String.Index>, language: NLLanguage?)] {
+        let tagger = NLTagger(tagSchemes: [.language])
         tagger.string = text
-        // Word classes come a paragraph at a time, in that paragraph's language, so a Japanese paragraph has none
-        // beside an English one that has them.
-        let splitter = NLTokenizer(unit: .paragraph)
-        splitter.string = text
-        let paragraphs = splitter.tokens(for: text.startIndex..<text.endIndex).map {
-            (range: $0, language: NLLanguageRecognizer.dominantLanguage(for: String(text[$0])))
+        return tagger.tags(in: text.startIndex..<text.endIndex, unit: .paragraph, scheme: .language).map {
+            (range: $0.1, language: $0.0.map { NLLanguage($0.rawValue) })
         }
-        // On iOS, asking which schemes a language has is what loads word classes the device has downloaded; tagging
-        // without asking gave every word OtherWord. The answer itself can be wrong, so the tags decide below.
-        for language in Set(paragraphs.compactMap(\.language)) { _ = NLTagger.availableTagSchemes(for: .word, language: language) }
+    }
+
+    func nouns(in text: String) -> [String] {
+        tagger.string = text
         var words: [String] = []
-        for paragraph in paragraphs {
+        for paragraph in Self.paragraphs(of: text) {
             var tokens: [(tag: NLTag?, range: Range<String.Index>)] = []
             tagger.enumerateTags(in: paragraph.range, unit: .word, scheme: .lexicalClass,
                                  options: [.omitWhitespace, .omitPunctuation, .omitOther]) { tag, range in
                 tokens.append((tag, range))
                 return true
             }
-            // Without the language's word classes, every word is OtherWord.
+            // The tagger's classes count too: it can read a short line in a language other than the one guessed for it.
             // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
-            let classified = tokens.contains { $0.tag != nil && $0.tag != .otherWord }
-            if !classified, !tokens.isEmpty, let language = paragraph.language { unclassified.insert(language) }
+            let nounsOnly = paragraph.language.map(classified.contains) == true || tokens.contains { $0.tag != nil && $0.tag != .otherWord }
             words += tokens.compactMap { tag, range in
-                guard !classified || tag == .noun else { return nil }
+                guard !nounsOnly || tag == .noun else { return nil }
                 let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
                 // Abbreviation-style tokens keep their full stop ("Dia."); the cloud wants the word alone.
                 let word = (lemma.flatMap { $0.isEmpty ? nil : $0 } ?? String(text[range])).lowercased()
@@ -275,21 +275,36 @@ struct SpokenWordCounter {
         return words
     }
 
-    /// Languages whose word classes were asked for this launch.
-    private static let asked = Mutex<Set<NLLanguage>>([])
+    /// What each language's request for word classes answered this launch.
+    private static let answers = Mutex<[NLLanguage: Bool]>([:])
 
-    /// Asks the system, once a launch, to load word classes and dictionary forms it hasn't for `languages`. A device
-    /// can lack them until it downloads them; counting has them from the next launch. Languages that have none never
-    /// answer, and nothing waits for the answer.
-    static func ask(_ languages: Set<NLLanguage>) {
-        let new = asked.withLock { asked in
-            let new = languages.subtracting(asked)
-            asked.formUnion(new)
-            return new
+    /// Which of `languages` this device has word classes for, asked for once a launch. A device can lack them until it
+    /// downloads them, and a language that has none never answers, so each wait stops after three seconds and counts as
+    /// none for this launch. A download carries on, for the next launch.
+    static func classified(_ languages: Set<NLLanguage>) async -> Set<NLLanguage> {
+        await withTaskGroup(of: NLLanguage?.self) { group in
+            for language in languages {
+                group.addTask { await hasWordClasses(language) ? language : nil }
+            }
+            let classified = await group.reduce(into: Set<NLLanguage>()) { classified, language in if let language { classified.insert(language) } }
+            // On iOS, asking which schemes a language has is what loads word classes the device has downloaded; tagging
+            // without asking gave every word OtherWord.
+            for language in languages { _ = NLTagger.availableTagSchemes(for: .word, language: language) }
+            return classified
         }
-        for language in new {
-            for scheme in [NLTagScheme.lexicalClass, .lemma] { NLTagger.requestAssets(for: language, tagScheme: scheme) { _, _ in } }
+    }
+
+    private static func hasWordClasses(_ language: NLLanguage) async -> Bool {
+        if let answer = answers.withLock({ $0[language] }) { return answer }
+        NLTagger.requestAssets(for: language, tagScheme: .lemma) { _, _ in }
+        let answer = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+            let waiting = OSAllocatedUnfairLock<CheckedContinuation<Bool, Never>?>(initialState: done)
+            let finish: @Sendable (Bool) -> Void = { available in waiting.withLock { $0.take() }?.resume(returning: available) }
+            NLTagger.requestAssets(for: language, tagScheme: .lexicalClass) { result, _ in finish(result == .available) }
+            Task { try? await Task.sleep(for: .seconds(3)); finish(false) }
         }
+        answers.withLock { $0[language] = answer }
+        return answer
     }
 
     static func top(_ counts: [String: Int], limit: Int) -> [InsightWord] {
