@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import Testing
 @testable import GoblinCore
 
@@ -172,6 +173,11 @@ struct HistoryInsightsTests {
         #expect(cloud.words.allSatisfy { !$0.word.hasSuffix(".") })
         // A one-character Chinese noun counts; Japanese particles, which the tagger cannot classify, do not.
         #expect(cloud.words.contains { $0.word == "书" } && !cloud.words.contains { ["と", "が", "は"].contains($0.word) })
+        // Japanese has no word classes, so its words count without them; the wait for its answer stops.
+        #expect(await SpokenWordCounter.classified([.english, .japanese]) == [.english])
+        // Each paragraph goes by its own language: the English one's nouns, and every Japanese word.
+        let counter = SpokenWordCounter(classified: [.english])
+        #expect(counter.nouns(in: "本と車が好きです。\nThe charts look great.").sorted() == ["chart", "です", "好き", "本", "車"])
     }
 
     @Test func selectedPeriodsKeepAppSharesAndCloudWithinTheSameDates() async throws {
