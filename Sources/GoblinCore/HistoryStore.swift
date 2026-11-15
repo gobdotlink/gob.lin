@@ -184,7 +184,7 @@ public actor HistoryStore {
     }
 
     /// Reads saved final text in the requested period, retaining only word counts. Text in a language whose word classes
-    /// the system hasn't loaded counts every word, and they're asked for; see `InsightWordCloud.wordClassesArrive`.
+    /// this device hasn't loaded counts every word, and they're asked for.
     public func spokenWords(now: Date = Date(), calendar: Calendar = .current, period: InsightPeriod = .week, limit: Int = 40,
                             device: String? = nil) throws -> InsightWordCloud {
         let scope = insightScope(now: now, since: period.start(now: now, calendar: calendar), device: device)
@@ -199,7 +199,6 @@ public actor HistoryStore {
             }
         }
         cloud.words = SpokenWordCounter.top(counts, limit: limit)
-        cloud.languagesWithoutWordClasses = counter.unclassified
         SpokenWordCounter.ask(counter.unclassified)
         return cloud
     }

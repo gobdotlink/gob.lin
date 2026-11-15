@@ -173,17 +173,11 @@ struct HistoryInsightsTests {
         #expect(cloud.words.allSatisfy { !$0.word.hasSuffix(".") })
         // A one-character Chinese noun counts; Japanese particles, which the tagger cannot classify, do not.
         #expect(cloud.words.contains { $0.word == "书" } && !cloud.words.contains { ["と", "が", "は"].contains($0.word) })
-        // Japanese has no word classes, so the cloud says its words were counted without them.
-        #expect(cloud.languagesWithoutWordClasses.contains(.japanese) && today.languagesWithoutWordClasses.isEmpty)
-    }
-
-    @Test func waitingForWordClassesEndsAtTheLimitOnceALaunch() async {
-        // Greek has no word classes, and asking for them never answers, so only the limit ends the wait.
-        let cloud = InsightWordCloud(languagesWithoutWordClasses: [.greek]), clock = ContinuousClock()
-        let first = await clock.measure { _ = await cloud.wordClassesArrive(within: .milliseconds(300)) }
-        // The limit counts from the first ask this launch, which has passed.
-        let again = await clock.measure { _ = await cloud.wordClassesArrive(within: .milliseconds(300)) }
-        #expect(first < .seconds(3) && again < .milliseconds(200))
+        // The tags say Japanese has no word classes here, so its words count without them and are asked for.
+        var counter = SpokenWordCounter()
+        _ = counter.nouns(in: "本と車が好きです。")
+        _ = counter.nouns(in: "The charts look great.")
+        #expect(counter.unclassified.contains(.japanese) && !counter.unclassified.contains(.english))
     }
 
     @Test func selectedPeriodsKeepAppSharesAndCloudWithinTheSameDates() async throws {

@@ -228,15 +228,6 @@ public struct InsightWord: Sendable, Identifiable, Hashable {
 public struct InsightWordCloud: Sendable {
     public var words: [InsightWord] = []
     public var entryCount = 0
-    /// Languages whose text counted every word, because this device has no word classes for them or hasn't loaded them
-    /// yet. Counting asked the system for them.
-    public var languagesWithoutWordClasses: Set<NLLanguage> = []
-
-    /// Waits until word classes arrive for one of those languages, at most `limit` after they were first asked for this
-    /// launch, and says whether they did. Counting again then finds the nouns.
-    public func wordClassesArrive(within limit: Duration) async -> Bool {
-        await SpokenWordCounter.wait(for: languagesWithoutWordClasses, limit: limit)
-    }
 }
 
 /// Picks the nouns out of dictated text, by dictionary form, so "chart" and "charts" count as one word.
@@ -248,55 +239,44 @@ struct SpokenWordCounter {
 
     mutating func nouns(in text: String) -> [String] {
         tagger.string = text
-        // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
-        let language = tagger.dominantLanguage
-        let classified = language.map(Self.classifies) ?? false
-        if let language, !classified { unclassified.insert(language) }
-        var words: [String] = []
+        var tokens: [(tag: NLTag?, range: Range<String.Index>)] = []
         tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
                              options: [.omitWhitespace, .omitPunctuation, .omitOther]) { tag, range in
-            guard !classified || tag == .noun else { return true }
+            tokens.append((tag, range))
+            return true
+        }
+        // The tags, not the system's list of schemes, say whether this device has the language's word classes: the
+        // list can be wrong either way, and without them every word is OtherWord.
+        // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
+        let classified = tokens.contains { $0.tag != nil && $0.tag != .otherWord }
+        if !classified, !tokens.isEmpty, let language = tagger.dominantLanguage { unclassified.insert(language) }
+        return tokens.compactMap { tag, range in
+            guard !classified || tag == .noun else { return nil }
             let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
             // Abbreviation-style tokens keep their full stop ("Dia."); the cloud wants the word alone.
             let word = (lemma.flatMap { $0.isEmpty ? nil : $0 } ?? String(text[range])).lowercased()
                 .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
             // One letter of an alphabet is noise, but one Chinese or Japanese character is often a whole noun (书, 車).
             let ideograph = word.count == 1 && word.unicodeScalars.allSatisfy(\.properties.isIdeographic)
-            if word.count > 1 || ideograph, word.contains(where: \.isLetter) { words.append(word) }
-            return true
+            return (word.count > 1 || ideograph) && word.contains(where: \.isLetter) ? word : nil
         }
-        return words
     }
 
-    static func classifies(_ language: NLLanguage) -> Bool {
-        NLTagger.availableTagSchemes(for: .word, language: language).contains(.lexicalClass)
-    }
+    /// Languages whose word classes were asked for this launch.
+    private static let asked = Mutex<Set<NLLanguage>>([])
 
-    /// When each language's word classes were first asked for this launch.
-    private static let asked = Mutex<[NLLanguage: ContinuousClock.Instant]>([:])
-
-    /// Asks the system to load word classes and dictionary forms for `languages`, once a launch.
+    /// Asks the system, once a launch, to load word classes and dictionary forms it hasn't for `languages`. A device
+    /// can lack them until it downloads them; counting has them from the next launch. Languages that have none never
+    /// answer, and nothing waits for the answer.
     static func ask(_ languages: Set<NLLanguage>) {
-        let now = ContinuousClock.now
         let new = asked.withLock { asked in
-            let new = languages.filter { asked[$0] == nil }
-            for language in new { asked[language] = now }
+            let new = languages.subtracting(asked)
+            asked.formUnion(new)
             return new
         }
         for language in new {
             for scheme in [NLTagScheme.lexicalClass, .lemma] { NLTagger.requestAssets(for: language, tagScheme: scheme) { _, _ in } }
         }
-    }
-
-    /// Waits until one of `languages` has word classes, at most `limit` after they were first asked for this launch.
-    static func wait(for languages: Set<NLLanguage>, limit: Duration) async -> Bool {
-        guard !languages.isEmpty else { return false }
-        ask(languages)
-        let deadline = (asked.withLock { asked in languages.compactMap { asked[$0] }.max() } ?? .now) + limit
-        // ponytail: polls, because a request for a language that has no word classes never answers.
-        while !languages.contains(where: classifies), ContinuousClock.now < deadline,
-              (try? await Task.sleep(for: .milliseconds(250))) != nil {}
-        return languages.contains(where: classifies)
     }
 
     static func top(_ counts: [String: Int], limit: Int) -> [InsightWord] {
