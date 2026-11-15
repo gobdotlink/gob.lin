@@ -279,8 +279,8 @@ struct SpokenWordCounter {
     private static let answers = Mutex<[NLLanguage: Bool]>([:])
 
     /// Which of `languages` this device has word classes for, asked for once a launch. A device can lack them until it
-    /// downloads them, and a language that has none never answers, so each wait stops after three seconds and counts as
-    /// none for this launch. A download carries on, for the next launch.
+    /// downloads them, and a language that has none never answers, so each wait stops after a second and counts as none
+    /// for this launch. A download carries on, for the next launch.
     static func classified(_ languages: Set<NLLanguage>) async -> Set<NLLanguage> {
         await withTaskGroup(of: NLLanguage?.self) { group in
             for language in languages {
@@ -301,7 +301,7 @@ struct SpokenWordCounter {
             let waiting = OSAllocatedUnfairLock<CheckedContinuation<Bool, Never>?>(initialState: done)
             let finish: @Sendable (Bool) -> Void = { available in waiting.withLock { $0.take() }?.resume(returning: available) }
             NLTagger.requestAssets(for: language, tagScheme: .lexicalClass) { result, _ in finish(result == .available) }
-            Task { try? await Task.sleep(for: .seconds(3)); finish(false) }
+            Task { try? await Task.sleep(for: .seconds(1)); finish(false) }
         }
         answers.withLock { $0[language] = answer }
         return answer
