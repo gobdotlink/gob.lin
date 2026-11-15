@@ -239,30 +239,40 @@ struct SpokenWordCounter {
 
     mutating func nouns(in text: String) -> [String] {
         tagger.string = text
+        // Word classes come a paragraph at a time, in that paragraph's language, so a Japanese paragraph has none
+        // beside an English one that has them.
+        let splitter = NLTokenizer(unit: .paragraph)
+        splitter.string = text
+        let paragraphs = splitter.tokens(for: text.startIndex..<text.endIndex).map {
+            (range: $0, language: NLLanguageRecognizer.dominantLanguage(for: String(text[$0])))
+        }
         // On iOS, asking which schemes a language has is what loads word classes the device has downloaded; tagging
         // without asking gave every word OtherWord. The answer itself can be wrong, so the tags decide below.
-        let language = tagger.dominantLanguage
-        if let language { _ = NLTagger.availableTagSchemes(for: .word, language: language) }
-        var tokens: [(tag: NLTag?, range: Range<String.Index>)] = []
-        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
-                             options: [.omitWhitespace, .omitPunctuation, .omitOther]) { tag, range in
-            tokens.append((tag, range))
-            return true
+        for language in Set(paragraphs.compactMap(\.language)) { _ = NLTagger.availableTagSchemes(for: .word, language: language) }
+        var words: [String] = []
+        for paragraph in paragraphs {
+            var tokens: [(tag: NLTag?, range: Range<String.Index>)] = []
+            tagger.enumerateTags(in: paragraph.range, unit: .word, scheme: .lexicalClass,
+                                 options: [.omitWhitespace, .omitPunctuation, .omitOther]) { tag, range in
+                tokens.append((tag, range))
+                return true
+            }
+            // Without the language's word classes, every word is OtherWord.
+            // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
+            let classified = tokens.contains { $0.tag != nil && $0.tag != .otherWord }
+            if !classified, !tokens.isEmpty, let language = paragraph.language { unclassified.insert(language) }
+            words += tokens.compactMap { tag, range in
+                guard !classified || tag == .noun else { return nil }
+                let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
+                // Abbreviation-style tokens keep their full stop ("Dia."); the cloud wants the word alone.
+                let word = (lemma.flatMap { $0.isEmpty ? nil : $0 } ?? String(text[range])).lowercased()
+                    .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
+                // One letter of an alphabet is noise, but one Chinese or Japanese character is often a whole noun (书, 車).
+                let ideograph = word.count == 1 && word.unicodeScalars.allSatisfy(\.properties.isIdeographic)
+                return (word.count > 1 || ideograph) && word.contains(where: \.isLetter) ? word : nil
+            }
         }
-        // Without the language's word classes, every word is OtherWord.
-        // ponytail: languages without word classes keep every word, little ones included; add stop lists if that reads badly.
-        let classified = tokens.contains { $0.tag != nil && $0.tag != .otherWord }
-        if !classified, !tokens.isEmpty, let language { unclassified.insert(language) }
-        return tokens.compactMap { tag, range in
-            guard !classified || tag == .noun else { return nil }
-            let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
-            // Abbreviation-style tokens keep their full stop ("Dia."); the cloud wants the word alone.
-            let word = (lemma.flatMap { $0.isEmpty ? nil : $0 } ?? String(text[range])).lowercased()
-                .trimmingCharacters(in: .punctuationCharacters.union(.symbols))
-            // One letter of an alphabet is noise, but one Chinese or Japanese character is often a whole noun (书, 車).
-            let ideograph = word.count == 1 && word.unicodeScalars.allSatisfy(\.properties.isIdeographic)
-            return (word.count > 1 || ideograph) && word.contains(where: \.isLetter) ? word : nil
-        }
+        return words
     }
 
     /// Languages whose word classes were asked for this launch.
