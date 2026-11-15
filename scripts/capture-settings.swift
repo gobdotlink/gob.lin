@@ -33,16 +33,7 @@ struct SettingsCapture {
         let lifecycle = GoblinApplicationDelegate()
         lifecycle.model = model
         app.delegate = lifecycle
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 760),
-            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.titlebarAppearsTransparent = true
-        if !CommandLine.arguments.contains("--offscreen") {
-            window.center()
-            window.makeKeyAndOrderFront(nil)
-            app.activate()
-        }
         let destination = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "docs/screenshots", isDirectory: true)
-        let offscreen = CommandLine.arguments.contains("--offscreen")
         var captureFailed = false
         let capture = Task { @MainActor in
             do {
@@ -55,28 +46,26 @@ struct SettingsCapture {
                                                      edited: "ask the Claude 5 Rook \(after) for this",
                                                      scope: DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin"))
                 }
-                var window = window
+                var last: NSWindow?
                 @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false) async throws {
                     // A fresh window per shot, so one view's toolbar never leaks into the next capture.
-                    window.orderOut(nil)
-                    window = CaptureWindow(contentRect: NSRect(origin: .zero, size: size),
+                    last?.orderOut(nil)
+                    let window = CaptureWindow(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                    last = window
                     window.isReleasedWhenClosed = false
                     window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
                     window.title = "gob.lin — \(name)"
                     window.setContentSize(size)
                     window.contentView = NSHostingView(rootView: view.allowsHitTesting(false))
-                    if offscreen {
-                        // Rendered off the visible desktop: nothing flashes on screen or takes focus.
-                        window.setFrameOrigin(NSPoint(x: -20_000, y: 0))
-                        window.orderBack(nil)
-                    } else {
-                        window.center()
-                        window.makeKeyAndOrderFront(nil)
-                        NSApp.activate(ignoringOtherApps: true)
-                    }
+                    window.park()
+                    window.orderBack(nil)
+                    window.becomeMain()
+                    window.becomeKey()
                     try await Task.sleep(for: .milliseconds(700))
-                    try snapshot(window, to: destination.appendingPathComponent("design-\(name).png"), live: !offscreen)
+                    // A toolbar resizes the window once it is shown.
+                    window.park()
+                    try snapshot(window, to: destination.appendingPathComponent("design-\(name).png"))
                     print("Captured \(name)")
                 }
                 let only = CommandLine.arguments.dropFirst(2).first { !$0.hasPrefix("--") }
@@ -189,7 +178,7 @@ struct SettingsCapture {
             }
         }
         RunLoop.main.add(timeout, forMode: .common)
-        withExtendedLifetime((lifecycle, model, empty, window)) { app.run() }
+        withExtendedLifetime((lifecycle, model, empty)) { app.run() }
         capture.cancel()
         timeout.invalidate()
         if captureFailed { exit(1) }
@@ -292,23 +281,22 @@ struct SettingsCapture {
         for child in view.subviews { invalidateTree(child) }
     }
 
-    @MainActor private static func snapshot(_ window: NSWindow, to file: URL, live: Bool = true) throws {
+    @MainActor private static func snapshot(_ window: NSWindow, to file: URL) throws {
         if let view = window.contentView {
             invalidateTree(view)
             view.layoutSubtreeIfNeeded()
             view.display()
             window.displayIfNeeded()
         }
-        if live {
         let screenshot = Process()
         screenshot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         screenshot.arguments = ["-x", "-o", "-l", String(window.windowNumber), file.path]
         try screenshot.run()
         screenshot.waitUntilExit()
         guard screenshot.terminationStatus != 0 else { return }
-        }
-        // A locked or sleeping display can't be captured; render the view offscreen instead.
-        // Window materials and chrome are missing from these, so prefer a live capture when possible.
+        // A locked or sleeping display can't be captured; render the view alone instead.
+        // Window materials and chrome are missing from these.
+        print("No window capture for \(file.lastPathComponent): drawn without materials or window chrome")
         guard let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw CaptureError.screenshot }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CaptureError.screenshot }
@@ -319,8 +307,28 @@ struct SettingsCapture {
 }
 
 /// Keeps the size it's given, so a whole page can be shot taller than the screen.
+/// A window nobody sees and that never takes focus, so captures can run while the Mac is in use.
 private final class CaptureWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+    // Drawn as the focused window, while the app in use keeps the real focus.
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
+
+    /// The system only draws a window that touches a display, so one point of a corner does. Corners are rounded,
+    /// so that point is clear.
+    func park() {
+        hasShadow = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        // The sharpest display, and above it: a toolbar grows the window upward.
+        for screen in NSScreen.screens.sorted(by: { $0.backingScaleFactor > $1.backingScaleFactor }) {
+            for x in [screen.frame.minX + 1 - frame.width, screen.frame.maxX - 1] {
+                let spot = NSRect(origin: NSPoint(x: x, y: screen.frame.maxY - 1), size: frame.size)
+                if NSScreen.screens.allSatisfy({ $0 == screen || !$0.frame.intersects(spot) }) { return setFrameOrigin(spot.origin) }
+            }
+        }
+        // ponytail: displays above both top corners of every display leave no spot; the capture is then drawn without chrome.
+        setFrameOrigin(NSPoint(x: -20_000, y: 0))
+    }
 }
 
 /// A desktop-ish backdrop so translucent surfaces have something to sit on.
