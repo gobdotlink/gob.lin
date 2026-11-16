@@ -63,6 +63,10 @@ private let main = window("AXStandardWindow", "design-team - Acme - Slack")
     }
     #expect(!slack.readsCallState)
     #expect(zoom.readsCallState && chrome.readsCallState)
+
+    // Helium's audio comes from its helper process, which counts as Helium and is read like Chrome.
+    let helium = CallApp.matching(bundleID: "net.imput.helium.helper")!
+    #expect(helium.name == "Helium" && helium.kind == .browser && helium.scope == .meetingPages && helium.readsCallState)
 }
 
 @Test func aBrowserPageIsReadOnlyAtAMeetingProvidersAddress() {

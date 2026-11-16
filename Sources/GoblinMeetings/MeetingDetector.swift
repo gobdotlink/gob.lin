@@ -160,7 +160,7 @@ public struct MeetingCandidate: Sendable, Hashable, Identifiable {
     /// "Meet – abc-defg-hij – Microphone recording - Google Chrome – Will" → "Meet – abc-defg-hij".
     nonisolated public static func cleanTitle(_ title: String) -> String {
         var title = title
-        let browsers = "Google Chrome|Chrome|Arc|Dia|Microsoft Edge|Brave|Firefox|Safari"
+        let browsers = "Google Chrome|Chrome|Arc|Dia|Microsoft Edge|Brave|Helium|Firefox|Safari"
         // The browser name is the last part, optionally followed by a profile name ("- Google Chrome – Will").
         title = title.replacingOccurrences(of: "\\s[-–—]\\s(\(browsers))(\\s[-–—]\\s[^-–—]*)?$", with: "", options: .regularExpression)
         let indicators = "Microphone recording|Camera recording|Camera and microphone recording|Audio playing|Audio muted|Memory usage[^–-]*|High memory usage[^–-]*"

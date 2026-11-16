@@ -118,6 +118,7 @@ public struct CallApp: Sendable, Hashable {
         CallApp(name: "Dia", bundleIDs: ["company.thebrowser.dia"], kind: .browser, scope: .meetingPages, readsCallState: true),
         CallApp(name: "Microsoft Edge", bundleIDs: ["com.microsoft.edgemac"], kind: .browser, scope: .meetingPages, readsCallState: true),
         CallApp(name: "Brave", bundleIDs: ["com.brave.Browser"], kind: .browser, scope: .meetingPages, readsCallState: true),
+        CallApp(name: "Helium", bundleIDs: ["net.imput.helium"], kind: .browser, scope: .meetingPages, readsCallState: true),
         CallApp(name: "Firefox", bundleIDs: ["org.mozilla.firefox"], kind: .browser, scope: .meetingPages, readsCallState: true),
         CallApp(name: "Safari", bundleIDs: ["com.apple.Safari", "com.apple.WebKit.GPU"], kind: .browser, scope: .meetingPages,
                 readsCallState: true),

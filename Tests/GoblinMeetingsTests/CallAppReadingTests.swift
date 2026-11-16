@@ -73,6 +73,7 @@ import Testing
 @Test func meetingTitlesLoseBrowserAndIndicatorSuffixes() {
     #expect(MeetingDetector.cleanTitle("Meet – abc-defg-hij – Microphone recording - Google Chrome – Sam") == "Meet – abc-defg-hij")
     #expect(MeetingDetector.cleanTitle("Meet - Design review - Audio playing - Arc") == "Meet - Design review")
+    #expect(MeetingDetector.cleanTitle("Meet - Design review - Microphone recording - Helium") == "Meet - Design review")
     #expect(MeetingDetector.cleanTitle("Zoom Meeting") == "Zoom Meeting")
     #expect(MeetingDetector.cleanTitle("Meet – Dia standup - Google Chrome") == "Meet – Dia standup")
     #expect(MeetingDetector.cleanTitle("Meet – Safari review – Microphone recording - Google Chrome – Sam") == "Meet – Safari review")
