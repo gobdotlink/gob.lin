@@ -43,6 +43,11 @@ struct GoblinCLI {
                 try await RewriteEvaluation.run(Array(arguments.dropFirst()))
                 return
             }
+            if arguments.first == "meetings", !MeetingsCommand.needsSpeechModel(arguments) {
+                // Meeting folders only; no speech model is loaded.
+                try await MeetingsCommand.run(arguments)
+                return
+            }
             if arguments == ["models"] {
                 let models = SpeechModelCatalog.supported.map { model in
                     ["id": model.id, "name": model.name, "purpose": model.purpose, "detail": model.detail,
@@ -89,6 +94,8 @@ struct GoblinCLI {
                 }
                 try await LiveReplay.run(replayArguments, engine: runtime.engine, options: options,
                                          previewAvailable: model.capabilities.livePreview)
+            } else if arguments.first == "meetings" {
+                try await MeetingsCommand.run(arguments, engine: runtime.engine, recognition: options)
             } else if arguments.first == "benchmark" {
                 try await SpeechBenchmark.run(Array(arguments.dropFirst()), engine: runtime.engine, options: options)
             } else {
@@ -311,6 +318,13 @@ private struct GoblinCommands {
       goblin rewrite-eval <dictionary-eval.jsonl> --glossary <terms> | --no-glossary
                                                    Saved AI cleanup over those results; sends transcripts to the provider
         [--source raw|text] [--concurrency 4]
+      goblin meetings list | show <id> [--markdown]  Meetings as JSON (or a Markdown note) [--root <dir>]
+      goblin meetings process <folder> [--preset offline|fast32|fast128]
+                                                   Diarize and write the transcript; downloads the diarizer on first use
+      goblin meetings export-fixture <id> <destination>
+                                                   Audio, timings, transcript, speakers, participants, mute and dictation spans
+      goblin meetings simulate --system <audio> [--mic <audio>] [--echo <gain>]
+                                                   Replay audio through the live meeting pipeline, then process it
       --model-dir <path> overrides the model cache for any command.
       --model <id> chooses a catalog model. --language auto|<code> sets recognition language.
 

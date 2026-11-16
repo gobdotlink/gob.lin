@@ -88,6 +88,15 @@ with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
         assert json.loads(run("benchmark", audio, *flags, status=2).stderr)["error"]["code"] == "usage"
     assert json.loads(run("--model-dir", "--help", status=2).stderr)["error"]["code"] == "usage"
 
+    meetings = scratch / "meetings"
+    meetings.mkdir()
+    assert json.loads(run("meetings", "list", "--root", meetings).stdout) == []
+    assert json.loads(run("meetings", "show", "missing", "--root", meetings, status=1).stderr)["error"]["code"] == "operation_failed"
+    assert json.loads(run("meetings", "list", "--frob", status=2).stderr)["error"]["code"] == "usage"
+    assert json.loads(run("meetings", "process", scratch, "--preset", "slow", status=2).stderr)["error"]["code"] == "usage"
+    assert json.loads(run("meetings", "process", scratch, status=2).stderr)["error"]["code"] == "usage"
+    assert json.loads(run("meetings", "simulate", "--system", scratch / "missing.wav", status=2).stderr)["error"]["code"] == "usage"
+
     invalid = scratch / "invalid.jsonl"
     invalid.write_text("{not json}\n")
     failure = json.loads(run("eval", invalid, fixtures / "B.jsonl", status=1).stderr)

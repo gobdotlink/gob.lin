@@ -14,6 +14,7 @@ struct MenuPopover: View {
         VStack(spacing: 8) {
             PopoverHeader(model: model, eyes: eyes)
             PopoverNotices(model: model)
+            PopoverMeeting(meetings: model.meetings)
             PopoverMicrophone(preview: model.audioPreview, microphones: model.microphones) { dismiss.then { model.openSettings(.audio) } }
             HStack(spacing: 8) { PopoverCleanup(model: model); PopoverTone() }
             PopoverRecents(model: model)
@@ -32,7 +33,7 @@ struct MenuPopover: View {
     }
 }
 
-private extension DismissAction {
+extension DismissAction {
     /// Closes the popover and runs the action straight away: windows activate gob.lin themselves.
     func then(_ action: () -> Void) {
         callAsFunction()
@@ -567,10 +568,22 @@ private struct RecentRow: View {
 
 private struct PopoverFooter: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var meetings: MeetingsController
     @Environment(\.dismiss) private var dismiss
+
+    init(model: AppModel) {
+        self.model = model
+        _meetings = ObservedObject(wrappedValue: model.meetings)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            // People talking in the room, with no call: the mic alone.
+            if meetings.enabled, !meetings.isRecording {
+                menuItem("Record Conversation", action: { dismiss.then(meetings.startConversation) })
+                    .disabled(!meetings.canStart)
+                    .help("Record the people talking around this Mac from your mic. \(MeetingsController.consentLine)")
+            }
             menuItem("Paste Last Dictation", shortcut: "⌥⇧⌘V", action: paste)
                 .disabled(!model.canPasteLastTranscript)
             menuItem("Settings…", shortcut: "⌘,") { dismiss.then { model.openSettings(.general) } }
@@ -605,7 +618,7 @@ private func moduleRow<Action: View>(symbol: String, attention: Bool, title: Str
 }
 
 @MainActor
-private func circle(_ symbol: String, on: Bool) -> some View {
+func circle(_ symbol: String, on: Bool) -> some View {
     Image(systemName: symbol).font(.system(size: 14))
         .foregroundStyle(on ? .white : .primary)
         .frame(width: 30, height: 30)
@@ -645,7 +658,7 @@ private struct MenuRowStyle: ButtonStyle {
     }
 }
 
-private extension View {
+extension View {
     /// A popover module: 14 pt plate inside the 22 pt panel, amber when it needs attention.
     func moduleBackground(attention: Bool = false, padded: Bool = true) -> some View {
         padding(.horizontal, padded ? PopoverModule.inset : 0).padding(.vertical, padded ? 10 : 0)
@@ -657,7 +670,7 @@ private extension View {
     }
 }
 
-private enum PopoverModule {
+enum PopoverModule {
     /// Where a module's words start, from its edge.
     static let inset: CGFloat = 12
     /// How far a row's hover fill reaches past its words.

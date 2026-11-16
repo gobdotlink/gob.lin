@@ -140,3 +140,46 @@ actor SpeechArtifactCache {
         if hash, try ModelAssetDownload.digest(url) != file.sha256 { throw SpeechModelStoreError.invalidCache }
     }
 }
+
+/// Pinned files for a model that isn't a dictation engine (the meeting speaker model), checked and downloaded
+/// the same way: exact upstream commit, size and SHA-256 from `speech-model-assets.json`, into gob.lin's model folder.
+/// Concurrent callers share one acquisition.
+public actor PinnedModelFiles {
+    public nonisolated let manifestID: String
+    public nonisolated let directory: URL
+    private let cache: SpeechArtifactCache
+    private var running: Task<SpeechModelCacheUse, Error>?
+
+    /// `directory` defaults to `gob.lin/models/<folder>`.
+    public init(manifestID: String, folder: String) {
+        self.init(manifestID: manifestID, directory: SpeechRuntimeFactory.modelRoot.appendingPathComponent(folder, isDirectory: true))
+    }
+
+    public init(manifestID: String, directory: URL) {
+        self.manifestID = manifestID
+        self.directory = directory.standardizedFileURL
+        cache = SpeechArtifactCache(directory: directory, manifest: SpeechModelAssets.manifest(for: manifestID))
+    }
+
+    /// Hashes every file on first use, then checks presence and size; downloads what's missing.
+    public func ensureAvailable(progress: @escaping @Sendable (SpeechModelPreparationProgress) -> Void = { _ in })
+        async throws -> SpeechModelCacheUse {
+        if let running { return try await running.value }
+        let cache = cache
+        let task = Task { try await cache.ensureAvailable(progress: progress) }
+        running = task
+        defer { running = nil }
+        return try await task.value
+    }
+
+    /// Every file present at its pinned size; no hashing, no network.
+    public nonisolated var isDownloaded: Bool {
+        SpeechModelAssets.manifest(for: manifestID).files.allSatisfy {
+            let url = directory.appendingPathComponent($0.destination)
+            return FileManager.default.isReadableFile(atPath: url.path)
+                && (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) == Int($0.size)
+        }
+    }
+
+    public nonisolated var downloadBytes: Int64 { SpeechModelAssets.manifest(for: manifestID).files.reduce(0) { $0 + $1.size } }
+}

@@ -1,14 +1,19 @@
 import AppKit
 import GoblinCore
 import GoblinEngines
+import GoblinMeetings
 import ServiceManagement
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case insights = "Insights", history = "History"
+    case insights = "Insights", history = "History", meetings = "Meetings"
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
-    case cleanup = "Cleanup", tone = "Tone", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
+    case cleanup = "Cleanup", tone = "Tone", meetingRecording = "Meeting Recording", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
+    /// Pages that show only while Meetings is on.
+    var needsMeetings: Bool { self == .meetings || self == .meetingRecording }
+    /// Pages that draw their own toolbar title (a list beside a detail).
+    var ownsToolbar: Bool { self == .history || self == .meetings }
     var symbol: String {
         switch self {
         case .insights: "chart.bar.xaxis"
@@ -20,6 +25,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .tone: "textformat"
         case .history: "clock"
         case .overlay: "rectangle.bottomhalf.inset.filled"
+        case .meetings: "person.2.wave.2"
+        case .meetingRecording: "headphones"
         case .diagnostics: "stethoscope"
         case .about: "info.circle"
         }
@@ -37,18 +44,7 @@ struct SettingsView: View {
     var body: some View {
         // The sidebar is always there: no toggle, and no collapsing in narrow windows.
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(SettingsSection.allCases) { item in
-                        if item == .general { Divider().padding(.vertical, 10).padding(.horizontal, 6) }
-                        SidebarRow(title: item.rawValue, selected: item == section, action: { model.settingsSelection = item }) {
-                            Image(systemName: item.symbol)
-                        }
-                    }
-                }
-                .padding(.horizontal, 10).padding(.top, 4)
-            }
-            .arrowKeySelection(SettingsSection.allCases, selection: $model.settingsSelection)
+            SettingsSidebar(model: model, section: section)
             .safeAreaInset(edge: .bottom, spacing: 0) { StatusFooter(model: model) }
             // The column width alone doesn't hold; the content's own width pins the split item.
             .frame(width: 200)
@@ -60,6 +56,7 @@ struct SettingsView: View {
             Group {
                 switch section {
                 case .history: HistoryView(model: model)
+                case .meetings: MeetingsView(model: model)
                 case .insights:
                     InsightsView(history: model.history)
                         .frame(maxWidth: 760)
@@ -78,7 +75,7 @@ struct SettingsView: View {
                 .caseBackground()
                 .navigationTitle(section.rawValue)
                 .toolbar(removing: .title)
-                .toolbar { if section != .history { ToolbarTitle(title: section.rawValue) } }
+                .toolbar { if !section.ownsToolbar { ToolbarTitle(title: section.rawValue) } }
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         // With the toolbar background hidden, scrolled rows would show through the title; the hard
@@ -101,11 +98,60 @@ struct SettingsView: View {
                                            onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                            onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
-        case .history, .insights: EmptyView()
+        case .history, .insights, .meetings: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
+        case .meetingRecording: MeetingRecordingSettingsView(meetings: model.meetings)
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
         case .about: AboutSettingsView(updates: model.updates, history: model.history, speechModels: model.speechModels, eyes: eyes)
         }
+    }
+}
+
+/// The page list. Meetings and Meeting Recording show only while Meetings is on; Meetings counts the meetings
+/// that still need names.
+private struct SettingsSidebar: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject private var meetings: MeetingsController
+    let section: SettingsSection
+    @State private var needsNames = 0
+
+    init(model: AppModel, section: SettingsSection) {
+        self.model = model
+        self.section = section
+        _meetings = ObservedObject(wrappedValue: model.meetings)
+    }
+
+    private var pages: [SettingsSection] { SettingsSection.allCases.filter { !$0.needsMeetings || meetings.enabled } }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(pages) { item in
+                    if item == .general { Divider().padding(.vertical, 10).padding(.horizontal, 6) }
+                    SidebarRow(title: item.rawValue, selected: item == section, action: { model.settingsSelection = item }) {
+                        Image(systemName: item.symbol)
+                    } trailing: {
+                        if item == .meetings, needsNames > 0 {
+                            HStack(spacing: 4) { StatusLight(state: .waiting); Text(needsNames.formatted()) }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("\(needsNames) \(needsNames == 1 ? "meeting needs" : "meetings need") names")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.top, 4)
+        }
+        .arrowKeySelection(pages, selection: $model.settingsSelection)
+        .task(id: meetings.meetings) { await countNeedsNames() }
+        .onReceive(NotificationCenter.default.publisher(for: .meetingsEdited)) { _ in Task { await countNeedsNames() } }
+        .onChange(of: meetings.enabled) { _, enabled in
+            if !enabled, section.needsMeetings { model.settingsSelection = .general }
+        }
+    }
+
+    private func countNeedsNames() async {
+        guard meetings.enabled else { needsNames = 0; return }
+        needsNames = await meetings.library.store.list().filter { MeetingBadge.badges($0).contains(.needsNames) }.count
     }
 }
 
@@ -284,6 +330,7 @@ private struct GeneralSettingsView: View {
             }
         } header: { CapsHeader("Typing it in") }
         .onAppear { refreshLoginStatus() }
+        MeetingsLabsSection(model: model)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
     }
 

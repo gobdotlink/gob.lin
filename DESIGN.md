@@ -11,9 +11,10 @@ gob.lin is a native macOS 26 app with a proud pixel goblin living in it. Control
 | Surface | Seen | Budget |
 |---|---|---|
 | Overlay | ~100 times a day | A face, a moving mouth, one hand. Plain words. |
+| Sidekick | during a recorded meeting | The overlay's budget: a face, plus the quill while a mark is written down. |
 | Menu-bar popover | daily | A goblin portrait and the wordmark in the header. Everything else is stock. |
-| Settings, History | weekly | Status sentences in the goblin's voice. No sprites, except on About and Insights. |
-| First run, empty states, milestones, About | rare | The full goblin: big sprites, jokes, sparkles and the tagline. |
+| Settings, History, Meetings | weekly | Status sentences in the goblin's voice. No sprites, except on About and Insights. |
+| First run, setup sheets, empty states, milestones, About | rare | The full goblin: big sprites, jokes, sparkles and the tagline. |
 
 ## Rules
 
@@ -31,8 +32,8 @@ The values live in `GoblinBrand`. This table is what it must contain.
 |---|---|---|---|
 | moss | `#2B7D4F` | `#34965F` fill, `#62C78A` text | Every interactive job: primary buttons, switches, links, selection, chart bars |
 | neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline on dark, the top word of the Insights cloud on dark |
-| candle | `#B26B0F` | `#F2A93B` | Stars and milestones |
-| case | `#EDECE9` | `#1E1F21` | Settings and History window background |
+| candle | `#B26B0F` | `#F2A93B` | Stars, milestones and meeting marks |
+| case | `#EDECE9` | `#1E1F21` | Settings window background (Settings, History and Meetings pages) |
 | plate | `#FBFAF8` | `#2A2B2E` | A grouped section, with a 0.5 pt hairline |
 | bubble | `#181A1C` at 92% | same | The overlay, over a blur |
 | lights | green `#2FB765`, amber `#F2A417`, red `#E2372D`, off is a hollow ring | same | Status lights |
@@ -67,7 +68,7 @@ A status light is an 8 pt dot plus a word or sentence beside it. The word always
 - Red: broken.
 - Hollow: off.
 
-Use them for the popover header status, the Settings sidebar footer, the last row of a settings group, and the first-run steps and setup card. In the setup card only, a 9 pt small-caps label (ON, WAIT, OFF) sits under the dot.
+Use them for the popover header status, the Settings sidebar footer and counts, the last row of a settings group, and the first-run steps and setup cards. In a setup card only (first run and the Meetings setup sheet), a 9 pt small-caps label (ON, WAIT, OFF) sits under the dot.
 
 ### Building blocks
 
@@ -111,7 +112,7 @@ Reuse these before writing new ones:
 
 The first two frames already ship in `Sources/GoblinApp/Assets/`. The rest are in `docs/design/sprites/`. Copy one into Assets when a surface needs it, and run `xcodegen generate` afterwards. The old 7 × 7 fists in `hands.png` are retired once the grip hands land.
 
-The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar the edge and the ring are dropped, and each green is drawn one step lighter, so the bar itself outlines the goblin and the shading doesn't sink into it. Any outline on a dark bar reads as a glow. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
+The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. While a meeting records, the goblin wears a pixel headset from the same script (`menu-headset*.png`), graphite on a light bar and pale grey on a dark one. It's a shape, not a colour, so it never reads as a status light, and it stacks with the state dot: dictating during a call shows both. Settings can add the elapsed time beside it. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar the edge and the ring are dropped, and each green is drawn one step lighter, so the bar itself outlines the goblin and the shading doesn't sink into it. Any outline on a dark bar reads as a glow. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
 
 The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a three-pixel slit pupil in each eye and the glow redrawn around it, one frame per compass point. Looking down starts from `goblin-look`, so the lid drops too. To move a slit, edit its table and rerun the script.
 
@@ -167,9 +168,16 @@ The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a 
 | password field | side-eye, palm | "That's a password field, so I didn't type there." Subline: `Insert › Secure Input is on`. |
 | word offer (new) | look down | After a fix the goblin learned from: "Add “panacea” to the dictionary?" Subline: "You fixed “anasia” · gob.lin" ("You fixed it 5 times · everywhere" after repeated fixes), Not Now and a moss Add. Like the microphone question, it waits for a running take and comes back after one that interrupts it. Stays 8 s; hovering holds it. Overlay settings can turn it off. |
 | word added (new) | closed | A one-line chip: "Added panacea for gob.lin". It leaves after 1.5 s. |
+| meeting question (new) | side-eye | A call app has held the mic for 2 s and its app is set to Ask: "Zoom is using your mic. Should I record this call?" Subline: `Meetings › Weekly sync` with Not Now and a moss Record. With System Audio Recording off it says "Zoom is using your mic, but I can't hear the other side yet." with the subline `Meetings › no call audio`, and offers Open Settings instead. It waits for a running take like the microphone question. Stays 12 s; hovering holds it. Ignoring it or Not Now leaves a Record row in the popover while the call lasts. While the screen is locked a notification asks instead; clicking it asks again here, and only its Record button records. |
+| meeting recording (new) | closed | Only when the Sidekick is off: a one-line chip, "Recording Weekly sync · Let people know you're recording." It leaves after 2.5 s. |
+| meeting ready (new) | closed | After processing: "Weekly sync is ready · 42 min · 1 voice to name" with Open. Stays 4 s; hovering holds it. |
+| meeting stopped (new) | side-eye | Sleep or the lid cut a recording short. Said on wake, once the screen is unlocked: "Recording stopped because the Mac went to sleep, so I kept the first 31 minutes." Subline: `Meetings › slept at 10:31` with Dismiss, and a moss Record the Rest while the call app still has the mic (it records part two). If the call ended meanwhile, a notification says it instead. |
+| quiet room (new) | closed, Zz | An in-person recording has heard nothing for 10 minutes: "It's been quiet for 10 minutes. Stop recording?" Subline: `Meetings › Conversation` with Keep Going and a moss Stop. Stays 20 s; ignoring it keeps recording and asks again after another quiet 10 minutes. |
 | milestone (new) | cackle, sparkles | Replaces the inserted chip once, at 1k, 10k, 100k and 1M words: "10,000 words yapped." The bubble edge glows candle. Stays 2.5 s. |
 
 Any other error uses the same form: a symbol, one first-person sentence, and an `Area › cause` subline.
+
+Meeting questions and chips are kept out of screen sharing (`sharingType = .none` while one shows); dictation phases show in a share as before.
 
 Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 ms. New words fade in over 80 ms.
 
@@ -178,16 +186,33 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 `GoblinApp.swift`. Use `MenuBarExtra` in window style: a 360 pt glass panel. Top to bottom:
 
 1. **Header:** the goblin at 64 pt, whose eyes follow the pointer anywhere over the popover and look ahead when it leaves (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button. While the goblin has dictionary suggestions, one moss line under the status ("3 new words for gob.lin") opens the Dictionary page.
-2. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
-3. **Update:** only when an update is available, with a Restart button.
-4. **Microphone:** the microphone in use, a picker in ranked order ending with Edit Ranking…, and press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved. While a higher-ranked mic is away or the lid has silenced it, the line under the meter says which one is standing in.
-5. **Cleanup and Tone** side by side. Clicking Cleanup's circle toggles it; its label opens the level menu.
-6. **Search:** a field plus the four latest dictations. Hovering a row shows copy and star. Then "All History".
-7. **Footer:** "Paste Last Dictation ⌥⇧⌘V" and "Settings… ⌘,".
+2. **Meeting:** only while Meetings is on and there's something to say. While recording: a moss headset circle (two people, in person), the title and "Recording Zoom", the elapsed time at 15 pt and Stop; You and Them level bars in moss (one Room row in person); then the line that matters now: the auto-stop countdown ("Zoom let go of the mic, so I'll stop in 0:47.") with Keep Recording and Stop Now, the quiet-room question with Keep Going, a lost mic or lost call sound, "The Sidekick is hidden while you share your screen.", the mute line ("You're muted in Zoom, so I'm leaving your mic out."), the speech model's first download, or captions left for after the call. Under it Mark This, Show or Hide Sidekick, and the number of marks. After Stop: "Sorting out who said what…" with a small spinner. With a call on the mic that isn't recording: "Zoom is using your mic · Weekly sync · not recording" with a moss Record. With System Audio Recording off: an amber module, "I can only hear your side of calls until you turn it back on.", with Open System Settings.
+3. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
+4. **Update:** only when an update is available, with a Restart button.
+5. **Microphone:** the microphone in use, a picker in ranked order ending with Edit Ranking…, and press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved. While a higher-ranked mic is away or the lid has silenced it, the line under the meter says which one is standing in.
+6. **Cleanup and Tone** side by side. Clicking Cleanup's circle toggles it; its label opens the level menu.
+7. **Search:** a field plus the four latest dictations. Hovering a row shows copy and star. Then "All History".
+8. **Footer:** "Record Conversation" while Meetings is on and nothing records (people talking in the room, from the mic alone), "Paste Last Dictation ⌥⇧⌘V" and "Settings… ⌘,".
 
 The ⋯ menu is a plain menu: Permissions… (with the number that are off), Diagnostics…, Copy Diagnostics, Check for Updates…, About gob.lin, and Quit gob.lin ⌘Q.
 
-Right-clicking or Control-clicking the menu-bar icon opens a native menu instead of the popover: Cancel Dictation ⎋ (only while recording), Paste Last Dictation ⌥⇧⌘V, Settings… ⌘,, then the ⋯ menu. Both menus come from the same lists in `Menu/StatusMenu.swift`.
+Right-clicking or Control-clicking the menu-bar icon opens a native menu instead of the popover: Cancel Dictation ⎋ (only while recording), then while Meetings is on either Mark This (⌃⌥M) and Stop Recording, or Record Zoom Call (when a call is on the mic) and Record Conversation, then Paste Last Dictation ⌥⇧⌘V, Settings… ⌘,, then the ⋯ menu. Both menus come from the same lists in `Menu/StatusMenu.swift`.
+
+### Sidekick
+
+`Sources/GoblinApp/Meetings/Sidekick*.swift`. Live captions while a meeting records, on by default (Settings › Meeting Recording › Show Sidekick). It is the overlay's dark glass and the overlay's whimsy budget.
+
+- **Window:** a non-activating panel that never takes focus, except while a mark's label is typed, and then hands it back. It sits at a screen edge, 16 pt in, and never covers the overlay's corner on either side (it moves above a bottom overlay, below a top one). Drag it anywhere; it snaps to the nearer side and remembers the side and height. It joins every Space and floats over full-screen calls.
+- **Screen sharing:** the panel is excluded from capture (`sharingType = .none`), and it also hides while the call app shows that you're sharing (Zoom's share toolbar, Meet's "You are presenting"), since newer capture APIs may ignore the exclusion. The popover says so.
+- **Panel:** 296 × 448 pt at radius 20.
+  - Header: the goblin at 64 pt, inside the panel with 12 pt around it, looking toward the middle of the screen; a neon reel (a ring with a dot), "Recording" and the elapsed time (12 pt, 62% and 40% white); "Zoom · Weekly sync" (11 pt, 40%); a ⋯ menu (Copy New Lines, Copy All, Collapse to Pill, Hide Until the Call Ends, Stop Recording) and Collapse.
+  - Levels: five-bar neon meters for You and Them, or one for the Room in person. A muted or dictating side goes idle.
+  - Captions: turns grouped by side, "You" or "Them" (no label in person, where voices are sorted out after Stop) with the time, words at 13 pt and 92% white. The first lines say "Let people know you're recording." (dismissable) and "Names come after the call. Live, I only know you and them." It follows live; scrolling back shows a Back to Live capsule on the panel's glass. A 14 pt top fade. A thin scroller floats over the right gutter while the captions scroll or the pointer is over them, then fades; it takes no width. While the call app shows you muted, your mic's lines stay out of the captions and Copy, as they do from the transcript.
+  - Marks: a candle-tinted row with a flag, the time, and the label or "Marked" with Add Label.
+  - Footer: one status line (what's recorded; the mute line in amber; a lost mic or lost call sound in amber, "I lost your mic, so I'm only recording Zoom. I'll pick it up again when it's back."; the speech model's first download with its progress; "I fell behind on captions, so I'll transcribe some of this after the call."; the auto-stop countdown with Keep Recording; System Audio Recording off with Open System Settings; the quiet-room question with Keep Going), then Mark This ⌃⌥M and Stop as 28 pt capsules.
+- **Pill:** a 196 × 40 pt capsule with the reel, the time, one meter, a candle flag (Mark This) and Expand, with the goblin at 64 pt beside it, bottoms aligned, on the screen-edge side, like the overlay. The goblin is never inside the capsule.
+- **Faces:** eyes toward the middle of the screen; look down with the quill for 1.5 s after a mark; closed while the room has been quiet.
+- **Motion:** fades in over 160 ms and out over 120 ms; the snap after a drag moves over 160 ms, and not at all under Reduce Motion.
 
 ### Settings
 
@@ -196,13 +221,14 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **Case and plates:** the window background is the case, and each group is a plate with a 10 pt small-caps label above it.
 - **Window chrome:** the sidebar is always visible (no toggle), with the traffic lights inside it. The page title is the window's toolbar title, level with the traffic lights, and the toolbar draws no band, so the case runs to the top of the window. Scroll views use the hard top edge effect, so scrolled content stops at the toolbar and never shows through the title.
 - **Status rows:** a group may end with one status row: a light, a sentence, and either a right-aligned detail or one button.
-- **Sidebar:** General, Audio, Model, Dictionary, Cleanup, Tone, History (retention only), Overlay, Diagnostics, About, all with SF Symbols. The footer is a status light, "Ready", and the engine and where it runs ("Parakeet v3 · on this Mac").
+- **Sidebar:** the pages you read, Insights, History and Meetings, then a rule, then the settings: General, Audio, Model, Dictionary, Cleanup, Tone, Meeting Recording, Overlay, Diagnostics, About, all with SF Symbols. Meetings and Meeting Recording show only while Meetings is on. A row may end with an amber light and a count when items there need you (Meetings: meetings with a voice to name). The footer is a status light, "Ready", and the engine and where it runs ("Parakeet v3 · on this Mac").
 - **General:**
   - Talk key: a big keycap card with the key, one sentence on how it works, and Record New Key…. Quick picks: fn / Globe, Right ⌥, ⌥ Space. Cancel a take: esc, or the overlay's × when esc is the talk key. A status row for the Globe key setting.
   - Behaviour: Open at login, Click sounds, Add a space after each take.
   - iCloud: Sync Dictionary and Sync History switches, off by default, each with a line under it saying what syncs and the rest behind its ⓘ. Each shows only in builds signed for it, and the group only when one does. A red status row appears while the last dictionary sync failed. Sync History ends with one status row: green while syncing; amber with the one button that fixes it while waiting for iCloud, while iCloud is full, or while dictations from a newer gob.lin are left out; hollow when sync turned itself off because gob.lin's iCloud data was deleted or a different account signed in.
   - Reduce audio while dictating: independent Pause current media and Mute audio switches. Explain that pause preserves the current player's position, mute lets playback advance, and both can be enabled. Preserve the existing pause preference; mute starts off.
   - Typing it in: the paste-last shortcut with Change…, a status row for the insertion mode and the last insert, and a status row for permissions with Open Setup….
+  - Labs: the Record meetings switch with a moss LABS tag. Turning it on the first time opens the Meetings setup sheet; while it's on, a status row leads to Meeting Recording….
 - **Audio:** Microphones is the ranked list. Each row has a light (green in use, amber silenced by the lid, hollow otherwise), the name, and its transport and state, plus a menu with the same moves as dragging. The System Default row is the line: mics above it are used in order, mics below it ("Only when picked") never on their own. A status row names the mic in use and the one it's standing in for.
 - **Cleanup:** the switch and level apply as soon as they change; the provider is edited in a sheet and applies on Save.
   - A top plate with the AI cleanup switch and a status row naming where the text goes. Turning it on with an unfinished provider opens the provider sheet, whose button reads Save and Turn On.
@@ -211,16 +237,22 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Try it: one line of sample text as an **inline diff**. Cut words are struck through on a red tint and added words sit on a green tint, with Run Again. The group's ⓘ holds the timeout note: "Slower than 4 s? I type what you said instead."
   - The provider sheet: Service, Address (Local and Custom only; named services use their own), Model (a free field with a chevron menu of suggested models, then the ones the service lists for the key), Reasoning, API key (masked, "Saved in gob.lin preferences", Remove), the model-list status row with Refresh, and Advanced request options. Every control ends on the same right edge. Cancel and Save.
 - **Dictionary:** while there are suggestions, a card above Terms with the look-down goblin at 64 pt gripping its top edge. A title in the goblin's voice ("I found some words in gob.lin"), the budget ("22 of 32 words for gob.lin"), and one row per word with a reason caption ("you fixed “go blin”", "from Package.swift", "you fixed it 6 times · sounds like “soul”, “sole” near GPT, 6.1"), Not Now and Add, plus Add All. Nothing is added without a click. A word learned from a fix is also offered once in the overlay; Not Now there is the same as Not Now here. Below it, one plate. Its header is a search field, a ⋯ menu holding Import Words… and a moss Add Term. Under the header the plate splits in two and hugs its content: places on the left, drawn with `SidebarRow` (Everywhere, apps with their icons and a chevron that opens their projects, then Other Projects), and the selected place's words on the right, as a table with Word and Sounds Like columns in SF Pro; Sounds Like ends with the context words ("soul, sole · near GPT, 6.1"). Its header has the place, the app icon and a meter ("32 of 32 active") that opens the words in priority order. The selected place is a moss tint. Edit and delete appear on hover, and in the row's context menu.
+- **Meeting Recording:** only while Meetings is on.
+  - The same Record meetings switch, then a status row: off ("Off. Nothing loads until you turn it on."), System Audio Recording off (amber, "so I can only hear your side", Open System Settings), notifications off (amber, Open Notifications), recording, processing, or "Ready. I'll ask when a call starts." with the last meeting on the right.
+  - When a call starts: one row per call app with its icon and an Ask / Always / Never popup, a single row for meetings in a browser, then Show Sidekick. The group's ⓘ explains the three choices.
+  - In the room: Record a conversation, which points to Record Conversation in the menu bar and says it uses only the mic.
+  - Speakers (Remember voices), Notes (Notes model) and the Export folder are present but disabled with "Coming later", so the page keeps its shape when they land.
+  - Storage: Keep audio, 1 week (starred meetings keep theirs), and a status row with the meetings' audio size and Show in Finder.
 - **About:** centred.
   - The goblin at 128 pt, whose eyes follow the pointer anywhere over the page, the 48 pt wordmark, the version, and the tagline with a blinking block cursor.
   - Two plates, one above the other: four sentences of lore with three stats (words yapped, dictations, 0 s of audio uploaded), then spec rows (recognition, runs on, model size, languages, network).
   - Check for Updates…, Licences, Data Folder.
 
-### History window
+### History
 
-`Sources/GoblinApp/History/`. History is its own window (about 1100 × 720), opened from "All History" in the popover.
+`Sources/GoblinApp/History/`. History is a page in the Settings window (about 1100 × 720), opened from "All History" in the popover. It draws its own toolbar title and buttons over a list beside a detail; the window's sidebar stays.
 
-- **Sidebar:** Insights, All Dictations, Starred and Warnings, each with a count, then Apps with counts. The filters run in the store query, not on the loaded page. The footer is the week's total: "1,284 words this week. About 23 minutes of typing you didn't do."
+- **Filter:** a menu at the top of the list: All Dictations, Starred and Warnings, each with a count, then Apps with counts. The filters run in the store query, not on the loaded page. The list's footer holds retention with Change….
 - **List:** grouped by day. The selected row is a moss tint. A row is the app icon, app name, time, a two-line preview, the length, a star, and "Not inserted" when it failed.
 - **Detail:**
   - The app and title, then the time and length.
@@ -236,6 +268,25 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Where you talked, only when the period has dictations from more than one device: the device's symbol, name, words, dictations and share. Where I typed: app icon, name, words and share over a thin moss track; an iPhone can't name the app it typed into, so its dictations make one row named after it, with its symbol. Counts and shares use the selected period's words. Then "How I count".
 - **Empty:** the closed goblin at 128 pt with Zz, then "Nothing to snitch on yet." and "Hold fn and say something. I'll keep the receipts."
 - **Problems:** save errors and unsaved dictations are amber status plates with one action each.
+
+### Meetings
+
+`Sources/GoblinApp/Meetings/`. A page in the Settings window under History, built like History: a 330 pt list beside the meeting. It appears once Meetings (Labs) is on. Meetings are calls, recorded from the call app and the mic, or conversations in the room, recorded from the mic alone.
+
+- **Toolbar:** "Meetings" with the count and total length under it, Copy as Markdown, a Delete menu (Delete Audio Only…, Delete Meeting…), and Search meetings.
+- **List:** a filter menu (All Meetings, Needs Names, then sources), then meetings grouped by day. A row is the call app's icon (a two-people glyph for a conversation in the room), the title, the start time, who spoke, then the length, the source ("Zoom", "In person") and its states: an amber light with Needs names, Processing or Recording, a red one with Couldn't finish, and plain "· Stopped early" and "· No audio". The selected row is a moss tint. The footer is the audio kept and its size, with Change… to Meeting Recording.
+- **Detail:**
+  - The icon and title, then "Monday 16 Nov at 14:00 · 42 min · Zoom".
+  - One chip per voice: initials, the name and the talk time. A voice with no name yet is amber with "Who's this?". A named chip opens Rename… and Merge Into. The participants nobody heard follow in one grey line.
+  - After a rename or merge, a moss-tinted line says what changed, with Undo.
+  - Status plates for "I need a name for one voice." (Who's This?), processing, a failure (Try Again), and "Recording stopped at 31:12 because the Mac went to sleep."
+  - The timeline plate: candle flags for marks above the lanes (hover for the label, click to move the playhead), one lane per voice across the whole meeting in moss (amber while the voice needs a name), a time axis, and the transport: play, the time in monospaced digits, and the stretch playing or "Click a stretch to play it". Click a stretch to play it from its own track. A lane's name opens the same menu as its chip.
+  - The transcript: time, name (candle for an unnamed voice) and text, with marks between the lines as candle flags. Clicking a line plays it. The caps label says how long the audio is kept.
+  - Notes: a dashed placeholder marked "Coming later".
+- **Who's this?** A sheet: how long the voice talked, three clips to play (its longest lines), then names it could be, each with a reason (from the call's participant list), a "That's…" field, and Not Now. When the call listed fewer people than voices, a "One laptop had two voices" card keeps the laptop's owner and names the second voice. In the room there's no participant list, so it offers That's Me (which names the voice You) and the field.
+- **Setup sheet:** "Two switches." First run's setup plate with System Audio Recording and Notifications, the shut goblin at 128 pt gripping its top edge, a plate saying "Tell people before I record them.", and Cancel and Turn On, which waits for System Audio Recording.
+- **Empty:** the closed goblin at 128 pt with Zz, "No calls on tape yet.", and a line on how recording starts.
+- In the room, nothing says "call": no call audio, no participants, no shared laptop.
 
 ### First run
 
@@ -257,7 +308,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 ## Before you call a UI change done
 
 1. Build and run the signed app with `scripts/build.sh`.
-2. Screenshot every surface you changed in light and in dark. Shoot the overlay over a light app and over a dark app. `scripts/capture-settings.sh <folder> [settings|icloud|history|popover|onboarding|overlay]` renders every surface from synthetic data without a microphone, and `scripts/check-mascot.sh` checks the overlay's sprite rules.
+2. Screenshot every surface you changed in light and in dark. Shoot the overlay over a light app and over a dark app. `scripts/capture-settings.sh <folder> [settings|icloud|history|meetings|popover|onboarding|overlay]` renders every surface from synthetic data without a microphone, and `scripts/check-mascot.sh` checks the overlay's sprite rules.
 3. Repeat with Reduce Motion and Increase Contrast on.
 4. Check the change against every rule above. Each one either holds, or the pull request says why it doesn't.
 

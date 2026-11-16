@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import GoblinCore
 import GoblinEngines
+import GoblinMeetings
 import SwiftUI
 
 @MainActor
@@ -25,6 +26,11 @@ final class AppModel: ObservableObject {
     let audioPreview: AudioPreviewModel
     let microphones: MicrophonesModel
     let speechModels: SpeechModelService
+    /// Dictation first: meeting chunks wait while a take runs from key-down to insertion.
+    let speechPriority = SpeechPriorityGate()
+    let meetings: MeetingsController
+    /// The meeting's overlay questions, the Sidekick and ⌃⌥M.
+    private var meetingSurfaces: MeetingSurfaces?
     let updates = UpdateChecker()
     @Published var mascotState: MascotState = .idle
     @Published var settingsSelection: SettingsSection? = .general
@@ -66,6 +72,9 @@ final class AppModel: ObservableObject {
         captureDirectory = dataDirectory?.appendingPathComponent("Captures", isDirectory: true)
         feedback = servicesEnabled ? GoblinBrand.assetDirectory.map { FeedbackSounds(directory: $0) } : nil
         speechModels = SpeechModelService(defaults: defaults)
+        meetings = MeetingsController(defaults: defaults, servicesEnabled: servicesEnabled, speechModels: speechModels,
+                                      gate: speechPriority,
+                                      root: dataDirectory?.appendingPathComponent("Meetings", isDirectory: true) ?? MeetingStorage.root)
         diagnostics = DiagnosticsModel(environment: diagnosticEnvironment, logDirectory: dataDirectory?.appendingPathComponent("logs", isDirectory: true))
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
         historySync = HistorySyncModel(history: history, enabled: servicesEnabled)
@@ -201,7 +210,14 @@ final class AppModel: ObservableObject {
             case .dismissTerm(let suggestion):
                 self.dictionary.dismiss(suggestion)
                 self.overlay.hide()
+            case .recordMeeting, .dismissMeetingOffer, .systemAudioSettings, .openMeeting, .recordRest, .dismissInterruption,
+                 .keepGoing, .stopMeeting:
+                self.meetingSurfaces?.perform(action)
             }
+        }
+        meetingSurfaces = MeetingSurfaces(meetings: meetings, overlay: overlay, defaults: defaults, servicesEnabled: servicesEnabled) { [weak self] id in
+            self?.meetings.show(meetingID: id)
+            self?.openSettings(.meetings)
         }
         permissions.onboardingContent = { [weak self] in self.map { AnyView(OnboardingView(model: $0)) } ?? AnyView(EmptyView()) }
         hotkeys.onAction = { [weak self] action in self?.handleHotkey(action) }
@@ -281,7 +297,11 @@ final class AppModel: ObservableObject {
             guard let self, !self.shuttingDown, let audioURL else { throw RecordedAudioError.invalidFile }
             let lease = try self.speechModels.beginSession(
                 vocabulary: self.dictionary.entries.vocabulary(in: entry.dictionaryContext))
-            defer { self.speechModels.endSession(lease) }
+            // A re-transcription is someone waiting too, so meeting chunks hold off like they do for a take. Nobody is
+            // speaking, so nothing the meeting's mic hears meanwhile is left out.
+            let priority = UUID()
+            self.meetings.dictationBegan(priority, recordsSpan: false)
+            defer { self.speechModels.endSession(lease); self.meetings.dictationEnded(priority) }
             let engine = try await self.speechModels.readyEngine(for: lease)
             let run = try await RecordedAudioPipeline(engine: engine, options: lease.options).transcribe(audioURL)
             try Task.checkCancellation()
@@ -444,6 +464,8 @@ final class AppModel: ObservableObject {
         let lease: SpeechModelLease
         do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.vocabulary(in: DictionaryScope(application: session.dictionaryScope))) }
         catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
+        // From here until the text is inserted, no meeting chunk starts on the speech model.
+        meetings.dictationBegan(session.id)
         let readiness = Task<any PCMSpeechEngine, Error> { [speechModels] in
             try await speechModels.readyEngine(for: lease)
         }
@@ -544,9 +566,12 @@ final class AppModel: ObservableObject {
             }
             lastMicrophoneUID = input.device.uid
             if active.audioReduction == nil {
-                active.audioReduction = AudioReductionSession(
-                    pauseMedia: defaults.bool(forKey: "audio.pauseMediaWhileDictating"),
-                    muteAudio: defaults.bool(forKey: "audio.muteWhileDictating"))
+                let pauseMedia = defaults.bool(forKey: "audio.pauseMediaWhileDictating")
+                let muteAudio = defaults.bool(forKey: "audio.muteWhileDictating")
+                // Pausing or muting would cut into a call: with Meetings on, leave the sound alone while a meeting records
+                // or a call app holds the mic. With Meetings off this is false and nothing changes.
+                let inCall = (pauseMedia || muteAudio) && meetings.callInProgress
+                active.audioReduction = AudioReductionSession(pauseMedia: pauseMedia && !inCall, muteAudio: muteAudio && !inCall)
             }
             diagnostics.resolve(.microphone)
             diagnostics.developmentLog.record(.firstBuffer, area: .microphone, operation: session.id)
@@ -583,6 +608,8 @@ final class AppModel: ObservableObject {
     private func finishDictation(_ active: ActiveDictation, counted: Bool) {
         guard !active.stopping else { return }
         active.stopping = true
+        // Key-up: what a meeting's mic hears from here on is no longer the dictation.
+        meetings.dictationCaptureEnded(active.session.id)
         active.sounds?.cancelStart(sessionID: active.session.id)
         active.countedForProcessing = counted
         if activeCapture === active {
@@ -762,6 +789,7 @@ final class AppModel: ObservableObject {
                 try? FileManager.default.removeItem(at: audio.fileURL)
             }
             self.speechModels.endSession(active.lease)
+            self.meetings.dictationEnded(active.session.id)
             self.liveSessions[active.session.id] = nil
             self.dictationSessions[active.session.id] = nil
             if active.countedForProcessing { self.hotkeys.processingCompleted() }
@@ -771,6 +799,9 @@ final class AppModel: ObservableObject {
 
     private func cancelDictation(_ active: ActiveDictation) {
         guard !active.session.cancelled else { return }
+        // Cancelling closes the take's mic now; what a meeting hears after it is the meeting's, even while the take
+        // still waits for a loading model before it ends.
+        meetings.dictationCaptureEnded(active.session.id)
         processingQueue.cancel(active.session)
         active.startTask?.cancel()
         // A close already under way is settled by the capture service's cancel below; its transcript isn't needed.
@@ -869,6 +900,9 @@ final class AppModel: ObservableObject {
         await insertionTask?.value
         insertionTask = nil
         for active in Array(liveSessions.values) { cancelDictation(active) }
+        // The meeting's last chunks use the speech model, so it closes before the model shuts down.
+        meetingSurfaces?.shutdown()
+        await meetings.shutdown()
         let modelShutdown = Task { [speechModels] in await speechModels.shutdown() }
         await processingQueue.shutdown()
         await captureDrainTask?.value
@@ -1168,7 +1202,8 @@ final class AppModel: ObservableObject {
             case .arming, .listening: state = .recording
             case .transcribing, .polishing: state = .transcribing
             case .error, .readyToPaste: state = .warning
-            case .hidden, .inserted, .milestone, .newMicrophone, .termSuggestion, .termAdded: state = .idle
+            case .hidden, .inserted, .milestone, .newMicrophone, .termSuggestion, .termAdded, .meetingOffer, .meetingRecording,
+                 .meetingReady, .meetingInterrupted, .meetingQuiet: state = .idle
             }
         }
         if mascotState != state { mascotState = state }

@@ -56,6 +56,17 @@ public struct SpeechModelDescriptor: Sendable, Equatable, Identifiable {
     }
 }
 
+extension SpeechModelDescriptor {
+    /// Whether a meeting may borrow this model when it's dictation's: a Parakeet that knows every language the
+    /// meeting's own Parakeet v3 does, and detects them, so the meeting's language never reaches a model without it.
+    /// English-only derivatives aren't, and the meeting loads its own v3.
+    public var servesMeetings: Bool {
+        let meeting = SpeechModelCatalog.parakeet.capabilities
+        return kind == .parakeet && capabilities.automaticLanguage
+            && Set(capabilities.languageCodes).isSuperset(of: meeting.languageCodes)
+    }
+}
+
 public enum SpeechModelCatalog {
     public static let parakeet = model("parakeet-tdt-v3", "Parakeet TDT v3", purpose: "Everyday default",
         detail: "Efficient dictation across 25 European languages. A preferred language guides the writing script; it cannot force one language over another using the same script.",

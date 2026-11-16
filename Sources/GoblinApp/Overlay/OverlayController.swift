@@ -15,6 +15,16 @@ enum OverlayPhase: Equatable {
     case termSuggestion(TermSuggestion)
     /// The confirmation after Add.
     case termAdded(TermSuggestion)
+    /// A call app took the mic: "Zoom is using your mic. Should I record this call?"
+    case meetingOffer(MeetingOffer)
+    /// A recording started without the Sidekick on screen: "Recording Weekly sync".
+    case meetingRecording(title: String)
+    /// Processing finished: "Weekly sync is ready", with Open.
+    case meetingReady(MeetingReady)
+    /// Sleep or the lid cut a recording short.
+    case meetingInterrupted(MeetingInterrupted)
+    /// An in-person recording has heard nothing for a while: Keep Going or Stop.
+    case meetingQuiet(minutes: Int)
     case error(OverlayNotice)
 
     var caption: String {
@@ -30,6 +40,11 @@ enum OverlayPhase: Equatable {
         case .newMicrophone: "New microphone"
         case .termSuggestion: "New word"
         case .termAdded: "Word added"
+        case .meetingOffer: "Record this call?"
+        case .meetingRecording: "Recording"
+        case .meetingReady: "Meeting ready"
+        case .meetingInterrupted: "Recording stopped"
+        case .meetingQuiet: "Still recording"
         case .error: "Needs attention"
         }
     }
@@ -37,6 +52,53 @@ enum OverlayPhase: Equatable {
     var hasWords: Bool {
         switch self { case .listening, .transcribing, .polishing: true; default: false }
     }
+
+    /// A meeting's question or notice: kept out of screen sharing, and waits for a take like the other questions.
+    var isMeeting: Bool {
+        switch self {
+        case .meetingOffer, .meetingRecording, .meetingReady, .meetingInterrupted, .meetingQuiet: true
+        default: false
+        }
+    }
+
+    /// Asks something, so a take that interrupts it brings it back afterwards and hovering holds it.
+    var isQuestion: Bool {
+        switch self {
+        case .newMicrophone, .termSuggestion, .meetingOffer, .meetingReady, .meetingInterrupted, .meetingQuiet: true
+        default: false
+        }
+    }
+}
+
+/// Meeting words the overlay shares with the popover and the Sidekick.
+enum MeetingCopy {
+    /// The consent reminder, said wherever a recording is offered or starts.
+    static let consent = "Let people know you're recording."
+}
+
+struct MeetingOffer: Equatable {
+    var app: String
+    var bundleID: String
+    /// "Weekly sync", from the call window.
+    var title: String?
+    /// System Audio Recording is off, so only your side of the call would record.
+    var systemAudioOff = false
+}
+
+struct MeetingReady: Equatable {
+    var meetingID: String
+    var title: String
+    /// "42 min · 1 voice to name".
+    var detail: String
+}
+
+struct MeetingInterrupted: Equatable {
+    /// "Recording stopped because the Mac went to sleep, so I kept the first 31 minutes."
+    var sentence: String
+    /// "Mac slept at 10:31".
+    var detail: String
+    /// The call app still has the mic, so Record the Rest makes sense.
+    var canRecordRest: Bool
 }
 
 struct OverlayResult: Equatable {
@@ -59,6 +121,8 @@ struct OverlayNotice: Equatable {
 enum OverlayAction {
     case setup, audioSettings, cleanupSettings, useMicrophone(uid: String), dismiss
     case addTerm(TermSuggestion), dismissTerm(TermSuggestion)
+    case recordMeeting(bundleID: String), dismissMeetingOffer, systemAudioSettings
+    case openMeeting(id: String), recordRest, dismissInterruption, keepGoing, stopMeeting
 }
 
 enum OverlayPosition: String, CaseIterable {
@@ -182,10 +246,7 @@ final class OverlayController {
     @discardableResult
     func begin(onCancel: @escaping () -> Void) -> UUID {
         // An unanswered question comes back after the take instead of being lost to it.
-        switch model.phase {
-        case .newMicrophone, .termSuggestion: completionNotices.append(model.phase)
-        default: break
-        }
+        if model.phase.isQuestion { completionNotices.append(model.phase) }
         hideTask?.cancel()
         orderOutTask?.cancel()
         sessionID = UUID()
@@ -193,6 +254,8 @@ final class OverlayController {
         model.resetForSession()
         model.cancel = onCancel
         model.phase = .arming
+        // Dictation shows in a screen share as it always has; only meeting questions stay out of it.
+        panel.sharingType = .readOnly
         // Render the collapsed frame first so the entrance has somewhere to start from.
         if !panel.isVisible { model.presented = false }
         // Settle the cleared content first: resizing inside the animated update drops the animation.
@@ -218,6 +281,8 @@ final class OverlayController {
         }
         if model.phase != phase {
             withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: 0.14)) { model.phase = phase }
+            // The people on the call never see a meeting question in a screen share.
+            panel.sharingType = phase.isMeeting ? .none : .readOnly
         }
         if let committed, committed != model.committedText { model.committedText = committed }
         if let tentative, tentative != model.tentativeText { model.tentativeText = tentative }
@@ -259,6 +324,12 @@ final class OverlayController {
         showCompletion(.termSuggestion(suggestion), session: UUID())
     }
 
+    /// Takes back a question or notice that no longer applies, on screen or still waiting for a take to end.
+    func withdraw(where matches: (OverlayPhase) -> Bool) {
+        completionNotices.removeAll(where: matches)
+        if model.phase != .hidden, matches(model.phase) { hide(session: sessionID) }
+    }
+
     /// Swap the offer for a short confirmation once the word is added.
     func confirmAdded(_ suggestion: TermSuggestion) {
         guard case .termSuggestion = model.phase else { return }
@@ -272,7 +343,10 @@ final class OverlayController {
     /// How long a late result stays: questions need time to read and answer.
     private static func lingers(_ phase: OverlayPhase) -> Double {
         switch phase {
-        case .newMicrophone: 12
+        case .newMicrophone, .meetingOffer, .meetingInterrupted: 12
+        case .meetingQuiet: 20
+        case .meetingReady: 4
+        case .meetingRecording: 2.5
         case .termSuggestion: suggestionSeconds
         default: 3
         }
@@ -280,11 +354,8 @@ final class OverlayController {
 
     /// Hovering holds a question on screen; leaving gives a few more seconds to come back.
     private func hoverChanged(_ hovering: Bool) {
-        switch model.phase {
-        case .newMicrophone, .termSuggestion:
-            if hovering { hideTask?.cancel() } else { hide(after: 3, session: sessionID) }
-        default: return
-        }
+        guard model.phase.isQuestion else { return }
+        if hovering { hideTask?.cancel() } else { hide(after: 3, session: sessionID) }
     }
 
     /// Older results wait for the current recording's overlay instead of replacing its words.

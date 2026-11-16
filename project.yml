@@ -26,6 +26,8 @@ targets:
         product: GoblinCore
       - package: GoblinPackages
         product: GoblinEngines
+      - package: GoblinPackages
+        product: GoblinMeetings
     settings:
       base:
         PRODUCT_NAME: gob.lin

@@ -147,6 +147,26 @@ final class SpeechModelService: ObservableObject {
         return engine
     }
 
+    /// The loaded dictation engine for background work such as a meeting's live transcript, or nil when the selected
+    /// model can't serve a meeting (`servesMeetings`: not Parakeet, or an English-only one). It takes no lease, so switching models and unloading stay free; callers ask again for each
+    /// use, and work through `SpeechPriorityGate` so dictation goes first. Each use counts as activity, so the model
+    /// isn't unloaded as idle during a meeting.
+    func backgroundEngine() async throws -> (any PCMSpeechEngine)? {
+        while true {
+            guard !stopping else { throw SpeechModelServiceError.stopped }
+            if let switchTask {
+                _ = try? await switchTask.value
+                continue
+            }
+            guard selectedModel.servesMeetings else { return nil }
+            lastActivity = .now
+            if loaded { return engine }
+            startPreparation()
+            guard let preparationTask else { throw SpeechModelServiceError.notReady }
+            try await preparationTask.value
+        }
+    }
+
     func endSession(_ lease: SpeechModelLease) {
         guard leases.remove(lease) != nil else { return }
         activeSessionCount = leases.count

@@ -3831,5 +3831,140 @@
         "sha256": "fb70c8fcb6472cda2bdb799b156a8941e72762344a7c636d3b1275f1d53c4a6b"
       }
     ]
+  },
+  "nemotron-3-diarization-offline": {
+    "languages": [],
+    "files": [
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_offline.mlmodelc/analytics/coremldata.bin",
+        "destination": "Nemotron3Diarizer_offline.mlmodelc/analytics/coremldata.bin",
+        "size": 243,
+        "sha256": "491594df92282a4f2cef65e96d236e210a5c4627063e37e822ec858aaaad416d"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_offline.mlmodelc/coremldata.bin",
+        "destination": "Nemotron3Diarizer_offline.mlmodelc/coremldata.bin",
+        "size": 758,
+        "sha256": "8b790c919c65744648c17290a26d3371e0e55db655310e7f8445080757b0bf08"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_offline.mlmodelc/model.mil",
+        "destination": "Nemotron3Diarizer_offline.mlmodelc/model.mil",
+        "size": 505274,
+        "sha256": "ea5673d9e9ec785e7c8fb628acd82f9f86214c46b6584eaacdb6faddcb3f0277"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_offline.mlmodelc/weights/weight.bin",
+        "destination": "Nemotron3Diarizer_offline.mlmodelc/weights/weight.bin",
+        "size": 198654080,
+        "sha256": "bab76e5f190d0e4a4e174e7fcb1e9beea58c6b2be56e665e2cac8fba6d10f7f1"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "learnable_sil_emb.bin",
+        "destination": "learnable_sil_emb.bin",
+        "size": 2048,
+        "sha256": "d4417b3c0eabdf7c47032fac2b5b5a7ee83d819a6ddda8fd8eaf74e2b5cc4ac7"
+      }
+    ]
+  },
+  "nemotron-3-diarization-fast32": {
+    "languages": [],
+    "files": [
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast32.mlmodelc/analytics/coremldata.bin",
+        "destination": "Nemotron3Diarizer_fast32.mlmodelc/analytics/coremldata.bin",
+        "size": 243,
+        "sha256": "7932ba85d07f09ba8feff996e1278f376a9139e31141d2827021f1c225e590ae"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast32.mlmodelc/coremldata.bin",
+        "destination": "Nemotron3Diarizer_fast32.mlmodelc/coremldata.bin",
+        "size": 755,
+        "sha256": "fbc2d4dc25147427269e4774a5b8e3dd6b613e8c8458d74c7462a1a377dbae75"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast32.mlmodelc/model.mil",
+        "destination": "Nemotron3Diarizer_fast32.mlmodelc/model.mil",
+        "size": 501830,
+        "sha256": "e2f0cbbf88e824385475779b637c36281c5f98f339783840bdf7b3dfcd08c123"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast32.mlmodelc/weights/weight.bin",
+        "destination": "Nemotron3Diarizer_fast32.mlmodelc/weights/weight.bin",
+        "size": 198566016,
+        "sha256": "7353d8e7a5d29a8d15edf86dbf40bed4e82b7b8f456f302d5cdcbf850ed25358"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "learnable_sil_emb.bin",
+        "destination": "learnable_sil_emb.bin",
+        "size": 2048,
+        "sha256": "d4417b3c0eabdf7c47032fac2b5b5a7ee83d819a6ddda8fd8eaf74e2b5cc4ac7"
+      }
+    ]
+  },
+  "nemotron-3-diarization-fast128": {
+    "languages": [],
+    "files": [
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc/analytics/coremldata.bin",
+        "destination": "Nemotron3Diarizer_fast128.mlmodelc/analytics/coremldata.bin",
+        "size": 243,
+        "sha256": "a71e06616a3ae7bddef06ce5dfc7fe523a286e489f63a8da2fc4f1e940d560a4"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc/coremldata.bin",
+        "destination": "Nemotron3Diarizer_fast128.mlmodelc/coremldata.bin",
+        "size": 758,
+        "sha256": "ebcca7245d8d774305752b9f2b79433ad1858f8a06df3b326e0ae6305d981d25"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc/model.mil",
+        "destination": "Nemotron3Diarizer_fast128.mlmodelc/model.mil",
+        "size": 502794,
+        "sha256": "e7c029a46d9f327bec4c47fc34e5d32ee2cec9ce596950af0c403d05146b4ead"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc/weights/weight.bin",
+        "destination": "Nemotron3Diarizer_fast128.mlmodelc/weights/weight.bin",
+        "size": 198590592,
+        "sha256": "e8c90d2d0e16787a420de6805fd5b7a95c116fac0163208b5bc4d8a9ae459ca4"
+      },
+      {
+        "repository": "FluidInference/nemotron-3-diarization-coreml",
+        "revision": "25a90f97f254428d4b30374b76af9c74fdee8327",
+        "path": "learnable_sil_emb.bin",
+        "destination": "learnable_sil_emb.bin",
+        "size": 2048,
+        "sha256": "d4417b3c0eabdf7c47032fac2b5b5a7ee83d819a6ddda8fd8eaf74e2b5cc4ac7"
+      }
+    ]
   }
 }

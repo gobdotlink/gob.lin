@@ -4,6 +4,10 @@
 One character is one pixel; dots are transparent. Writes four PNGs into
 Sources/GoblinApp/Assets: the 22 px map, the same map doubled for Retina, and both
 again for dark menu bars: no outer edge, and each green one step lighter. Requires Pillow.
+
+It also writes the headset the goblin wears while a meeting records (menu-headset*.png):
+only its own pixels, drawn over the goblin at runtime. Graphite on a light bar, pale
+grey on a dark one, so it reads as a shape rather than another status colour.
 """
 from pathlib import Path
 
@@ -49,6 +53,36 @@ PIXELS = """
 """
 
 
+# Over-ear headphones: the band over the ears, the cups on the cheeks. Rows below the
+# map's eleventh are left alone, so the state dot in the bottom-right never meets it.
+HEADSET = """
+....hhhhhhhhhhhhhh....
+...h..............h...
+..H................H..
+..H................H..
+..H................H..
+..H................H..
+.CC................CC.
+CcC................CcC
+CcC................CcC
+CcC................CcC
+.CC................CC.
+"""
+
+HEADSET_LIGHT = {"h": (104, 110, 120, 255), "H": (46, 49, 54, 255), "C": (46, 49, 54, 255), "c": (150, 156, 166, 255)}
+HEADSET_DARK = {"h": (222, 224, 228, 255), "H": (196, 200, 206, 255), "C": (176, 180, 188, 255), "c": (238, 240, 243, 255)}
+
+
+def draw_headset(dark: bool) -> Image.Image:
+    image = Image.new("RGBA", (22, 22), (0, 0, 0, 0))
+    palette = HEADSET_DARK if dark else HEADSET_LIGHT
+    for y, row in enumerate(HEADSET.strip("\n").split("\n")):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                image.putpixel((x, y), palette[ch])
+    return image
+
+
 # Dark menu bars: the bar itself is the outline, and shadows lift so they don't sink into it.
 LIFT = {"D": PALETTE["S"], "S": PALETTE["G"], "G": PALETTE["L"]}
 
@@ -77,3 +111,6 @@ if __name__ == "__main__":
         image = draw(rows, dark)
         image.save(ASSETS / f"goblin-menu{suffix}.png")
         image.resize((44, 44), Image.NEAREST).save(ASSETS / f"goblin-menu{suffix}@2x.png")
+        headset = draw_headset(dark)
+        headset.save(ASSETS / f"menu-headset{suffix}.png")
+        headset.resize((44, 44), Image.NEAREST).save(ASSETS / f"menu-headset{suffix}@2x.png")

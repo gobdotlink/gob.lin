@@ -27,11 +27,29 @@ extension AppModel {
     /// The right-click menu: the ⋯ menu under the daily actions, and a way out of a recording.
     var statusMenu: [[MenuCommand]] {
         let cancel = MenuCommand(title: "Cancel Dictation", shortcut: KeyboardShortcut(.escape, modifiers: [])) { self.cancelRecording() }
-        return (isRecording ? [[cancel]] : []) + [[
+        return (isRecording ? [[cancel]] : []) + meetingMenu + [[
             MenuCommand(title: "Paste Last Dictation", shortcut: KeyboardShortcut("v", modifiers: [.option, .shift, .command]),
                         enabled: canPasteLastTranscript) { self.pasteLastTranscript() },
             MenuCommand(title: "Settings…", shortcut: KeyboardShortcut(",")) { self.openSettings(.general) },
         ]] + moreMenu
+    }
+}
+
+extension AppModel {
+    /// While Meetings is on: Stop and Mark This during a recording; otherwise Record for a call on the mic, and
+    /// Record Conversation for people talking in the room.
+    var meetingMenu: [[MenuCommand]] {
+        guard meetings.enabled else { return [] }
+        if meetings.isRecording {
+            return [[MenuCommand(title: "Mark This (\(MeetingMarkHotkey.title))") { self.meetings.mark() },
+                     MenuCommand(title: "Stop Recording") { self.meetings.stop() }]]
+        }
+        var items: [MenuCommand] = []
+        if let call = meetings.unrecordedCall ?? meetings.detectedCandidate {
+            items.append(MenuCommand(title: "Record \(call.app.name) Call", enabled: meetings.canStart) { self.meetings.start(call) })
+        }
+        items.append(MenuCommand(title: "Record Conversation", enabled: meetings.canStart) { self.meetings.startConversation() })
+        return [items]
     }
 }
 

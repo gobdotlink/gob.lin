@@ -1,5 +1,6 @@
 import AppKit
 import GoblinCore
+import GoblinMeetings
 import SwiftUI
 
 /// Production views with isolated synthetic data and no system services: Settings, History, the
@@ -22,7 +23,15 @@ struct SettingsCapture {
         ])
         defaults.set(try JSONEncoder().encode(HistoryRetention(maximumUnstarredCount: 500, maximumAgeDays: 30)), forKey: "history.retention")
         defaults.set(OverlayPosition.top.rawValue, forKey: "overlayPosition")
+        // Meetings on, so the popover and the menu-bar mark have something to show; nothing records.
+        defaults.set(true, forKey: MeetingsController.enabledKey)
         try RewriteSettingsStore.save(RewriteSettings(enabled: false, baseURL: "https://provider.invalid/v1", model: "example-model", cleanup: .light), defaults: defaults)
+        defaults.set(true, forKey: MeetingsController.enabledKey)
+        defaults.set(true, forKey: MeetingsController.setupFinishedKey)
+        defaults.set(["com.apple.FaceTime": "always"], forKey: MeetingsController.appPoliciesKey)
+        defaults.set(["com.hnc.Discord"], forKey: MeetingsController.neverAskKey)
+        SystemAudioAccess.shared.override = .granted
+        let sampleMeetings = try SampleMeetings.write(in: directory.appendingPathComponent("Meetings", isDirectory: true))
         let model = AppModel(dataDirectory: directory, defaults: defaults, servicesEnabled: false,
             diagnosticEnvironment: DiagnosticEnvironment(microphonePermission: .notRequested,
                 accessibilityPermission: .denied, inputMonitoringPermission: .denied,
@@ -47,7 +56,8 @@ struct SettingsCapture {
                                                      scope: DictionaryScope(application: "com.t3tools.t3code", project: "gob.lin"))
                 }
                 var last: NSWindow?
-                @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false) async throws {
+                @MainActor func shoot(_ name: String, _ view: some View, size: NSSize, dark: Bool = false,
+                                      settle: Duration = .milliseconds(700)) async throws {
                     // A fresh window per shot, so one view's toolbar never leaks into the next capture.
                     last?.orderOut(nil)
                     let window = CaptureWindow(contentRect: NSRect(origin: .zero, size: size),
@@ -62,7 +72,7 @@ struct SettingsCapture {
                     window.orderBack(nil)
                     window.becomeMain()
                     window.becomeKey()
-                    try await Task.sleep(for: .milliseconds(700))
+                    try await Task.sleep(for: settle)
                     // A toolbar resizes the window once it is shown.
                     window.park()
                     try snapshot(window, to: destination.appendingPathComponent("design-\(name).png"))
@@ -72,15 +82,15 @@ struct SettingsCapture {
                 func wanted(_ group: String) -> Bool { only == nil || only == group }
 
                 if wanted("settings") {
-                    for page in SettingsSection.allCases {
+                    for page in SettingsSection.allCases where page != .meetings {
                         model.settingsSelection = page
                         if page == .diagnostics { model.diagnostics.report(.modelUnavailable) }
-                        try await shoot("settings-\(page.rawValue.lowercased())", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080))
+                        try await shoot("settings-\(page.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080))
                     }
                     // Every page in dark too: DESIGN.md asks for both appearances of whatever a change touches.
-                    for page in SettingsSection.allCases where page != .history && page != .insights {
+                    for page in SettingsSection.allCases where page != .history && page != .insights && page != .meetings {
                         model.settingsSelection = page
-                        try await shoot("settings-\(page.rawValue.lowercased())-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
+                        try await shoot("settings-\(page.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     }
                     empty.settingsSelection = .dictionary
                     try await shoot("settings-dictionary-empty-dark", SettingsView(model: empty, speechModels: empty.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
@@ -131,6 +141,57 @@ struct SettingsCapture {
                     }
                     model.settingsSelection = .history
                 }
+                if wanted("meetings") {
+                    model.meetings.refreshList()
+                    let meetingsSize = NSSize(width: 1180, height: 860)
+                    for (name, id) in [("meetings", sampleMeetings.weekly), ("meetings-in-person", sampleMeetings.inPerson),
+                                       ("meetings-stopped", sampleMeetings.stopped)] {
+                        for dark in [false, true] where name == "meetings" || !dark {
+                            model.settingsSelection = .meetings
+                            model.meetings.focusedMeetingID = id
+                            try await shoot(name + (dark ? "-dark" : ""), SettingsView(model: model, speechModels: model.speechModels),
+                                            size: meetingsSize, dark: dark, settle: .milliseconds(1_200))
+                        }
+                    }
+                    let store = model.meetings.library.store
+                    for (name, id, voice) in [("meetings-who", sampleMeetings.weekly, "Speaker 3"),
+                                              ("meetings-who-in-person", sampleMeetings.inPerson, "Speaker 2")] {
+                        let detail = try await store.detail(id)
+                        let lanes = MeetingTimeline.lanes(detail.turns, kind: detail.summary.kind)
+                        let player = MeetingPlayer()
+                        player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
+                        let sheet = WhoIsThisSheet(meeting: detail.summary, lane: lanes.first { $0.name == voice }!, lanes: lanes, turns: detail.turns,
+                                                   participants: detail.participants, player: player,
+                                                   onName: { _ in }, onClose: {})
+                            .background(Color(nsColor: .windowBackgroundColor))
+                        for dark in [false, true] {
+                            try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: name == "meetings-who" ? 700 : 560), dark: dark)
+                        }
+                    }
+                    for dark in [false, true] {
+                        SystemAudioAccess.shared.override = .unknown
+                        try await shoot("meetings-setup" + (dark ? "-dark" : ""), MeetingsSetupSheet(meetings: model.meetings, notifications: .notDetermined) {},
+                                        size: NSSize(width: 620, height: 640), dark: dark)
+                        SystemAudioAccess.shared.override = .granted
+                        try await shoot("meetings-setup-allowed" + (dark ? "-dark" : ""), MeetingsSetupSheet(meetings: model.meetings, notifications: .notDetermined) {},
+                                        size: NSSize(width: 620, height: 640), dark: dark)
+                    }
+                    for dark in [false, true] {
+                        model.settingsSelection = .meetingRecording
+                        try await shoot("meeting-recording" + (dark ? "-dark" : ""), SettingsView(model: model, speechModels: model.speechModels),
+                                        size: NSSize(width: 1040, height: 1180), dark: dark, settle: .milliseconds(1_000))
+                        SystemAudioAccess.shared.override = .denied
+                        try await shoot("meeting-recording-permission-off" + (dark ? "-dark" : ""), SettingsView(model: model, speechModels: model.speechModels),
+                                        size: NSSize(width: 1040, height: 560), dark: dark)
+                        SystemAudioAccess.shared.override = .granted
+                        model.settingsSelection = .general
+                        try await shoot("meetings-general" + (dark ? "-dark" : ""), SettingsView(model: model, speechModels: model.speechModels),
+                                        size: NSSize(width: 1040, height: 1260), dark: dark)
+                        empty.settingsSelection = .meetings
+                        try await shoot("meetings-empty" + (dark ? "-dark" : ""), SettingsView(model: empty), size: NSSize(width: 1100, height: 720),
+                                        dark: dark, settle: .milliseconds(1_000))
+                    }
+                }
                 if wanted("popover") {
                     try await shoot("popover", popover(model), size: NSSize(width: 420, height: 720))
                     try await shoot("popover-dark", popover(model), size: NSSize(width: 420, height: 720), dark: true)
@@ -153,6 +214,9 @@ struct SettingsCapture {
                     for step in OnboardingView.Step.allCases {
                         try await shoot("onboarding-\(step.rawValue + 1)-dark", OnboardingView(model: model, startAt: step), size: NSSize(width: 660, height: 516), dark: true)
                     }
+                }
+                if wanted("meetings") {
+                    try await captureMeetings(model) { name, view, size, dark in try await shoot(name, view, size: size, dark: dark) }
                 }
                 if wanted("overlay") {
                     for (name, overlay) in overlayPhases() {
@@ -232,6 +296,108 @@ struct SettingsCapture {
         }
     }
 
+    /// The in-call surfaces from synthetic meetings: the popover module, the Sidekick, the pill and the menu-bar mark.
+    @MainActor private static func captureMeetings(_ model: AppModel,
+                                                   shoot: @MainActor (String, AnyView, NSSize, Bool) async throws -> Void) async throws {
+        let meetings = model.meetings
+        let start = Date().addingTimeInterval(-(12 * 60 + 48))
+        func line(_ t: Double, _ speaker: String, _ text: String) -> MeetingLine { MeetingLine(id: UUID(), speaker: speaker, start: t, text: text) }
+        var call = MeetingsController.Recording(title: "Weekly sync", app: "Zoom", bundleID: "us.zoom.xos", startedAt: start)
+        call.meetingID = "2026-11-16 140100 Weekly sync"
+        call.microphoneLevel = -24
+        call.systemLevel = -16
+        call.lines = [line(245, "You", "Then let's hold the next batch until Thursday."),
+                      line(370, "Them", "On pricing, I'd keep the free tier at three borrowed tools a month."),
+                      line(412, "You", "Three feels right. We can raise it once lending is steady."),
+                      line(580, "Them", "The offline mode still drops edits if you close the app too fast."),
+                      line(615, "You", "Is that the same bug from the sync rewrite?"),
+                      line(648, "Them", "Same family. I'd rather fix it properly than patch it again."),
+                      line(722, "Them", "Can we write down which bugs block the launch and which don't?"),
+                      line(750, "You", "Yes. I'll start the list after this call.")]
+        call.marks = [.init(id: UUID(), t: 372, label: "Pricing: free tier stays at three"), .init(id: UUID(), t: 760, label: "")]
+        var muted = call
+        muted.muted = true
+        muted.microphoneLevel = -100
+        var ending = call
+        ending.releasedSince = Date().addingTimeInterval(-13)
+        ending.systemLevel = -100
+        ending.microphoneLevel = -100
+        var room = MeetingsController.Recording(title: "Conversation", app: "In person", bundleID: nil, startedAt: start)
+        room.inPerson = true
+        room.meetingID = "2026-11-16 140100 Conversation"
+        room.microphoneLevel = -20
+        room.lines = [line(402, "", "So the library said yes for the twelfth, and they'll let us in an hour early."),
+                      line(409, "", "Is that the room with the projector?"),
+                      line(414, "", "It is. I'll bring the adapter."),
+                      line(470, "", "Then the twelfth it is. Can someone put it on the calendar?")]
+        var quietRoom = room
+        quietRoom.microphoneLevel = -100
+        let zoom = MeetingCandidate(app: AudioClientApp(bundleID: "us.zoom.xos", name: "Zoom", pid: nil, processes: [],
+                                                        callApp: CallApp.matching(bundleID: "us.zoom.xos")),
+                                    since: Date(), meetingTitle: "Weekly sync", isLikelyMeeting: true)
+
+        let popovers: [(String, () -> Void)] = [
+            ("recording", { meetings.preview(.recording(call)) }),
+            ("muted", { meetings.preview(.recording(muted), sidekickVisible: false) }),
+            ("ending", { meetings.preview(.recording(ending)) }),
+            ("in-person", { meetings.preview(.recording(room)) }),
+            ("in-person-quiet", { meetings.preview(.recording(quietRoom), quiet: true) }),
+            ("processing", { meetings.preview(.processing(title: "Weekly sync", meetingID: "preview")) }),
+            ("not-recording", { meetings.preview(.idle, unrecordedCall: zoom) }),
+            ("system-audio-off", { meetings.preview(.idle, systemAudio: .denied) }),
+        ]
+        for (name, setUp) in popovers {
+            setUp()
+            for dark in [false, true] {
+                try await shoot("popover-meeting-\(name)\(dark ? "-dark" : "")", AnyView(popover(model)), NSSize(width: 420, height: 760), dark)
+            }
+        }
+
+        let sidekicks: [(String, Bool, SidekickModel.Edge, () -> Void)] = [
+            ("call", false, .right, { meetings.preview(.recording(call)) }),
+            ("scrolled-back", false, .right, { meetings.preview(.recording(call)) }),
+            ("marking", false, .right, { meetings.preview(.recording(call), markedAt: Date().addingTimeInterval(600)) }),
+            ("muted", false, .right, { meetings.preview(.recording(muted)) }),
+            ("ending", false, .right, { meetings.preview(.recording(ending)) }),
+            ("system-audio-off", false, .right, { meetings.preview(.recording(call), systemAudio: .denied) }),
+            ("in-person", false, .right, { meetings.preview(.recording(room)) }),
+            ("in-person-quiet", false, .right, { meetings.preview(.recording(quietRoom), quiet: true) }),
+            ("pill", true, .right, { meetings.preview(.recording(call)) }),
+            ("pill-left", true, .left, { meetings.preview(.recording(call)) }),
+        ]
+        for (name, collapsed, edge, setUp) in sidekicks {
+            setUp()
+            let sidekick = SidekickModel(collapsed: collapsed)
+            sidekick.edge = edge
+            for (microphone, system) in [(-30, -14), (-18, -40), (-26, -12), (-14, -30), (-22, -18)] as [(Float, Float)] {
+                sidekick.push(microphone: name.contains("muted") || name.contains("ending") || name.contains("quiet") ? -100 : microphone,
+                              system: name.contains("in-person") || name.contains("ending") ? -100 : system)
+            }
+            if name == "call" { sidekick.showsConsent = false }
+            if name == "scrolled-back" { sidekick.previewScrolledBack = true }
+            let size = collapsed ? SidekickController.collapsedSize : SidekickController.expandedSize
+            let window = NSSize(width: size.width + 2 * SidekickController.margin, height: size.height + 2 * SidekickController.margin)
+            for dark in [false, true] {
+                let view = ZStack { AppBackdrop(); SidekickView(meetings: meetings, model: sidekick) }
+                try await shoot("sidekick-\(name)\(dark ? "-dark" : "")", AnyView(view), window, dark)
+            }
+        }
+        meetings.preview(.idle)
+
+        // The menu-bar goblin at 4×: idle, recording a meeting, and dictating during one.
+        for dark in [false, true] {
+            let icons = HStack(spacing: 28) {
+                ForEach(Array([(MascotState.idle, false), (.idle, true), (.recording, true), (.transcribing, true)].enumerated()), id: \.offset) { _, icon in
+                    Image(nsImage: GoblinBrand.menuImage(icon.0, headset: icon.1)).resizable().interpolation(.none).frame(width: 88, height: 88)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(dark ? Color(white: 0.16) : Color(white: 0.93))
+            try await shoot("menu-bar-headset\(dark ? "-dark" : "")", AnyView(icons), NSSize(width: 520, height: 140), dark)
+        }
+    }
+
     @MainActor private static func overlayPhases() -> [(String, OverlayModel)] {
         func make(_ phase: OverlayPhase, committed: String = "", tentative: String = "", level: Double = 0.6,
                   configure: (OverlayModel) -> Void = { _ in }) -> OverlayModel {
@@ -272,7 +438,20 @@ struct SettingsCapture {
             ("error-secure", make(.error(OverlayNotice(.secureInputEnabled)))),
             ("mirrored", make(.listening, committed: "Sounds good, send it", tentative: " over") { $0.mirrored = true }),
             ("top", make(.listening, committed: "Top-right, under the menu bar") { $0.edge = .top }),
-        ]
+        ] + [false, true].flatMap { dark -> [(String, OverlayModel)] in
+            let suffix = dark ? "-dark" : ""
+            return [
+                ("meeting-offer\(suffix)", make(.meetingOffer(MeetingOffer(app: "Zoom", bundleID: "us.zoom.xos", title: "Weekly sync")))),
+                ("meeting-offer-system-audio-off\(suffix)", make(.meetingOffer(MeetingOffer(app: "Zoom", bundleID: "us.zoom.xos", title: "Weekly sync",
+                                                                                          systemAudioOff: true)))),
+                ("meeting-recording\(suffix)", make(.meetingRecording(title: "Weekly sync"))),
+                ("meeting-ready\(suffix)", make(.meetingReady(MeetingReady(meetingID: "preview", title: "Weekly sync", detail: "42 min · 1 voice to name")))),
+                ("meeting-slept\(suffix)", make(.meetingInterrupted(MeetingInterrupted(
+                    sentence: "Recording stopped because the Mac went to sleep, so I kept the first 31 minutes.",
+                    detail: "slept at 10:31", canRecordRest: true)))),
+                ("meeting-quiet\(suffix)", make(.meetingQuiet(minutes: 10))),
+            ]
+        }
     }
 
     @MainActor private static func invalidateTree(_ view: NSView) {
@@ -331,6 +510,19 @@ private final class CaptureWindow: NSWindow {
     }
 }
 
+/// A plain app window behind the Sidekick: light or dark, so the dark glass is seen over both.
+private struct AppBackdrop: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Wallpaper()
+            RoundedRectangle(cornerRadius: 12).fill(scheme == .dark ? Color(white: 0.16) : Color(white: 0.97))
+                .padding(.leading, 0).padding(.vertical, 8).padding(.trailing, 80)
+        }
+    }
+}
+
 /// A desktop-ish backdrop so translucent surfaces have something to sit on.
 private struct Wallpaper: View {
     var body: some View {
@@ -338,5 +530,138 @@ private struct Wallpaper: View {
                        startPoint: .topLeading, endPoint: .bottomTrailing)
             .overlay(RadialGradient(colors: [Color(red: 0.78, green: 0.7, blue: 0.56).opacity(0.7), .clear],
                                     center: .topTrailing, startRadius: 0, endRadius: 420))
+    }
+}
+
+/// Fictional meetings on disk, written the way a recording and its processing leave them, so the Meetings page,
+/// its timeline and "Who's this?" render without a microphone or the speech models.
+private enum SampleMeetings {
+    struct IDs { var weekly: String; var inPerson: String; var stopped: String }
+
+    typealias Line = (speaker: String, minute: Double, text: String)
+
+    static func write(in root: URL) throws -> IDs {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let now = Date()
+        let weekly = try meeting(in: root, title: "Weekly sync", source: "Zoom", start: now.addingTimeInterval(-65 * 60), minutes: 42,
+                                 participants: MeetingParticipants(all: ["Will", "Priya Shah", "Sam Okafor"], me: "Will"),
+                                 names: ["Speaker 1": "Priya Shah", "Speaker 2": "Sam Okafor"],
+                                 marks: [MeetingMark(t: 4 * 60 + 26, label: "Ship CSV first"), MeetingMark(t: 12 * 60 + 6),
+                                         MeetingMark(t: 38 * 60 + 30, label: "Launch copy owner")],
+                                 lines: [
+            ("Speaker 1", 0.2, "Okay, I think everyone's here. Three things today: the export, the API timeline and the launch copy."),
+            ("You", 0.5, "Quick heads-up, I'm recording this so I can write up notes. Shout if that's a problem."),
+            ("Speaker 2", 0.62, "All good."),
+            ("Speaker 1", 4.03, "Export first. Is it still on for this sprint?"),
+            ("You", 4.15, "It's close. The CSV path works, but the PDF one still drops page breaks."),
+            ("Speaker 2", 4.4, "I'd ship CSV on its own and move PDF to next sprint."),
+            ("Speaker 3", 4.52, "I can pick up the page-break fix. I'm next to Sam today, same laptop."),
+            ("Speaker 1", 7.3, "Good. Then the release notes say CSV now, PDF in two weeks, and nobody is surprised."),
+            ("Speaker 2", 9.1, "I'll write the changelog entry and link the tracking issue so support can point people at it."),
+            ("Speaker 1", 11.67, "Great, let's do that. Sam, how's the API timeline looking?"),
+            ("Speaker 2", 11.8, "Fine, as long as we freeze the schema by Thursday."),
+            ("You", 12.07, "Thursday works. I'll send the field list tonight."),
+            ("Speaker 2", 15.4, "The one open question is pagination. Cursor or page numbers, I don't mind, but we pick one."),
+            ("You", 16.2, "Cursor. Page numbers fall apart the moment someone deletes a row."),
+            ("Speaker 3", 21.17, "Sorry, that was me, not Sam. Cursor gets my vote too, it matches the mobile client."),
+            ("Speaker 1", 24.5, "Then it's settled. Let's not reopen it next week unless something breaks."),
+            ("Speaker 2", 29.3, "Rate limits: we keep the current ones for the beta and look again after a month of real traffic."),
+            ("You", 33.4, "Fine by me. I'd rather tune it from numbers than guess now."),
+            ("Speaker 1", 38.35, "Last thing, launch copy. Who owns the first pass?"),
+            ("Speaker 3", 38.45, "I'll take it. I wrote most of the onboarding strings anyway."),
+            ("Speaker 1", 41.58, "Perfect. Let's check in on Thursday then."),
+        ])
+        try meeting(in: root, title: "Standup", source: "Zoom", start: now.addingTimeInterval(-14 * 60), minutes: 12,
+                    participants: MeetingParticipants(all: ["Will", "Priya Shah"], me: "Will"), processed: false, lines: [])
+        try meeting(in: root, title: "Design crit", source: "Google Chrome", start: now.addingTimeInterval(-4 * 3_600), minutes: 25,
+                    participants: MeetingParticipants(all: ["Will", "Ana Ruiz"], me: "Will"), lines: [
+            ("Ana Ruiz", 0.25, "The empty state reads well, but the goblin's too big on small screens."),
+            ("You", 0.5, "Fair. Let's look at it on a 13-inch screen before we decide."),
+            ("Ana Ruiz", 9, "The list rows are right. I'd keep the two-line preview."),
+            ("You", 18, "Agreed. I'll send the narrow captures after this."),
+        ])
+        let inPerson = try meeting(in: root, title: "Conversation", source: "Microphone", start: now.addingTimeInterval(-26 * 3_600), minutes: 18,
+                                   kind: .inPerson, lines: [
+            ("Speaker 1", 0.3, "Have you got five minutes about the offsite? I want to lock the venue this week."),
+            ("Speaker 2", 0.7, "Sure. I liked the one by the river, as long as the train times work for everyone."),
+            ("Speaker 1", 3.2, "They do, mostly. The early train gets in at nine, which is fine for a ten o'clock start."),
+            ("Speaker 2", 6.8, "Then book it. I'll sort the agenda if you send me the headcount."),
+            ("Speaker 1", 11.4, "Twenty-two so far. I'll chase the rest on Friday and send you the final number."),
+            ("Speaker 2", 16.5, "Great. Lunch on site, or do we walk somewhere?"),
+        ])
+        let stopped = try meeting(in: root, title: "Roadmap review", source: "Zoom", start: now.addingTimeInterval(-28 * 3_600), minutes: 31,
+                                  participants: MeetingParticipants(all: ["Will", "Jonas Berg", "Lena Park"], me: "Will"),
+                                  names: ["Speaker 1": "Jonas Berg", "Speaker 2": "Lena Park"], stopReason: "sleep", lines: [
+            ("Speaker 1", 0.4, "If we take meetings on this quarter, what slips?"),
+            ("You", 1.1, "Probably the Windows port. It was always going to be the stretch goal."),
+            ("Speaker 2", 6, "Then let's say so out loud in the update, so nobody plans around it."),
+            ("Speaker 1", 22, "Agreed. Next up is the pricing page."),
+        ])
+        // Its audio went after a week; the transcript stays.
+        try meeting(in: root, title: "Hiring debrief", source: "Google Chrome", start: now.addingTimeInterval(-4 * 86_400), minutes: 33,
+                                 participants: MeetingParticipants(all: ["Will", "Lena Park", "Jonas Berg"], me: "Will"),
+                                 names: ["Speaker 1": "Lena Park", "Speaker 2": "Jonas Berg"], audio: false, lines: [
+            ("Speaker 1", 0.3, "Strong on systems, quieter on product sense."),
+            ("Speaker 2", 2, "I'd still move forward. The take-home was the best we've seen."),
+            ("You", 4, "Same. Let's do the final round next week."),
+        ])
+        return IDs(weekly: weekly, inPerson: inPerson, stopped: stopped)
+    }
+
+    @discardableResult
+    static func meeting(in root: URL, title: String, source: String, start: Date, minutes: Double, kind: MeetingKind = .call,
+                        participants: MeetingParticipants = MeetingParticipants(), names: [String: String] = [:],
+                        marks: [MeetingMark] = [], stopReason: String? = "call ended", processed: Bool = true, audio: Bool = true,
+                        lines: [Line]) throws -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HHmmss"
+        let id = "\(formatter.string(from: start)) \(title)"
+        let directory = root.appendingPathComponent(id, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        var info = MeetingSessionInfo(title: title, source: source, target: kind == .inPerson ? "none" : "\(source) (1 process)", startedAt: start)
+        info.kind = kind
+        info.endedAt = start.addingTimeInterval(minutes * 60)
+        info.stopReason = stopReason
+        try encoder.encode(info).write(to: directory.appendingPathComponent(MeetingStorage.sessionFile))
+        try encoder.encode(participants).write(to: directory.appendingPathComponent(MeetingStorage.participantsFile))
+        try Data().write(to: directory.appendingPathComponent(MeetingStorage.segmentsFile))
+        if audio { try writeWAV(to: directory.appendingPathComponent(MeetingStorage.audioFile(.microphone))) }
+        if audio, kind == .call { try writeWAV(to: directory.appendingPathComponent(MeetingStorage.audioFile(.system))) }
+        if !marks.isEmpty {
+            let text = try marks.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n") + "\n"
+            try text.write(to: directory.appendingPathComponent(MeetingStorage.marksFile), atomically: true, encoding: .utf8)
+        }
+        guard processed else { return id }
+        // Each line stands for a stretch of talk that runs until shortly before the next one, as a real call's do.
+        let turns = lines.enumerated().map { index, line in
+            let words = Double(line.text.split(separator: " ").count)
+            let begin = line.minute * 60
+            let next = index + 1 < lines.count ? lines[index + 1].minute * 60 : minutes * 60
+            let end = min(max(begin + words * 0.38, next - 4), begin + 150)
+            return TranscriptTurn(speaker: line.speaker, label: line.speaker,
+                                  track: kind == .inPerson || line.speaker == "You" ? .microphone : .system,
+                                  start: begin, end: max(end, begin + 1.5), text: line.text)
+        }
+        try encoder.encode(turns).write(to: directory.appendingPathComponent(MeetingStorage.attributedFile))
+        try encoder.encode(names).write(to: directory.appendingPathComponent(MeetingStorage.speakersFile))
+        try MeetingPostProcessor.render(directory: directory)
+        return id
+    }
+
+    /// Two seconds of near-silence: enough for the page to treat the meeting as having audio.
+    static func writeWAV(to url: URL) throws {
+        let samples = 32_000
+        var data = Data()
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) } }
+        data.append(contentsOf: Array("RIFF".utf8)); append(UInt32(36 + samples * 2))
+        data.append(contentsOf: Array("WAVEfmt ".utf8)); append(UInt32(16)); append(UInt16(1)); append(UInt16(1))
+        append(UInt32(16_000)); append(UInt32(32_000)); append(UInt16(2)); append(UInt16(16))
+        data.append(contentsOf: Array("data".utf8)); append(UInt32(samples * 2))
+        for index in 0..<samples { append(Int16(truncatingIfNeeded: Int(sin(Double(index) * 0.05) * 40))) }
+        try data.write(to: url)
     }
 }

@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>gob.lin records the call app's audio to transcribe meetings on your Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>gob.lin uses your microphone to transcribe your speech on your Mac.</string>
 </dict>

@@ -71,8 +71,10 @@ enum GoblinBrand {
     }
 
     /// The dark artwork drops the black edge and lifts each green a step, for dark menu bars.
-    static func menuArtwork(dark: Bool = false) -> NSImage {
-        let name = dark ? "goblin-menu-dark" : "goblin-menu"
+    static func menuArtwork(dark: Bool = false) -> NSImage { menuArtwork(dark ? "goblin-menu-dark" : "goblin-menu") }
+
+    /// 22 pt artwork with its Retina double, from `design/menu-icon/draw.py`.
+    private static func menuArtwork(_ name: String) -> NSImage {
         guard let assets = assetDirectory,
               let data = try? Data(contentsOf: assets.appendingPathComponent(name + ".png")),
               let normal = NSBitmapImageRep(data: data) else {
@@ -91,14 +93,18 @@ enum GoblinBrand {
         return image
     }
 
-    static func menuImage(_ state: MascotState) -> NSImage {
+    /// The menu-bar goblin with its state dot, wearing the headset while a meeting records. The headset is a shape,
+    /// not a colour, so it never reads as a status light and stacks with the dictation dot.
+    static func menuImage(_ state: MascotState, headset: Bool = false) -> NSImage {
         let light = menuArtwork(), dark = menuArtwork(dark: true)
+        let headsetLight = headset ? menuArtwork("menu-headset") : nil, headsetDark = headset ? menuArtwork("menu-headset-dark") : nil
         let image = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { bounds in
             // AppKit runs this handler again for each appearance, so the edge follows the
             // menu bar's own light or dark look rather than the app's.
             let isDark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             NSGraphicsContext.current?.imageInterpolation = .none
             (isDark ? dark : light).draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
+            (isDark ? headsetDark : headsetLight)?.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
             if state != .idle {
                 let color: NSColor = switch state {
                 case .recording: .systemRed
@@ -116,7 +122,7 @@ enum GoblinBrand {
             return true
         }
         image.isTemplate = false
-        image.accessibilityDescription = "gob.lin " + state.rawValue
+        image.accessibilityDescription = "gob.lin " + state.rawValue + (headset ? ", recording a meeting" : "")
         return image
     }
 }

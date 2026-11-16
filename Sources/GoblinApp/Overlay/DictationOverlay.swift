@@ -43,6 +43,10 @@ private struct OverlayGoblin: View {
             .overlay(alignment: mirrored ? .bottomLeading : .bottomTrailing) {
                 if hand == .palm { PixelSprite(sprite: .palm, scale: 2, mirrored: !mirrored).offset(x: mirrored ? -18 : 18, y: -6) }
             }
+            .overlay(alignment: mirrored ? .topLeading : .topTrailing) {
+                // Asleep: a quiet room for ten minutes.
+                if case .meetingQuiet = model.visiblePhase { PixelSprite(sprite: .zz, scale: 2).offset(x: mirrored ? -6 : 6, y: -4) }
+            }
             .overlay(alignment: .topLeading) {
                 if case .milestone = model.visiblePhase {
                     PixelSprite(sprite: .spark, scale: 2).offset(x: -6, y: 4)
@@ -63,6 +67,8 @@ private struct OverlayGoblin: View {
         case .readyToPaste, .newMicrophone: .side
         case .termSuggestion: .look
         case .termAdded: .closed
+        case .meetingOffer, .meetingInterrupted: .side
+        case .meetingRecording, .meetingReady, .meetingQuiet: .closed
         case .error(let notice): NoticeCopy(notice).face
         }
     }
@@ -88,7 +94,7 @@ private struct OverlayBubble: View {
         switch model.visiblePhase {
         case .arming: true
         case .inserted(let result): result.notice == nil
-        case .termAdded: true
+        case .termAdded, .meetingRecording, .meetingReady: true
         default: false
         }
     }
@@ -240,8 +246,8 @@ private struct OverlayBubble: View {
                 Subline {
                     Text("Audio › new microphone").lineLimit(1)
                     Spacer(minLength: 8)
-                    Button("Not Now") { model.perform(.dismiss) }.buttonStyle(OverlayPillStyle())
-                    Button("Use It") { model.perform(.useMicrophone(uid: uid)) }.buttonStyle(OverlayPillStyle(prominent: true))
+                    Button("Not Now") { model.perform(.dismiss) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Not Now")
+                    Button("Use It") { model.perform(.useMicrophone(uid: uid)) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Use It")
                 }
             }
         case .termSuggestion(let suggestion):
@@ -254,8 +260,8 @@ private struct OverlayBubble: View {
                 Subline {
                     Text(suggestionDetail(suggestion)).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 8)
-                    Button("Not Now") { model.perform(.dismissTerm(suggestion)) }.buttonStyle(OverlayPillStyle())
-                    Button("Add") { model.perform(.addTerm(suggestion)) }.buttonStyle(OverlayPillStyle(prominent: true))
+                    Button("Not Now") { model.perform(.dismissTerm(suggestion)) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Not Now")
+                    Button("Add") { model.perform(.addTerm(suggestion)) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Add")
                 }
             }
         case .termAdded(let suggestion):
@@ -264,6 +270,71 @@ private struct OverlayBubble: View {
                 Text("Added \(Text(suggestion.spelling).fontWeight(.semibold))").font(.row)
                 if let place = placeName(suggestion) {
                     Text("for \(place)").font(.status).foregroundStyle(.white.opacity(0.5))
+                }
+            }
+        case .meetingOffer(let offer):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: offer.systemAudioOff ? "exclamationmark.triangle.fill" : "headphones")
+                        .font(.system(size: 15))
+                        .foregroundStyle(offer.systemAudioOff ? Color(red: 1, green: 0.84, blue: 0.04) : GoblinBrand.neon).padding(.top, 1)
+                    Text(offer.systemAudioOff ? "\(offer.app) is using your mic, but I can't hear the other side yet."
+                                              : "\(offer.app) is using your mic. Should I record this call?")
+                        .font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Subline {
+                    Text(offer.systemAudioOff ? "Meetings › no call audio" : "Meetings › \(offer.title ?? offer.app)")
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button("Not Now") { model.perform(.dismissMeetingOffer) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Not Now")
+                    if offer.systemAudioOff {
+                        Button("Open Settings") { model.perform(.systemAudioSettings) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Open Settings")
+                    } else {
+                        Button("Record") { model.perform(.recordMeeting(bundleID: offer.bundleID)) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Record")
+                    }
+                }
+            }
+        case .meetingRecording(let title):
+            HStack(spacing: 9) {
+                Image(systemName: "headphones").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon)
+                Text("Recording \(Text(title).fontWeight(.semibold))").font(.row).lineLimit(1)
+                Text(MeetingCopy.consent).font(.status).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+            }
+        case .meetingReady(let ready):
+            HStack(spacing: 9) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon)
+                Text("\(Text(ready.title).fontWeight(.semibold)) is ready").font(.row).lineLimit(1)
+                Text(ready.detail).font(.status).foregroundStyle(.white.opacity(0.5)).monospacedDigit().lineLimit(1)
+                Button("Open") { model.perform(.openMeeting(id: ready.meetingID)) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Open").padding(.leading, 2)
+            }
+        case .meetingInterrupted(let notice):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 15))
+                        .foregroundStyle(Color(red: 1, green: 0.84, blue: 0.04)).padding(.top, 1)
+                    Text(notice.sentence).font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Subline {
+                    Text("Meetings › \(notice.detail)").lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Dismiss") { model.perform(.dismissInterruption) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Dismiss")
+                    if notice.canRecordRest {
+                        Button("Record the Rest") { model.perform(.recordRest) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Record the Rest")
+                    }
+                }
+            }
+        case .meetingQuiet(let minutes):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "waveform.slash").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon).padding(.top, 1)
+                    Text("It's been quiet for \(minutes) minutes. Stop recording?")
+                        .font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Subline {
+                    Text("Meetings › Conversation").lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Keep Going") { model.perform(.keepGoing) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Keep Going")
+                    Button("Stop") { model.perform(.stopMeeting) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Stop")
                 }
             }
         case .error(let notice):
@@ -278,7 +349,7 @@ private struct OverlayBubble: View {
                         if let detail = copy.detail { Text(detail).lineLimit(1) }
                         Spacer(minLength: 8)
                         if let action = copy.action {
-                            Button(action.title) { model.perform(action.action) }.buttonStyle(OverlayPillStyle())
+                            Button(action.title) { model.perform(action.action) }.buttonStyle(OverlayPillStyle()).accessibilityLabel(action.title)
                         }
                     }
                 }
@@ -450,7 +521,7 @@ private struct Subline<Content: View>: View {
 }
 
 /// Five neon bars from the last five levels, oldest first.
-private struct Meter: View {
+struct Meter: View {
     let levels: [Double]
     let idle: Bool
 
@@ -514,7 +585,7 @@ private struct Shimmer: View {
     }
 }
 
-private struct DarkKey: View {
+struct DarkKey: View {
     let label: String
     init(_ label: String) { self.label = label }
 
@@ -539,7 +610,7 @@ private struct BubbleTail: Shape {
 }
 
 /// A pill button on the dark bubble. The prominent one is the bubble's single primary action, in moss.
-private struct OverlayPillStyle: ButtonStyle {
+struct OverlayPillStyle: ButtonStyle {
     var prominent = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -552,7 +623,7 @@ private struct OverlayPillStyle: ButtonStyle {
 }
 
 /// Pressed state responds on press, not release.
-private struct OverlayIconButtonStyle: ButtonStyle {
+struct OverlayIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { IconButton(configuration: configuration) }
 
     private struct IconButton: View {

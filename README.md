@@ -132,6 +132,7 @@ disk image. See
 
 - `Sources/GoblinCore`: portable Swift domain and pipeline code; no AppKit.
 - `Sources/GoblinEngines`: shared `SpeechEngine` protocol and engine adapters.
+- `Sources/GoblinMeetings`: meeting recording, call detection, transcripts and speaker separation.
 - `Sources/GoblinApp`: SwiftUI/AppKit menu bar app and windows.
 - `Sources/GoblinCLI`: `goblin` command-line companion.
 - `Resources`: app metadata and hardened-runtime entitlements.
@@ -185,6 +186,19 @@ entry and counts again. WPM uses final words divided by recorded audio minutes
 duration never becomes a guessed speed. Typing saved compares those same words at
 40 words a minute, a typical typing speed, with the audio time. Days use the entry start in the Mac’s current
 calendar/time zone; a current streak can end today or yesterday.
+
+## Meetings (Labs)
+
+Off by default; turn it on with **Record meetings** in Settings → General → Labs.
+When a call app such as Zoom, Teams, Slack, FaceTime or a browser meeting picks up
+the microphone, gob.lin asks whether to record it. It records your microphone and
+the call app's audio, shows live captions in the Sidekick panel, and afterwards
+separates the voices on your Mac, leaves out what you said while muted or dictated,
+and lets you name each voice. Record Conversation in the menu bar records people in
+the room from the microphone alone. Meetings live under History; audio is deleted
+after a week unless the meeting is starred. It needs System Audio Recording and
+Notifications; see [permissions](docs/permissions.md#meetings) and
+[privacy](PRIVACY.md#meetings).
 
 ## CLI evaluation
 
