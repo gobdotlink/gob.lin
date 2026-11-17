@@ -22,6 +22,8 @@ public struct CaptureStopTiming: Sendable {
     public let file: Double
     /// The input device's buffer length.
     public let buffer: Double
+    /// The stop closed on a buffer whose time couldn't be read.
+    public var withoutClock = false
 }
 
 public struct AudioCaptureFailure: Error, LocalizedError, Sendable {
@@ -31,8 +33,10 @@ public struct AudioCaptureFailure: Error, LocalizedError, Sendable {
     }
     public let kind: Kind
     public let recoveryURL: URL?
+    /// Where capture raised it, as file:line, for the development log.
+    public let site: String?
 
-    public init(_ kind: Kind, recoveryURL: URL? = nil) { self.kind = kind; self.recoveryURL = recoveryURL }
+    public init(_ kind: Kind, recoveryURL: URL? = nil, site: String? = nil) { self.kind = kind; self.recoveryURL = recoveryURL; self.site = site }
 
     public var errorDescription: String? {
         switch kind {

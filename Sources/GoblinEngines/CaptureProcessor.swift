@@ -20,7 +20,8 @@ final class CaptureProcessor: @unchecked Sendable {
     private var pendingFailure: AudioCaptureFailure.Kind?
     private var nextInputSample: AVAudioFramePosition?
     private var inputHostRange: (start: UInt64, end: UInt64)?
-    private var hostTimesValid = true
+    /// The last stop closed on a buffer whose time couldn't be read, for the development log.
+    private var stoppedWithoutClock = false
     private var inputBufferDuration = 0.12
     /// The open device stopped mid-take; the service moves the take to another input.
     private var broken = false
@@ -76,7 +77,7 @@ final class CaptureProcessor: @unchecked Sendable {
                feedback: FeedbackSounds? = nil,
                feedbackSessionID: UUID? = nil,
                handler: @escaping @Sendable (AudioCaptureEvent) -> Void) throws {
-        lock.withLock { recordingSince = .now; hasNonzeroInput = false; zeroSince = nil; inputHostRange = nil; hostTimesValid = true }
+        lock.withLock { recordingSince = .now; hasNonzeroInput = false; zeroSince = nil; inputHostRange = nil; stoppedWithoutClock = false }
         try queue.sync {
             guard file == nil else { throw AudioCaptureFailure(.alreadyRecording) }
             if let failure { throw failure }
@@ -145,19 +146,14 @@ final class CaptureProcessor: @unchecked Sendable {
         if pendingStop == nil { inputBufferDuration = bufferSeconds }
         let durationTicks = AVAudioTime.hostTime(forSeconds: bufferSeconds)
         let sampleTicks = max(1, AVAudioTime.hostTime(forSeconds: 1 / nativeRate))
+        // Only this buffer's span is compared with a stop's cutoff. Order and gaps are the sample times' job above: a clock
+        // that drifts between buffers, as a USB microphone's does, loses no audio.
+        inputHostRange = nil
         if let time, time.isHostTimeValid, time.isSampleTimeValid, time.sampleRate == nativeRate, time.hostTime > 0 {
             let (end, overflow) = time.hostTime.addingReportingOverflow(durationTicks)
             let now = mach_absolute_time()
-            if overflow || time.hostTime > now || (end > now && end - now > sampleTicks) {
-                hostTimesValid = false
-            } else {
-                if let previous = inputHostRange {
-                    let gap = time.hostTime >= previous.end ? time.hostTime - previous.end : previous.end - time.hostTime
-                    if time.hostTime <= previous.start || gap > sampleTicks { hostTimesValid = false }
-                }
-                inputHostRange = (time.hostTime, end)
-            }
-        } else { hostTimesValid = false }
+            if !overflow, time.hostTime <= now, end <= now || end - now <= sampleTicks { inputHostRange = (time.hostTime, end) }
+        }
         let rms = sqrt((sums.max() ?? 0) / Double(frames))
         let copiedSamples = mono
         let capturedAt = time?.isHostTimeValid == true ? time!.hostTime : mach_absolute_time()
@@ -177,11 +173,13 @@ final class CaptureProcessor: @unchecked Sendable {
             catch { self.fail((error as? AudioCaptureFailure)?.kind ?? .conversionFailed) }
         }
         if let pendingStop {
-            if !hostTimesValid || DispatchTime.now() >= pendingStop.deadline {
+            if DispatchTime.now() >= pendingStop.deadline {
                 queue.async { self.fail(.noCallbacks) }
                 closeIngressLocked()
-            } else if let range = inputHostRange, range.end >= pendingStop.cutoff {
-                // Publish the whole straddling buffer before acknowledging the cutoff.
+            } else if inputHostRange.map({ $0.end >= pendingStop.cutoff }) ?? true {
+                // Publish the whole straddling buffer before acknowledging the cutoff. One whose time can't be read
+                // arrived after the stop, so it reaches the cutoff to within the device's safety offset.
+                if inputHostRange == nil { stoppedWithoutClock = true }
                 closeIngressLocked()
             }
         }
@@ -202,7 +200,7 @@ final class CaptureProcessor: @unchecked Sendable {
                         queue.async { self.fail(.staleSession) }
                         closeIngressLocked(); reply.resume(); return
                     }
-                    guard hostTimesValid, cutoff > 0, cutoff <= mach_absolute_time() else {
+                    guard cutoff > 0, cutoff <= mach_absolute_time() else {
                         queue.async { self.fail(.noCallbacks) }
                         closeIngressLocked(); reply.resume(); return
                     }
@@ -232,11 +230,14 @@ final class CaptureProcessor: @unchecked Sendable {
 
     /// For the render thread, after each cycle: whether a stop is waiting for input that `end` covers. The input unit then
     /// hands over its partial batch, so a stop waits for at most one device cycle instead of the rest of a ~100 ms batch.
-    /// Lock-free and allocation-free.
+    /// A cycle without a host time (`end` 0) hands over at once. Lock-free and allocation-free.
     func stopWaits(through end: UInt64) -> Bool {
         let cutoff = waitingCutoff.load(ordering: .acquiring)
-        return cutoff != 0 && end >= cutoff
+        return cutoff != 0 && (end == 0 || end >= cutoff)
     }
+
+    /// Whether the last stop closed on a buffer whose time couldn't be read.
+    var stopWithoutClock: Bool { lock.withLock { stoppedWithoutClock } }
 
     private func closeIngressLocked() {
         accepting = false
@@ -292,13 +293,13 @@ final class CaptureProcessor: @unchecked Sendable {
 
     func resume() {
         queue.sync { converter.reset(); inputCount = 0; outputCount = 0; ring.removeAll(keepingCapacity: true) }
-        lock.withLock { closeIngressLocked(); accepting = true; broken = false; gapSince = nil; outageSince = nil; awaitingInput = false; rebindsWithoutInput = 0; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil; inputHostRange = nil; hostTimesValid = true; inputBufferDuration = 0.12 }
+        lock.withLock { closeIngressLocked(); accepting = true; broken = false; gapSince = nil; outageSince = nil; awaitingInput = false; rebindsWithoutInput = 0; overflow = false; lastCallback = .now; hasCallback = false; hasNonzeroInput = false; zeroSince = nil; recordingSince = nil; pendingFailure = nil; nextInputSample = nil; inputHostRange = nil; stoppedWithoutClock = false; inputBufferDuration = 0.12 }
     }
 
-    private func fail(_ kind: AudioCaptureFailure.Kind, recoveryURL: URL? = nil) {
+    private func fail(_ kind: AudioCaptureFailure.Kind, recoveryURL: URL? = nil, file site: StaticString = #fileID, line: UInt = #line) {
         // Call only on queue, or schedule via interrupt. Keep the first failure and its recoverable file.
         guard failure == nil else { return }
-        failure = AudioCaptureFailure(kind, recoveryURL: recoveryURL ?? file?.partialURL)
+        failure = AudioCaptureFailure(kind, recoveryURL: recoveryURL ?? file?.partialURL, site: "\(site):\(line)")
         lock.withLock { closeIngressLocked() }
         failedFileURL = failure?.recoveryURL
         file?.preserve()
@@ -311,8 +312,9 @@ final class CaptureProcessor: @unchecked Sendable {
         return queue.sync { fail(kind); return failure! }
     }
 
-    func interrupt(_ kind: AudioCaptureFailure.Kind) {
-        lock.withLock { queue.async { self.fail(kind) }; closeIngressLocked() }
+    /// Logged as raised where it was called.
+    func interrupt(_ kind: AudioCaptureFailure.Kind, file: StaticString = #fileID, line: UInt = #line) {
+        lock.withLock { queue.async { self.fail(kind, file: file, line: line) }; closeIngressLocked() }
     }
 
     /// The device stopped rendering or changed under the stream. A take stops taking input and waits for
@@ -357,7 +359,7 @@ final class CaptureProcessor: @unchecked Sendable {
             guard recordingSince != nil else { return }
             // Counted from the last real buffer, even across several rebinds.
             gapSince = gapSince ?? lastCallback
-            lastCallback = .now; nextInputSample = nil; inputHostRange = nil; hostTimesValid = true
+            lastCallback = .now; nextInputSample = nil; inputHostRange = nil
             broken = false; awaitingInput = true; rebindsWithoutInput += 1; accepting = true
         }
     }

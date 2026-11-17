@@ -395,6 +395,7 @@ struct AudioCaptureCheck {
             do { _ = try await processor.finish(sessionID: id, cancel: false); preconditionFailure("Uncertain stop must retain audio and fail") }
             catch let error as AudioCaptureFailure {
                 precondition(error.kind == kind)
+                precondition(error.site != nil, "A capture failure must say where it was raised")
                 let file = try AVAudioFile(forReading: error.recoveryURL!)
                 precondition(file.length == samples)
             }
@@ -450,23 +451,41 @@ struct AudioCaptureCheck {
         precondition(waited >= .milliseconds(100) && waited < .seconds(1), "The source-derived deadline must be bounded")
         try await retained(timeout, timeoutID, .noCallbacks, 1600)
 
-        // Invalid host/sample mapping must never certify a complete stop. All accepted audio stays recoverable.
-        for mode in 0..<8 {
+        // A USB clock wobbles: contiguous samples whose batch times drift past one sample are still one take, and its
+        // stop finishes with every sample.
+        let (wobble, wobbleID, wobbleBase) = try make()
+        let sample = AVAudioTime.hostTime(forSeconds: 1.0 / 16_000)
+        wobble.receive(buffer(0.25), time: time(wobbleBase, 0))
+        wobble.receive(buffer(0.75), time: time(wobbleBase + ticks + sample * 3, 1600))
+        await wobble.seal(atHostTime: wobbleBase + ticks + ticks / 2)
+        let wobbleAudio = try await wobble.finish(sessionID: wobbleID, cancel: false)
+        precondition(wobbleAudio?.sampleCount == 3200, "A clock wobble must not fail the stop")
+
+        // A buffer whose time can't be read never fails a stop. The stop asks for the next cycle at once, and the buffer
+        // that brings, timed or not, closes it with every sample. Only a cutoff no stop passes still fails.
+        for mode in 0..<12 {
             let (invalid, invalidID, invalidBase) = try make()
-            let timestamp: AVAudioTime?
-            switch mode {
-            case 0: timestamp = nil
-            case 1: timestamp = AVAudioTime(sampleTime: 0, atRate: 16_000)
-            case 2: timestamp = AVAudioTime(hostTime: invalidBase)
-            case 3: timestamp = AVAudioTime(hostTime: invalidBase, sampleTime: 0, atRate: 48_000)
-            case 4: timestamp = time(mach_absolute_time() + ticks, 0)
-            case 5: timestamp = time(UInt64.max - 1, 0)
-            default: timestamp = time(invalidBase, 0)
+            func timestamp(_ host: UInt64, _ sample: Int64) -> AVAudioTime? {
+                switch mode % 6 {
+                case 0: nil
+                case 1: AVAudioTime(sampleTime: sample, atRate: 16_000)
+                case 2: AVAudioTime(hostTime: host)
+                case 3: AVAudioTime(hostTime: host, sampleTime: sample, atRate: 48_000)
+                case 4: time(mach_absolute_time() + ticks, sample)
+                default: time(UInt64.max - 1, sample)
+                }
             }
-            invalid.receive(buffer(0.25), time: timestamp)
-            if mode >= 6 { invalid.receive(buffer(0.75), time: time(mode == 6 ? invalidBase - ticks : invalidBase + ticks * 2, 1600)) }
-            await invalid.seal(atHostTime: invalidBase + ticks / 2)
-            try await retained(invalid, invalidID, .noCallbacks, mode >= 6 ? 3200 : 1600)
+            invalid.receive(buffer(0.25), time: timestamp(invalidBase, 0))
+            let cutoff = invalidBase + ticks / 2
+            let sealing = Task { await invalid.seal(atHostTime: cutoff) }
+            try await Task.sleep(for: .milliseconds(5))
+            precondition(invalid.stopWaits(through: 0), "A cycle without a host time must hand its batch over at once")
+            // The first six modes bring an untimed buffer next, the rest a timed one past the cutoff.
+            invalid.receive(buffer(0.75), time: mode < 6 ? timestamp(invalidBase + ticks, 1600) : time(invalidBase + ticks, 1600))
+            await sealing.value
+            let audio = try await invalid.finish(sessionID: invalidID, cancel: false)
+            precondition(audio?.sampleCount == 3200, "An unreadable clock must not fail the stop or lose samples")
+            precondition(invalid.stopWithoutClock == (mode < 6), "Only a stop closed on an untimed buffer is noted")
         }
         for invalidCutoff in [UInt64(0), mach_absolute_time() + ticks] {
             let (invalid, invalidID, invalidBase) = try make()
@@ -496,7 +515,7 @@ struct AudioCaptureCheck {
                 precondition(discarded == nil && !FileManager.default.fileExists(atPath: directory.appendingPathComponent(cancelledID.uuidString + ".partial.wav").path))
             }
         }
-        print("Stop boundary checks: delayed straddling tail saved, subsequent input rejected, cached coverage, stale deadline reset, bounded uncertainty with retained samples, invalid clocks, immediate cancel/failure and original error passed.")
+        print("Stop boundary checks: delayed straddling tail saved, subsequent input rejected, cached coverage, stale deadline reset, bounded uncertainty with retained samples, clock wobble and unreadable clocks finishing with every sample, immediate cancel/failure and original error passed.")
     }
 
     @MainActor static func native() async throws {

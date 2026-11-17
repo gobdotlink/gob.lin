@@ -102,7 +102,7 @@ public final class AudioCaptureService {
             var result = try await processor.finish(sessionID: sessionID, cancel: false)
             let milliseconds = { (duration: Duration) in Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15 }
             result?.stopTiming = CaptureStopTiming(seal: milliseconds(start.duration(to: sealed)), file: milliseconds(sealed.duration(to: .now)),
-                                                   buffer: processor.bufferDuration * 1000)
+                                                   buffer: processor.bufferDuration * 1000, withoutClock: processor.stopWithoutClock)
             return result
         }
         terminalTask = task

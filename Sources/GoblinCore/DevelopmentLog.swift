@@ -41,6 +41,8 @@ public enum DevelopmentReason: String {
     case manualRetry, settingsReturn
     case permissionMissing, invalidFormat, deviceUnavailable, systemDefault, savedDevice
     case liveWindowLimit, liveDecodeFailed, liveDecodeUnavailable, liveOverlapMismatch, liveTimingUnavailable, liveInputDiscontinuity, liveInvalidSamples
+    /// Capture closed at key-up on a buffer whose time couldn't be read.
+    case stopWithoutClock
 }
 
 /// Device UIDs never leave this type. Tokens correlate devices only within one launch.
@@ -78,6 +80,8 @@ public struct DevelopmentDetails {
     public var sealMilliseconds: Double?
     public var fileMilliseconds: Double?
     public var bufferMilliseconds: Double?
+    /// A capture failure's kind and the file:line that raised it.
+    public var captureFailure: String?
     public init(reason: DevelopmentReason? = nil) { self.reason = reason }
 
     fileprivate var fields: [String: Any] {
@@ -106,6 +110,7 @@ public struct DevelopmentDetails {
         fields["inputMonitoring"] = inputMonitoring?.rawValue
         fields["secureInput"] = secureInput
         fields["failure"] = failure?.message
+        fields["captureFailure"] = captureFailure
         fields["succeeded"] = succeeded
         fields["timings"] = timings.map(DiagnosticsReport.timingLines)
         if let underlyingError {

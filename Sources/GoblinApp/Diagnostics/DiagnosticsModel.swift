@@ -30,10 +30,11 @@ final class DiagnosticsModel: ObservableObject {
         else { refresh() }
     }
 
-    func report(_ failure: DiagnosticFailure, operation: UUID? = nil) {
+    func report(_ failure: DiagnosticFailure, operation: UUID? = nil, captureFailure: String? = nil) {
         if operation == nil, activeFailures[failure.area] == failure { return }
         var details = DevelopmentDetails()
         details.failure = failure
+        details.captureFailure = captureFailure
         developmentLog.record(.failure, area: failure.area, severity: .error, operation: operation, details: details)
         guard activeFailures[failure.area] != failure else { return }
         activeFailures[failure.area] = failure
