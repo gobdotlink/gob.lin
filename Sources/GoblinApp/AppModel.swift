@@ -663,11 +663,13 @@ final class AppModel: ObservableObject {
                 if let closing = active.captureStop { audio = try await closing.value }
                 else { audio = try await self.capture.stop(sessionID: captureID) }
             } catch {
+                // The failure event can still be on its way; the take's message and kept audio come from this error.
+                if active.failure == nil { active.failure = error as? AudioCaptureFailure }
                 active.sounds?.end(sessionID: active.session.id, playStop: false)
                 await active.audioReduction?.finish()
                 throw error
             }
-            var stopped = DevelopmentDetails()
+            var stopped = DevelopmentDetails(reason: audio.stopTiming?.withoutClock == true ? .stopWithoutClock : nil)
             stopped.sealMilliseconds = audio.stopTiming?.seal
             stopped.fileMilliseconds = audio.stopTiming?.file
             stopped.bufferMilliseconds = audio.stopTiming?.buffer
@@ -827,7 +829,8 @@ final class AppModel: ObservableObject {
     }
 
     private func recordFailedDictation(_ active: ActiveDictation, failure: DiagnosticFailure) async {
-        diagnostics.report(failure, operation: active.session.id)
+        diagnostics.report(failure, operation: active.session.id,
+                           captureFailure: active.failure.map { [$0.kind.rawValue, $0.site].compactMap(\.self).joined(separator: " at ") })
         if let overlayID = active.session.overlayID {
             overlay.update(.error(OverlayNotice(failure)), session: overlayID)
             overlay.hide(after: 4, session: overlayID)
