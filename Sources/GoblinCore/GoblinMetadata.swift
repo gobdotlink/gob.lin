@@ -1,6 +1,6 @@
 public enum GoblinMetadata {
     public static let name = "gob.lin"
-    public static let version = "0.2.36"
+    public static let version = "0.2.37"
     public static let bundleIdentifier = "app.goblin.dictation"
     #if os(iOS)
     static let userAgent = "gob.lin/\(version) (iOS dictation)"
