@@ -26,6 +26,11 @@ struct MeetingDetailView: View {
     struct Undo: Equatable {
         var message: String
         var names: [String: String]
+        /// After a merge while someone on the call had no voice: who, and the merged voice's name before, so
+        /// "That's Sam" can split it back out under their name.
+        var missing: String? = nil
+        var mergedFrom: String? = nil
+        var warning: String? = nil
     }
 
     private var turns: [TranscriptTurn] { detail?.turns ?? [] }
@@ -95,8 +100,7 @@ struct MeetingDetailView: View {
                                 onRename: { startRename(lane) }, onMerge: { merge(lane, into: $0) })
                 }
             }
-            let heard = Set(lanes.map { $0.name.lowercased() })
-            let unheard = (detail?.participants.others ?? []).filter { !heard.contains($0.lowercased()) }
+            let unheard = SpeakerSuggestions.unmatched(lanes: lanes, participants: detail?.participants ?? MeetingParticipants())
             if !inPerson, !unheard.isEmpty {
                 Text("Also in the call: " + unheard.joined(separator: ", ")).font(.meta).foregroundStyle(.secondary)
             }
@@ -104,14 +108,9 @@ struct MeetingDetailView: View {
     }
 
     private func undoBar(_ undo: Undo) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark").font(.status.weight(.semibold)).foregroundStyle(GoblinBrand.mossText).accessibilityHidden(true)
-            Text(undo.message).font(.status)
-            Spacer(minLength: 8)
-            Button("Undo") { restore(undo) }.font(.status)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+        MeetingChangeLine(message: undo.message, warning: undo.warning, missing: undo.mergedFrom == nil ? nil : undo.missing,
+                          onSplit: { if let lane = undo.mergedFrom, let missing = undo.missing { split(undo, lane: lane, as: missing) } },
+                          onUndo: { restore(undo) })
     }
 
     @ViewBuilder private var notices: some View {
@@ -297,25 +296,43 @@ struct MeetingDetailView: View {
         let other = lanes.first { $0.id != lane.id && $0.name.caseInsensitiveCompare(typed) == .orderedSame }
         let trimmed = other?.name ?? typed
         guard trimmed != lane.name else { return }
-        change(other != nil ? "Merged \(lane.name) into \(trimmed)." : lane.needsName ? "Named \(lane.name) \(trimmed)." : "Renamed \(lane.name) to \(trimmed).") {
+        if let other { return merge(lane, into: other) }
+        change(lane.needsName ? "Named \(lane.name) \(trimmed)." : "Renamed \(lane.name) to \(trimmed).") {
             try await store.renameSpeaker(meeting.id, from: lane.name, to: trimmed)
         }
     }
 
+    /// Two voices become one. When someone on the call has no voice yet, the line saying so offers them instead:
+    /// two voices the diarizer kept apart are more likely that person than the same one twice.
     private func merge(_ lane: MeetingLane, into other: MeetingLane) {
-        change("Merged \(lane.name) into \(other.name).") { try await store.renameSpeaker(meeting.id, from: lane.name, to: other.name) }
+        let unmatched = inPerson ? [] : SpeakerSuggestions.unmatched(lanes: lanes, participants: detail?.participants ?? MeetingParticipants())
+        let warning = SpeakerSuggestions.mergeWarning(unmatched: unmatched)
+        change("Merged \(lane.name) into \(other.name).", missing: unmatched.count == 1 ? unmatched[0] : nil,
+               mergedFrom: warning == nil ? nil : lane.name, warning: warning) {
+            try await store.renameSpeaker(meeting.id, from: lane.name, to: other.name)
+        }
     }
 
-    private func change(_ message: String, _ edit: @escaping () async throws -> [TranscriptTurn]) {
+    private func change(_ message: String, missing: String? = nil, mergedFrom: String? = nil, warning: String? = nil,
+                        _ edit: @escaping () async throws -> [TranscriptTurn]) {
         Task {
             do {
                 let before = try await store.speakerNames(meeting.id)
                 _ = try await edit()
-                undo = Undo(message: message, names: before)
+                undo = Undo(message: message, names: before, missing: missing, mergedFrom: mergedFrom, warning: warning)
                 failure = nil
             } catch { failure = error.localizedDescription }
             reloads += 1
             onEdited()
+        }
+    }
+
+    /// Undoes a merge and names the voice that was merged in after the person who had no voice.
+    private func split(_ undo: Undo, lane: String, as name: String) {
+        self.undo = nil
+        change(MeetingTimeline.isUnnamed(lane) ? "Named \(lane) \(name)." : "Renamed \(lane) to \(name).") {
+            _ = try await store.setSpeakerNames(meeting.id, undo.names)
+            return try await store.renameSpeaker(meeting.id, from: lane, to: name)
         }
     }
 
@@ -437,5 +454,34 @@ struct FlowRows: Layout {
             }
         }
         return rows
+    }
+}
+
+/// The moss-tinted line after a rename or merge: what changed, with Undo. After a merge while someone on the call had
+/// no voice, a second line says who, with "That's <name>" to name the merged voice after them instead.
+struct MeetingChangeLine: View {
+    let message: String
+    var warning: String? = nil
+    var missing: String? = nil
+    var onSplit: () -> Void = {}
+    let onUndo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark").font(.status.weight(.semibold)).foregroundStyle(GoblinBrand.mossText).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message).font(.status)
+                if let warning {
+                    Text(warning).font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            if let missing {
+                Button("That's \(SpeakerSuggestions.firstName(missing))", action: onSplit).font(.status)
+            }
+            Button("Undo", action: onUndo).font(.status)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
     }
 }

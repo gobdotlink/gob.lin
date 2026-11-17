@@ -597,7 +597,13 @@ public enum MeetingPostProcessor {
     /// voices stay "Speaker N" (nothing ties a voice to a name yet); the transcript lists the participants.
     static func systemTurns(_ system: [TranscriptSegment], spans: [DiarizedSpan], remote: [String],
                             track: MeetingTrack = .system) -> [TranscriptTurn] {
-        let attributed = system.map { segment in (segment, speakers(for: segment, spans: spans)) }
+        // The last word's speaker carries across lines, so overlapped speech stays with whoever was already talking.
+        var previous: Int?
+        let attributed = system.map { segment in
+            let speakers = speakers(for: segment, spans: spans, previous: previous)
+            previous = speakers.last ?? previous
+            return (segment, speakers)
+        }
         var order: [Int: Int] = [:]
         for (_, speakers) in attributed {
             for case let speaker? in speakers where order[speaker] == nil { order[speaker] = order.count + 1 }
@@ -632,30 +638,57 @@ public enum MeetingPostProcessor {
         return turns
     }
 
-    /// One speaker per word (one for the whole segment when it has no words); nil only without spans.
-    static func speakers(for segment: TranscriptSegment, spans: [DiarizedSpan]) -> [Int?] {
+    /// One speaker per word (one for the whole segment when it has no words); nil only without spans. `previous` is
+    /// the speaker of the word before this segment.
+    static func speakers(for segment: TranscriptSegment, spans: [DiarizedSpan], previous: Int? = nil) -> [Int?] {
         guard !spans.isEmpty else { return segment.words.isEmpty ? [nil] : segment.words.map { _ in nil } }
         guard !segment.words.isEmpty else {
-            return [dominant(spans, segment.start, segment.end) ?? nearest(spans, (segment.start + segment.end) / 2, within: .infinity)]
+            return [dominant(spans, segment.start, segment.end, previous: previous)
+                ?? nearest(spans, (segment.start + segment.end) / 2, within: .infinity)]
         }
         var result: [Int?] = []
-        var previous: Int?
+        // The word before decides ties; only a word in this segment stands in for a word far from every span.
+        var inSegment: Int?
         for word in segment.words {
             let middle = (word.start + word.end) / 2
-            let speaker = dominant(spans, word.start, word.end) ?? nearest(spans, middle, within: nearbySpanSeconds) ?? previous
-                ?? nearest(spans, middle, within: .infinity)
+            let speaker = dominant(spans, word.start, word.end, previous: inSegment ?? previous)
+                ?? nearest(spans, middle, within: nearbySpanSeconds) ?? inSegment ?? nearest(spans, middle, within: .infinity)
             result.append(speaker)
-            previous = speaker
+            inSegment = speaker
         }
         return result
     }
 
-    static func dominant(_ spans: [DiarizedSpan], _ start: Double, _ end: Double) -> Int? {
+    /// A voice whose overlap with a word is at least this share of the largest one counts as a tie.
+    static let overlapTieShare = 0.8
+    /// A pause in a voice this short, with the voice going on after it, is still that voice's turn.
+    static let pauseInTurnSeconds = 0.6
+
+    /// The voice that overlaps `start…end` most. The diarizer marks voices talking over each other, so two voices can
+    /// cover a word about equally; then the word stays with `previous`, whoever was already talking, including across
+    /// a short pause in their voice, rather than going to the lower-numbered voice. Without that, a voice heard under
+    /// someone's monologue once took the second half of it.
+    static func dominant(_ spans: [DiarizedSpan], _ start: Double, _ end: Double, previous: Int? = nil) -> Int? {
         var overlap: [Int: Double] = [:]
         for span in spans where span.start < end && span.end > start {
             overlap[span.speaker, default: 0] += min(span.end, end) - max(span.start, start)
         }
-        return overlap.max { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }?.key
+        guard let best = overlap.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }) else { return nil }
+        guard let previous else { return best.key }
+        var held = overlap[previous] ?? 0
+        if held < best.value * overlapTieShare, pausesWithin(spans, of: previous, start, end) { held = end - start }
+        return held >= best.value * overlapTieShare ? previous : best.key
+    }
+
+    /// Whether `start…end` falls in a pause of `speaker`'s voice no longer than `pauseInTurnSeconds`: a span of
+    /// theirs that began before the word stopped, and a later one starts again and runs past the word. A voice that
+    /// stopped and doesn't resume, or only blips inside the word, has ended its turn.
+    static func pausesWithin(_ spans: [DiarizedSpan], of speaker: Int, _ start: Double, _ end: Double) -> Bool {
+        let theirs = spans.filter { $0.speaker == speaker }
+        guard let stopped = theirs.filter({ $0.start < start && $0.end <= end }).map(\.end).max(),
+              let resumed = theirs.filter({ $0.start >= stopped && $0.start >= start && $0.end > end }).map(\.start).min()
+        else { return false }
+        return resumed - stopped <= pauseInTurnSeconds
     }
 
     static func nearest(_ spans: [DiarizedSpan], _ time: Double, within limit: Double) -> Int? {

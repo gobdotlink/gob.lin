@@ -168,6 +168,13 @@ struct SettingsCapture {
                             try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: name == "meetings-who" ? 700 : 560), dark: dark)
                         }
                     }
+                    let mergeLine = MeetingChangeLine(message: "Merged Speaker 3 into Priya Shah.",
+                                                      warning: SpeakerSuggestions.mergeWarning(unmatched: ["Sam Okafor"]),
+                                                      missing: "Sam Okafor", onUndo: {})
+                        .padding(20).frame(width: 760, alignment: .leading).background(Color(nsColor: .windowBackgroundColor))
+                    for dark in [false, true] {
+                        try await shoot("meetings-merge" + (dark ? "-dark" : ""), mergeLine, size: NSSize(width: 760, height: 100), dark: dark)
+                    }
                     for dark in [false, true] {
                         SystemAudioAccess.shared.override = .unknown
                         try await shoot("meetings-setup" + (dark ? "-dark" : ""), MeetingsSetupSheet(meetings: model.meetings, notifications: .notDetermined) {},

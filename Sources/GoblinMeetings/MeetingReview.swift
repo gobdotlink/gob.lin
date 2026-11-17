@@ -79,12 +79,45 @@ public enum MeetingTimeline {
         }
     }
 
+    /// A voice starting this soon after another voice stopped mid-sentence may be the diarizer splitting one
+    /// person's speech, not a new person talking.
+    public static let pickupGap = 0.5
+
     /// Up to `count` of a voice's turns to listen to: its longest lines of three words or more, in meeting order.
+    /// Lines from a run of this voice that took over mid-sentence from another voice come last: when a quiet voice had
+    /// two of those as its longest lines, both were someone else, and the voice was named after them.
     public static func clips(of speaker: String, in turns: [TranscriptTurn], count: Int = 3) -> [TranscriptTurn] {
-        let theirs = turns.filter { $0.speaker == speaker }
+        let ordered = turns.sorted { $0.start < $1.start }
+        var pickups = Set<UUID>()
+        var runIsPickup: [MeetingTrack: Bool] = [:]
+        var lastOfTheirs: [MeetingTrack: Int] = [:]
+        for (index, turn) in ordered.enumerated() where turn.speaker == speaker {
+            // A turn soon after this voice's last one, with nobody else between, continues its run and keeps its verdict.
+            let continues = lastOfTheirs[turn.track].map { last in
+                turn.start - ordered[last].end <= joinGap
+                    && !ordered[(last + 1)..<index].contains { $0.track == turn.track && $0.speaker != speaker }
+            } ?? false
+            if !continues {
+                let before = ordered[..<index].last { $0.track == turn.track && $0.speaker != speaker }
+                runIsPickup[turn.track] = before.map { turn.start - $0.end <= pickupGap && !endsASentence($0.text) } ?? false
+            }
+            if runIsPickup[turn.track] == true { pickups.insert(turn.id) }
+            lastOfTheirs[turn.track] = index
+        }
+        let theirs = ordered.filter { $0.speaker == speaker }
         let wordy = theirs.filter { $0.text.split(separator: " ").count >= 3 }
-        return Array((wordy.isEmpty ? theirs : wordy).sorted { ($0.end - $0.start, $1.start) > ($1.end - $1.start, $0.start) }.prefix(count))
-            .sorted { $0.start < $1.start }
+        let pool = wordy.isEmpty ? theirs : wordy
+        let ranked = pool.sorted { a, b in
+            let (aPickup, bPickup) = (pickups.contains(a.id), pickups.contains(b.id))
+            if aPickup != bPickup { return !aPickup }
+            return (a.end - a.start, b.start) > (b.end - b.start, a.start)
+        }
+        return Array(ranked.prefix(count)).sorted { $0.start < $1.start }
+    }
+
+    static func endsASentence(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return true }
+        return ".?!…".contains(last)
     }
 
     /// Axis labels every 5 or 10 minutes (every minute under 10 minutes), starting at zero.
@@ -127,6 +160,22 @@ public enum SpeakerSuggestions {
             result.append(SpeakerSuggestion(name: name, reason: "In the call's participant list, and no voice has their name yet."))
         }
         return Array(result.prefix(limit))
+    }
+
+    /// People the call's participant list says were there whom no voice is named after yet, in the list's order.
+    /// Never this Mac's own person.
+    public static func unmatched(lanes: [MeetingLane], participants: MeetingParticipants) -> [String] {
+        let heard = Set(lanes.map { $0.name.lowercased() })
+        return participants.others.filter { !heard.contains($0.lowercased()) }
+    }
+
+    /// The sentence asking before two voices become one while someone on the call has no voice yet, or nil when
+    /// nobody is missing: "I heard these as two different voices, and Sam Okafor doesn't have a voice yet."
+    public static func mergeWarning(unmatched: [String]) -> String? {
+        guard !unmatched.isEmpty else { return nil }
+        let names = unmatched.count == 1 ? unmatched[0]
+            : unmatched.dropLast().joined(separator: ", ") + " and " + unmatched[unmatched.count - 1]
+        return "I heard these as two different voices, and \(names) \(unmatched.count == 1 ? "doesn't" : "don't") have a voice yet."
     }
 
     /// More voices came through the call than it listed people: someone shared a laptop. Returns how many extra.

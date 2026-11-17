@@ -70,6 +70,44 @@ private func turn(_ speaker: String, _ start: Double, _ end: Double, track: Meet
     #expect(MeetingTimeline.clips(of: "Speaker 4", in: [turns[0]]).count == 1)
 }
 
+@Test func clipsSkipLinesTakenOverMidSentence() {
+    // The diarizer split Priya's sentence, giving its end to Speaker 4: those lines are Priya, so they come last.
+    let turns = [
+        turn("Priya Shah", 0, 30, "we build scheduling tools for clinics and the"),
+        turn("Speaker 4", 30.1, 31, "pharmacies they work with"),
+        turn("Speaker 4", 31.2, 40, "and we're heavily using the models for that so"),
+        turn("Speaker 4", 40.2, 48, "we wanted to understand the other programmes"),
+        turn("Priya Shah", 49, 52, "Sam, do you want to say where you sit?"),
+        turn("Speaker 4", 52.2, 60, "Sure, I'm one of the engineers on the project."),
+        turn("Speaker 4", 70, 72, "Okay, sounds good."),
+    ]
+    #expect(MeetingTimeline.clips(of: "Speaker 4", in: turns).map(\.start) == [31.2, 52.2, 70])
+    // Someone else asking in between starts a new run: the answer is judged on its own.
+    let asked = [
+        turn("Priya Shah", 0, 10, "we build scheduling tools for clinics and the"),
+        turn("Speaker 4", 10.1, 11, "pharmacies they work with"),
+        turn("Priya Shah", 11.1, 11.7, "Sam, is that right?"),
+        turn("Speaker 4", 11.8, 20, "Yes, and I look after the routing side of it."),
+        turn("Speaker 4", 30, 32, "Okay, sounds good."),
+    ]
+    #expect(MeetingTimeline.clips(of: "Speaker 4", in: asked, count: 1).map(\.start) == [11.8])
+    // An answer straight after a finished sentence is theirs.
+    #expect(MeetingTimeline.clips(of: "Speaker 4", in: turns, count: 1).map(\.start) == [52.2])
+}
+
+@Test func mergingWhileSomeoneHasNoVoiceSaysWho() {
+    let participants = MeetingParticipants(all: ["Will", "Priya Shah", "Sam Okafor", "Mira Patel"], me: "Will")
+    let lanes = MeetingTimeline.lanes([turn("You", 0, 1, track: .microphone), turn("Priya Shah", 1, 2), turn("Speaker 3", 2, 3)])
+    let unmatched = SpeakerSuggestions.unmatched(lanes: lanes, participants: participants)
+    #expect(unmatched == ["Sam Okafor", "Mira Patel"])
+    #expect(SpeakerSuggestions.mergeWarning(unmatched: ["Sam Okafor"])
+            == "I heard these as two different voices, and Sam Okafor doesn't have a voice yet.")
+    #expect(SpeakerSuggestions.mergeWarning(unmatched: unmatched)
+            == "I heard these as two different voices, and Sam Okafor and Mira Patel don't have a voice yet.")
+    #expect(SpeakerSuggestions.mergeWarning(unmatched: []) == nil)
+    #expect(SpeakerSuggestions.unmatched(lanes: lanes, participants: MeetingParticipants()).isEmpty)
+}
+
 @Test func marksParseSkipBadLinesAndSort() {
     let marks = MeetingMark.parse("""
         {"t": 120.5, "label": "Pricing"}

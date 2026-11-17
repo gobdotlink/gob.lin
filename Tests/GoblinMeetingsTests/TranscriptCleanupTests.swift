@@ -139,6 +139,36 @@ import Testing
     #expect(turns.map(\.speaker) == ["Speaker 1", "Speaker 2"])
 }
 
+@Test func speechTwoVoicesCoverEquallyStaysWithWhoeverWasTalking() {
+    // Voice 2 talks from 0 s; the diarizer also hears voice 0 under it from 3 s to 9 s. Before, every word both covered
+    // went to voice 0 on the tie, across the line break too.
+    let spans = [DiarizedSpan(speaker: 2, start: 0, end: 12), DiarizedSpan(speaker: 0, start: 3, end: 9),
+                 DiarizedSpan(speaker: 0, start: 14, end: 18)]
+    let turns = MeetingPostProcessor.systemTurns([Fixtures.segment(.system, "we built the first version and now we use", at: 0, step: 0.6),
+                                                   Fixtures.segment(.system, "the models for route planning", at: 6.5),
+                                                   Fixtures.segment(.system, "I'm one of the engineers", at: 14.5)],
+                                                  spans: spans, remote: ["Alex Kim", "Priya Shah"])
+    #expect(turns.map(\.speaker) == ["Speaker 1", "Speaker 1", "Speaker 2"])
+    // A short pause in the talker's voice where only the other voice is heard doesn't hand them the rest.
+    let paused = [DiarizedSpan(speaker: 2, start: 0, end: 4), DiarizedSpan(speaker: 2, start: 4.4, end: 10),
+                  DiarizedSpan(speaker: 0, start: 2, end: 10)]
+    #expect(Set(MeetingPostProcessor.speakers(for: Fixtures.segment(.system, "one two three four five six seven eight", at: 3, step: 0.5),
+                                              spans: paused, previous: 2)) == [2])
+    // A reply straight after someone stops is the replier's from its first word.
+    let reply = [DiarizedSpan(speaker: 2, start: 0, end: 4), DiarizedSpan(speaker: 0, start: 4.2, end: 8)]
+    #expect(MeetingPostProcessor.speakers(for: Fixtures.segment(.system, "sure thing", at: 4.3), spans: reply, previous: 2) == [0, 0])
+    // A blip of the talker's voice inside a word the other voice covers isn't a pause in their turn.
+    let blip = [DiarizedSpan(speaker: 2, start: 0, end: 4.9), DiarizedSpan(speaker: 2, start: 5.1, end: 5.2),
+                DiarizedSpan(speaker: 0, start: 5, end: 6)]
+    #expect(MeetingPostProcessor.dominant(blip, 5, 5.6, previous: 2) == 0)
+    // A line far from every span takes the nearest voice, not the last line's.
+    let far = [DiarizedSpan(speaker: 2, start: 0, end: 2), DiarizedSpan(speaker: 0, start: 30, end: 32)]
+    #expect(MeetingPostProcessor.speakers(for: Fixtures.segment(.system, "and so", at: 26), spans: far, previous: 2) == [0, 0])
+    // A word mostly in one voice still goes to it, whoever spoke before.
+    let clear = [DiarizedSpan(speaker: 2, start: 0, end: 1.1), DiarizedSpan(speaker: 0, start: 1.1, end: 4)]
+    #expect(MeetingPostProcessor.speakers(for: Fixtures.segment(.system, "yes so", at: 0.5, step: 0.8), spans: clear) == [2, 0])
+}
+
 @Test func noSpeakerIsEverAQuestionMark() {
     let segments = [Fixtures.segment(.system, "hello", at: 1), TranscriptSegment(track: .system, start: 3, end: 4, text: "hm", words: [],
                                                                                     decodeMilliseconds: 1)]
