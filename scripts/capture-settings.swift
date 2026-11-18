@@ -32,11 +32,14 @@ struct SettingsCapture {
         defaults.set(["com.hnc.Discord"], forKey: MeetingsController.neverAskKey)
         SystemAudioAccess.shared.override = .granted
         let sampleMeetings = try SampleMeetings.write(in: directory.appendingPathComponent("Meetings", isDirectory: true))
+        // Notes were said yes to once, so the weekly sync has them; the design crit shows what writing them looks like.
+        defaults.set(true, forKey: MeetingNotesModel.consentKey)
         let model = AppModel(dataDirectory: directory, defaults: defaults, servicesEnabled: false,
             diagnosticEnvironment: DiagnosticEnvironment(microphonePermission: .notRequested,
                 accessibilityPermission: .denied, inputMonitoringPermission: .denied,
                 microphoneNames: ["Preview microphone"], defaultMicrophoneName: "Preview microphone"))
         precondition(model.overlay.position == .top, "Saved overlay position must apply before Settings or Preview opens")
+        model.meetings.notes.usePreview(tools: SampleMeetings.notesTools, models: SampleMeetings.notesModels)
         let emptyDirectory = directory.appendingPathComponent("empty", isDirectory: true)
         let empty = AppModel(dataDirectory: emptyDirectory, defaults: defaults, servicesEnabled: false)
         let lifecycle = GoblinApplicationDelegate()
@@ -167,6 +170,21 @@ struct SettingsCapture {
                         for dark in [false, true] {
                             try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: name == "meetings-who" ? 700 : 560), dark: dark)
                         }
+                    }
+                    // The notes on their own, and a meeting without them, as the page shows them below the transcript.
+                    for (name, id) in [("meetings-notes", sampleMeetings.weekly), ("meetings-notes-offer", sampleMeetings.design)] {
+                        let detail = try await store.detail(id)
+                        let notes = try await store.notes(id)
+                        let player = MeetingPlayer()
+                        player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
+                        if name == "meetings-notes-offer" { defaults.set(false, forKey: MeetingNotesModel.consentKey) }
+                        let section = MeetingNotesSection(meeting: detail.summary, notes: notes, stale: false, names: detail.speakerNames,
+                                                          model: model.meetings.notes, player: player, onChanged: {})
+                            .padding(28).frame(width: 820, alignment: .topLeading).background(GoblinBrand.caseBackground)
+                        for dark in [false, true] {
+                            try await shoot(name + (dark ? "-dark" : ""), section, size: NSSize(width: 820, height: name == "meetings-notes" ? 880 : 200), dark: dark)
+                        }
+                        defaults.set(true, forKey: MeetingNotesModel.consentKey)
                     }
                     let mergeLine = MeetingChangeLine(message: "Merged Speaker 3 into Priya Shah.",
                                                       warning: SpeakerSuggestions.mergeWarning(unmatched: ["Sam Okafor"]),
@@ -543,7 +561,7 @@ private struct Wallpaper: View {
 /// Fictional meetings on disk, written the way a recording and its processing leave them, so the Meetings page,
 /// its timeline and "Who's this?" render without a microphone or the speech models.
 private enum SampleMeetings {
-    struct IDs { var weekly: String; var inPerson: String; var stopped: String }
+    struct IDs { var weekly: String; var inPerson: String; var stopped: String; var design: String }
 
     typealias Line = (speaker: String, minute: Double, text: String)
 
@@ -580,7 +598,7 @@ private enum SampleMeetings {
         ])
         try meeting(in: root, title: "Standup", source: "Zoom", start: now.addingTimeInterval(-14 * 60), minutes: 12,
                     participants: MeetingParticipants(all: ["Will", "Priya Shah"], me: "Will"), processed: false, lines: [])
-        try meeting(in: root, title: "Design crit", source: "Google Chrome", start: now.addingTimeInterval(-4 * 3_600), minutes: 25,
+        let design = try meeting(in: root, title: "Design crit", source: "Google Chrome", start: now.addingTimeInterval(-4 * 3_600), minutes: 25,
                     participants: MeetingParticipants(all: ["Will", "Ana Ruiz"], me: "Will"), lines: [
             ("Ana Ruiz", 0.25, "The empty state reads well, but the goblin's too big on small screens."),
             ("You", 0.5, "Fair. Let's look at it on a 13-inch screen before we decide."),
@@ -612,7 +630,51 @@ private enum SampleMeetings {
             ("Speaker 2", 2, "I'd still move forward. The take-home was the best we've seen."),
             ("You", 4, "Same. Let's do the final round next week."),
         ])
-        return IDs(weekly: weekly, inPerson: inPerson, stopped: stopped)
+        try writeNotes(in: root.appendingPathComponent(weekly, isDirectory: true))
+        return IDs(weekly: weekly, inPerson: inPerson, stopped: stopped, design: design)
+    }
+
+    static let notesTools: [NotesTool: MeetingNotesModel.ToolState] = [
+        .codex: .ready(NotesToolInstall(tool: .codex, executable: URL(fileURLWithPath: "/usr/local/bin/codex"), version: "0.169.0",
+                                        signedIn: true, signIn: "ChatGPT")),
+        .claudeCode: .signedOut(NotesToolInstall(tool: .claudeCode, executable: URL(fileURLWithPath: "/usr/local/bin/claude"), version: "2.1.323",
+                                                 signedIn: false, signIn: nil)),
+    ]
+
+    static let notesModels: [NotesTool: [NotesModelOption]] = [
+        .codex: [NotesModelOption(id: "gpt-6.2-sol", title: "GPT-6.2-Sol", efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "low", isDefault: true),
+                 NotesModelOption(id: "gpt-6.1-terra", title: "GPT-6.1 Terra", efforts: ["low", "medium", "high"], defaultEffort: "low"),
+                 NotesModelOption(id: "gpt-6-luna", title: "GPT-6-Luna", efforts: ["low", "medium", "high"], defaultEffort: "medium")],
+    ]
+
+    /// Synthetic notes for the weekly sync: what a model would write from its lines above.
+    static func writeNotes(in directory: URL) throws {
+        let notes = MeetingNotes(
+            title: "CSV export, API schema and launch copy",
+            summary: "Export ships as CSV this sprint, with PDF two weeks later. The API schema freezes on Thursday with cursor pagination, and [S4] takes the first pass at the launch copy.",
+            decisions: [MeetingNotes.Decision(text: "Ship CSV export on its own; PDF moves to next sprint.", status: .decided, at: 4 * 60 + 24),
+                        MeetingNotes.Decision(text: "Use cursor pagination for the API.", status: .decided, at: 24 * 60 + 30),
+                        MeetingNotes.Decision(text: "Revisit rate limits after a month of real traffic.", status: .open, at: 29 * 60 + 18)],
+            actionItems: [MeetingNotes.ActionItem(task: "Write the changelog entry and link the tracking issue", owner: "S3", due: nil, at: 9 * 60 + 6),
+                          MeetingNotes.ActionItem(task: "Send the field list", owner: "S1", due: "tonight", at: 12 * 60 + 4),
+                          MeetingNotes.ActionItem(task: "Fix PDF page breaks", owner: "S4", due: "next sprint", at: 4 * 60 + 31),
+                          MeetingNotes.ActionItem(task: "First pass at the launch copy", owner: "S4", due: nil, at: 38 * 60 + 27)],
+            sections: [MeetingNotes.Section(heading: "Export", items: [
+                           MeetingNotes.Item(text: "The CSV path works; PDF still drops page breaks.", at: 4 * 60 + 9),
+                           MeetingNotes.Item(text: "Release notes will say CSV now and PDF in two weeks.", at: 7 * 60 + 18)]),
+                       MeetingNotes.Section(heading: "API timeline", items: [
+                           MeetingNotes.Item(text: "The timeline holds if the schema freezes by Thursday.", at: 11 * 60 + 48),
+                           MeetingNotes.Item(text: "Cursor matches the mobile client; page numbers break when rows are deleted.", at: 16 * 60 + 12)])],
+            marks: [MeetingNotes.MarkNote(t: 4 * 60 + 26, label: "Ship CSV first", note: "[S3] suggested shipping CSV alone and moving PDF to the next sprint."),
+                    MeetingNotes.MarkNote(t: 12 * 60 + 6, label: nil, note: "You agreed to the Thursday freeze and to send the field list tonight.")],
+            fixes: [MeetingNotes.SpellingFix(heard: "Post grass", meant: "Postgres", count: 2, kind: .applied),
+                    MeetingNotes.SpellingFix(heard: "Okafur", meant: "Okafor", count: 1, kind: .suggested)],
+            speakers: ["S1": "You", "S2": "Speaker 1", "S3": "Speaker 2", "S4": "Speaker 3"],
+            written: MeetingNotes.Provenance(tool: .codex, model: "gpt-6.2-sol", effort: "medium", template: .auto, style: .concise,
+                                             createdAt: Date(), seconds: 18, transcriptHash: MeetingNotesFile.sourceHash(directory),
+                                             promptVersion: MeetingNotesPrompt.version))
+        try MeetingNotesFile.write(notes, to: directory)
+        try MeetingPostProcessor.render(directory: directory)
     }
 
     @discardableResult

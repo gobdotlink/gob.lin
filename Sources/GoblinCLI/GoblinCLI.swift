@@ -325,6 +325,9 @@ private struct GoblinCommands {
                                                    Audio, timings, transcript, speakers, participants, mute and dictation spans
       goblin meetings simulate --system <audio> [--mic <audio>] [--echo <gain>]
                                                    Replay audio through the live meeting pipeline, then process it
+      goblin meetings notes <id> [--tool codex|claude] [--notes-model <id>] [--thinking <level>] [--out <file>]
+                                                   Write notes with your own Codex or Claude Code; sends the transcript
+      goblin meetings notes-tools                  Codex and Claude Code on this Mac, their models, and the pick
       --model-dir <path> overrides the model cache for any command.
       --model <id> chooses a catalog model. --language auto|<code> sets recognition language.
 

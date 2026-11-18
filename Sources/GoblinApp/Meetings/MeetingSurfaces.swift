@@ -69,7 +69,7 @@ final class MeetingSurfaces {
         if notice.voicesToName > 0 { detail += " · \(notice.voicesToName) \(notice.voicesToName == 1 ? "voice" : "voices") to name" }
         overlay.showCompletion(.meetingReady(MeetingReady(meetingID: notice.meetingID, title: notice.title, detail: detail)), session: UUID())
         meetings.acknowledgeReady()
-        meetings.acknowledge()
+        meetings.acknowledge(meetingID: notice.meetingID)
     }
 
     private func say(_ interruption: MeetingsController.Interruption) {

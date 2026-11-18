@@ -185,6 +185,10 @@ final class MeetingsController: ObservableObject {
     var processingDownloads: Bool { speakerModelDownload != nil || speechModelDownload != nil }
 
     let library: MeetingLibrary
+    /// Notes after each call, and the settings for them.
+    private(set) var notes: MeetingNotesModel!
+    /// The dictionary's spellings, which notes may correct a misheard name to. Set by the app model.
+    var vocabulary: @MainActor () -> [String] = { [] }
     let defaults: UserDefaults
     private let servicesEnabled: Bool
     private let gate: SpeechPriorityGate
@@ -277,6 +281,8 @@ final class MeetingsController: ObservableObject {
         for bundle in defaults.stringArray(forKey: Self.neverAskKey) ?? [] where policies[bundle] == nil { policies[bundle] = .never }
         appPolicies = policies
         neverAsk = policies.filter { $0.value == .never }.map(\.key).sorted()
+        notes = MeetingNotesModel(defaults: defaults, store: library.store, discovers: servicesEnabled, vocabulary: { [weak self] in self?.vocabulary() ?? [] })
+        notes.meetingsEnabled = { [weak self] in self?.enabled ?? false }
         gate.observeWaits { [weak self] milliseconds in
             Task { @MainActor in self?.dictationWaited(milliseconds) }
         }
@@ -493,6 +499,12 @@ final class MeetingsController: ObservableObject {
 
     /// Asks the Meetings page to select this meeting.
     func show(meetingID: String) { focusedMeetingID = meetingID }
+
+    /// The ready chip for `meetingID` was shown: clears that meeting's finished state only. With notes, the chip can
+    /// come after another meeting has finished or failed, and that one's state stays until it's seen.
+    func acknowledge(meetingID: String) {
+        if case .finished(let finished) = phase, finished == meetingID { phase = enabled ? .idle : .off }
+    }
 
     /// The overlay has shown the ready chip.
     func acknowledgeReady() { readyNotice = nil }
@@ -1155,13 +1167,19 @@ final class MeetingsController: ObservableObject {
             if case .processing(_, let current) = phase, current == id {
                 phase = failure.map { .failed("I kept the recording, but couldn't finish the transcript: \($0)") } ?? .finished(meetingID: id)
             }
-            if failure == nil, let summary = try? await store.summary(id) {
-                readyNotice = ReadyNotice(meetingID: id, title: summary.title, duration: summary.duration,
-                                          voicesToName: summary.speakers.filter(Self.isUnnamedVoice).count)
-            }
             if let failure { logger.error("meeting processing failed: \(failure, privacy: .private)") }
             else { logger.info("processing done: \(id, privacy: .private)") }
             refreshList()
+            guard failure == nil else { return }
+            // Notes on their own task, so the next meeting's processing doesn't wait for a model; the ready chip waits
+            // for them, so it has the title they found.
+            Task { [weak self] in
+                guard let self else { return }
+                if await self.notes.afterProcessing(id, allowed: { [weak self] in self.map { $0.enabled && !$0.shuttingDown } ?? false }) { self.refreshList() }
+                guard !self.shuttingDown, let summary = try? await store.summary(id) else { return }
+                self.readyNotice = ReadyNotice(meetingID: id, title: summary.title, duration: summary.duration,
+                                               voicesToName: summary.speakers.filter(Self.isUnnamedVoice).count)
+            }
         }
     }
 
@@ -1181,6 +1199,14 @@ final class MeetingsController: ObservableObject {
             let repaired = await store.repairUnfinished { message in logger.info("\(message, privacy: .private)") }
             let removed = await store.applyRetention()
             if !repaired.isEmpty || !removed.isEmpty { refreshList() }
+            // Meetings finished now, after a quit or crash, get their notes as they would have after Stop. Only those
+            // that processed: the repaired list includes failed attempts.
+            for id in repaired where (try? await store.summary(id))?.state == .ready {
+                guard !Task.isCancelled else { return }
+                if await notes.afterProcessing(id, allowed: { [weak self] in self.map { $0.enabled && !$0.shuttingDown } ?? false }) {
+                    refreshList()
+                }
+            }
         }
     }
 

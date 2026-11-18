@@ -113,7 +113,7 @@ struct MeetingsView: View {
                 Rectangle().fill(.primary.opacity(0.1)).frame(width: 1)
                 Group {
                     if let meeting = selected {
-                        MeetingDetailView(meeting: meeting, store: store, revision: revision, processingLine: meetings.processingLine) {
+                        MeetingDetailView(meeting: meeting, store: store, notesModel: meetings.notes, revision: revision, processingLine: meetings.processingLine) {
                             revision += 1
                             NotificationCenter.default.post(name: .meetingsEdited, object: nil)
                         }

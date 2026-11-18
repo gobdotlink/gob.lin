@@ -1,4 +1,5 @@
 import Foundation
+import GoblinCore
 import GoblinEngines
 import GoblinMeetings
 
@@ -10,6 +11,10 @@ enum MeetingsCommand {
            goblin meetings show <id> [--markdown] [--root <dir>]
            goblin meetings process <folder> [--preset offline|fast32|fast128] [--verbose]
            goblin meetings export-fixture <id> <destination> [--root <dir>]
+           goblin meetings notes <id> [--tool codex|claude] [--notes-model <id>] [--thinking <level>] [--template <id>]
+             [--style concise|detailed] [--out <file>] [--print-prompt] [--dictionary <file>] [--root <dir>] [--verbose]
+           goblin meetings notes-tools
+      notes writes notes.json into the meeting, or only to --out when given; --print-prompt sends nothing.
            goblin meetings simulate --system <audio> [--mic <audio>] [--echo <gain>] [--title <text>]
              [--preset offline|fast32|fast128] [--root <dir>] [--verbose]
       simulate writes to a new temporary folder unless --root is given.
@@ -37,7 +42,7 @@ enum MeetingsCommand {
         guard let command = arguments.first else { throw CommandError.usage(usage) }
         arguments.removeFirst()
         var options = try Options(arguments)
-        let rootOption = options.take("--root").map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let rootOption = try options.take("--root").map { URL(fileURLWithPath: $0, isDirectory: true) }
         let root = rootOption ?? MeetingStorage.root
         let verbose = options.flag("--verbose")
         let log: @Sendable (String) -> Void = { message in
@@ -77,11 +82,11 @@ enum MeetingsCommand {
             let files = try await MeetingStore(root: root).exportFixture(values[0], to: destination)
             try write(Exported(destination: destination.path, files: files))
         case "simulate":
-            guard let system = options.take("--system") else { throw CommandError.usage(usage) }
-            let microphone = options.take("--mic")
-            let echoText = options.take("--echo") ?? "0"
+            guard let system = try options.take("--system") else { throw CommandError.usage(usage) }
+            let microphone = try options.take("--mic")
+            let echoText = try options.take("--echo") ?? "0"
             guard let echo = Float(echoText), echo >= 0, echo <= 1 else { throw CommandError.usage("--echo takes a gain from 0 to 1") }
-            let title = options.take("--title") ?? "Simulation"
+            let title = try options.take("--title") ?? "Simulation"
             let preset = try options.preset()
             try options.finish(positional: 0)
             for path in [system] + (microphone.map { [$0] } ?? []) where !FileManager.default.isReadableFile(atPath: path) {
@@ -100,10 +105,92 @@ enum MeetingsCommand {
             try await store.process(directory.lastPathComponent, log: log)
             try write(Simulated(liveSeconds: live, seconds: Date().timeIntervalSince(started),
                                 meeting: try await store.detail(directory.lastPathComponent)))
+        case "notes":
+            let toolName = try options.take("--tool") ?? "codex"
+            guard let tool = NotesTool.allCases.first(where: { $0.rawValue == toolName || $0.command == toolName }) else {
+                throw CommandError.usage("--tool takes codex or claude")
+            }
+            let model = try options.take("--notes-model"), effort = try options.take("--thinking")
+            let templateID = try options.take("--template") ?? NotesTemplate.auto.id
+            guard let template = NotesTemplate.builtIns.first(where: { $0.id == templateID }) else {
+                throw CommandError.usage("--template takes " + NotesTemplate.builtIns.map(\.id).joined(separator: ", "))
+            }
+            guard let style = NotesStyle(rawValue: try options.take("--style") ?? NotesStyle.concise.rawValue) else {
+                throw CommandError.usage("--style takes concise or detailed")
+            }
+            let out = try options.take("--out")
+            // The Markdown goes beside the JSON, so they need different names.
+            if let out, URL(fileURLWithPath: out).pathExtension.lowercased() == "md" {
+                throw CommandError.usage("--out takes a .json file; the Markdown is written beside it.")
+            }
+            let dictionaryPath = try options.take("--dictionary")
+            let printPrompt = options.flag("--print-prompt")
+            let id = try options.finish(positional: 1)[0]
+            let directory = try await MeetingStore(root: root).directory(for: id)
+            // Drafts go somewhere else: inside any meeting's folder they could replace its transcript.
+            // The meeting's own folder too, which may be a link to somewhere outside the meetings folder.
+            if let out {
+                // Every meeting's folder as it resolves, since any of them may be a link to elsewhere.
+                let meetings = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+                let folders = ([root, directory] + meetings).map { $0.resolvingSymlinksInPath().standardizedFileURL.path + "/" }
+                let destination = URL(fileURLWithPath: out).deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path + "/"
+                if folders.contains(where: { destination.hasPrefix($0) }) {
+                    throw CommandError.usage("--out must be outside the meetings folder.")
+                }
+            }
+            let repository = dictionaryPath.map { DictionaryRepository(url: URL(fileURLWithPath: $0)) } ?? .applicationDefault
+            if let dictionaryPath, !FileManager.default.fileExists(atPath: dictionaryPath) {
+                throw CommandError.usage("No dictionary at \(dictionaryPath).")
+            }
+            // A dictionary asked for by name must load; the app's own may simply not exist yet.
+            let vocabulary = (dictionaryPath == nil ? ((try? repository.load()) ?? []) : try repository.load()).map(\.spelling)
+            let settings = NotesSettings(tool: tool, model: model, effort: effort, template: template, style: style)
+            if printPrompt {
+                let prepared = try MeetingNotesWriter.prepare(directory: directory, settings: settings, vocabulary: vocabulary)
+                FileHandle.standardOutput.write(Data((prepared.model.instructions + "\n\n----- input -----\n" + prepared.input.text + "\n").utf8))
+                return
+            }
+            guard let install = await NotesTools.find(tool) else { throw MeetingNotesError.notInstalled(tool) }
+            guard install.signedIn else { throw MeetingNotesError.signedOut(tool) }
+            let runner = NotesTools.runner(install)
+            if let out {
+                let draft = try await MeetingNotesWriter.draft(directory: directory, settings: settings, vocabulary: vocabulary, runner: runner, log: log)
+                // As the meeting page would show it: the person's saved spelling decisions kept, fixes applied.
+                let notes = MeetingNotesWriter.withSavedDecisions(draft, directory: directory).corrected
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+                encoder.dateEncodingStrategy = .iso8601
+                try encoder.encode(notes).write(to: URL(fileURLWithPath: out), options: .atomic)
+                let markdownURL = URL(fileURLWithPath: out).deletingPathExtension().appendingPathExtension("md")
+                try MeetingNotesFile.markdown(notes, title: MeetingTitles.display(directory: directory, generated: notes.title),
+                                              names: MeetingNotesFile.names(for: notes, directory: directory))
+                    .write(to: markdownURL, atomically: true, encoding: .utf8)
+                try write(DraftWritten(path: out, markdown: markdownURL.path, seconds: notes.written.seconds))
+            } else {
+                try write(try await MeetingStore(root: root).writeNotes(id, settings: settings, vocabulary: vocabulary, runner: runner, log: log))
+            }
+        case "notes-tools":
+            try options.finish(positional: 0)
+            var found: [FoundTool] = []
+            for tool in NotesTool.allCases {
+                guard let install = await NotesTools.find(tool) else { continue }
+                // A tool that's signed in but can't list its models is an error, not an empty list.
+                let models = install.signedIn ? try await NotesTools.models(install) : []
+                found.append(FoundTool(tool: tool, executable: install.executable.path, version: install.version, signedIn: install.signedIn,
+                                       signIn: install.signIn, models: models))
+            }
+            let available = Dictionary(found.filter(\.signedIn).map { ($0.tool, $0.models) }, uniquingKeysWith: { first, _ in first })
+            try write(ToolsFound(tools: found, pick: NotesModelRanking.best(available: available)))
         default:
             throw CommandError.usage(usage)
         }
     }
+
+    private struct DraftWritten: Encodable { let path: String; let markdown: String; let seconds: Double }
+    private struct FoundTool: Encodable {
+        let tool: NotesTool; let executable: String; let version: String?; let signedIn: Bool; let signIn: String?; let models: [NotesModelOption]
+    }
+    private struct ToolsFound: Encodable { let tools: [FoundTool]; let pick: NotesSettings? }
 
     /// Deferred speech, transcribed on the CLI's own engine, which the CLI unloads when it's done.
     private static func transcribeLater(_ engine: any PCMSpeechEngine) -> MeetingLateTranscriber {
@@ -127,15 +214,20 @@ enum MeetingsCommand {
 
         init(_ arguments: [String]) throws { self.arguments = arguments }
 
-        mutating func take(_ option: String) -> String? {
-            guard let index = arguments.firstIndex(of: option), index + 1 < arguments.count else { return nil }
+        /// The option's value. An option at the end, or followed by another option ("--out --print-prompt"), has
+        /// none, and that's an error rather than taking the next option as its value.
+        mutating func take(_ option: String) throws -> String? {
+            guard let index = arguments.firstIndex(of: option) else { return nil }
+            guard index + 1 < arguments.count, !arguments[index + 1].hasPrefix("--") else {
+                throw CommandError.usage("\(option) needs a value.")
+            }
             let value = arguments[index + 1]
             arguments.removeSubrange(index...index + 1)
             return value
         }
 
         mutating func preset() throws -> String {
-            let preset = take("--preset") ?? "offline"
+            let preset = try take("--preset") ?? "offline"
             guard MeetingPostProcessOptions.presets.contains(preset) else {
                 throw CommandError.usage("--preset must be one of \(MeetingPostProcessOptions.presets.joined(separator: ", "))")
             }

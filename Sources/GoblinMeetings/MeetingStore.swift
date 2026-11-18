@@ -509,7 +509,9 @@ public actor MeetingStore {
                   let turns = try? JSONDecoder.meeting.decode([TranscriptTurn].self, from: data) {
             for turn in turns where !speakers.contains(turn.speaker) { speakers.append(turn.speaker) }
         }
-        return MeetingSummary(id: id, title: metadata.title ?? session?.title ?? MeetingStorage.title(fromFolderName: id),
+        let title = MeetingTitles.display(typed: metadata.title, recorded: session?.title ?? MeetingStorage.title(fromFolderName: id),
+                                          generated: MeetingNotesFile.read(directory)?.title)
+        return MeetingSummary(id: id, title: title,
                               source: session?.source ?? "", target: session?.target ?? "", startedAt: startedAt,
                               endedAt: session?.endedAt, duration: max(0, duration), participants: participants, speakers: speakers,
                               state: state, wasInterrupted: metadata.interrupted,

@@ -294,18 +294,19 @@ public enum MeetingPostProcessor {
             try JSONEncoder.pretty.encode(base).write(to: attributedURL, options: .atomic)
         }
         let names = speakerNames(directory)
-        let turns = merge(base.map { turn in
+        let named = merge(base.map { turn in
             var turn = turn
             let label = turn.label ?? turn.speaker
             turn.speaker = names[label] ?? label
             return turn
         }, by: \.speaker)
+        // The notes' spelling fixes, applied last.
+        let turns = MeetingNotesFile.rendered(named, directory: directory)
         try JSONEncoder.pretty.encode(turns).write(to: transcriptURL, options: .atomic)
 
         let session = try? JSONDecoder.meeting.decode(MeetingSessionInfo.self,
                                                       from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.sessionFile)))
-        let metadata = MeetingMetadata.read(directory)
-        try markdown(turns, title: metadata.title ?? session?.title, session: session,
+        try markdown(turns, title: MeetingTitles.display(directory: directory, session: session), session: session,
                      participants: MeetingParticipants.read(directory))
             .write(to: directory.appendingPathComponent(MeetingStorage.transcriptMarkdownFile), atomically: true, encoding: .utf8)
 

@@ -3,10 +3,11 @@ import GoblinMeetings
 import SwiftUI
 
 /// One meeting: who was there, a timeline with a lane per voice and the marks above it, the named transcript,
-/// and a place for notes later. Names change through `MeetingStore.renameSpeaker`, each with Undo.
+/// the notes, when a notes model wrote them. Names change through `MeetingStore.renameSpeaker`, each with Undo.
 struct MeetingDetailView: View {
     let meeting: StoredMeeting
     let store: MeetingStore
+    @ObservedObject var notesModel: MeetingNotesModel
     /// Bumped by the page after a change elsewhere, so the detail reloads.
     let revision: Int
     /// What processing is doing right now: sorting out voices, or the speaker model's one-time download.
@@ -22,6 +23,8 @@ struct MeetingDetailView: View {
     @State private var undo: Undo?
     @State private var failure: String?
     @State private var reloads = 0
+    @State private var savedNotes: MeetingNotes?
+    @State private var notesStale = false
 
     struct Undo: Equatable {
         var message: String
@@ -56,7 +59,7 @@ struct MeetingDetailView: View {
             .padding(28)
         }
         // The meeting's state too: processing that finishes in the background brings the transcript and voices.
-        .task(id: "\(revision)-\(reloads)-\(meeting.state.rawValue)") { await load() }
+        .task(id: "\(revision)-\(reloads)-\(meeting.state.rawValue)-\(notesModel.writing.contains(meeting.id))") { await load() }
         .onDisappear { player.stop() }
         .sheet(item: $who) { lane in
             WhoIsThisSheet(meeting: meeting, lane: lane, lanes: lanes, turns: turns,
@@ -255,20 +258,10 @@ struct MeetingDetailView: View {
     }
 
     private var notes: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                CapsHeader("Notes")
-                Text("Coming later").font(.meta).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-            }
-            .padding(.leading, 6)
-            Label("I'll write a summary and action items here once Notes lands. Your marks will be its starting points.", systemImage: "doc.text")
-                .font(.status).foregroundStyle(.secondary)
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous)
-                    .strokeBorder(.primary.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        MeetingNotesSection(meeting: meeting, notes: savedNotes, stale: notesStale, names: detail?.speakerNames ?? [:],
+                            model: notesModel, player: player) {
+            reloads += 1
+            onEdited()
         }
     }
 
@@ -281,6 +274,8 @@ struct MeetingDetailView: View {
         }
         detail = next
         lanes = MeetingTimeline.lanes(next.turns, kind: meeting.kind)
+        savedNotes = try? await store.notes(meeting.id)
+        notesStale = (try? await store.notesAreStale(meeting.id)) ?? false
     }
 
     private func startRename(_ lane: MeetingLane) {

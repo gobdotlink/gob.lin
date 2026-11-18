@@ -111,15 +111,8 @@ struct MeetingRecordingSettingsView: View {
             }
             .disabled(true)
         } header: { CapsHeader("Speakers") }
-        Section {
-            LabeledContent {
-                Picker("Notes model", selection: .constant(0)) { Text("None").tag(0) }
-                    .pickerStyle(.menu).labelsHidden().fixedSize().disabled(true)
-            } label: {
-                Text("Notes model")
-                Text("Coming later. I'll never pick a cloud model for you.").rowDetail()
-            }
-        } header: { CapsHeader("Notes") }
+        MeetingNotesSettingsSection(model: meetings.notes)
+            .disabled(!meetings.enabled)
         Section {
             LabeledContent {
                 Text("1 week").foregroundStyle(.secondary)
