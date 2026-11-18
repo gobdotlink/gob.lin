@@ -573,12 +573,14 @@ private struct Shimmer: View {
     var body: some View {
         TimelineView(.animation(paused: reduceMotion)) { context in
             let phase = reduceMotion ? -1 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 1.6 - 0.3
+            // The sweep starts and ends off the text, so clamp every stop: one left unclamped would sit out of order.
+            let location = { (offset: Double) in max(0, min(1, phase + offset)) }
             Text(text.isEmpty ? " " : text).font(.overlayWords).lineSpacing(3).lineLimit(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(LinearGradient(stops: [
-                    .init(color: .white.opacity(0.94), location: max(0, phase - 0.12)),
-                    .init(color: Color(red: 0.73, green: 0.96, blue: 0.81), location: max(0, min(1, phase))),
-                    .init(color: .white.opacity(0.94), location: min(1, phase + 0.12)),
+                    .init(color: .white.opacity(0.94), location: location(-0.12)),
+                    .init(color: Color(red: 0.73, green: 0.96, blue: 0.81), location: location(0)),
+                    .init(color: .white.opacity(0.94), location: location(0.12)),
                 ], startPoint: .leading, endPoint: .trailing))
         }
         .accessibilityLabel(text)
