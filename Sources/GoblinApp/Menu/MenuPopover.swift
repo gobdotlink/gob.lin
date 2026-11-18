@@ -15,9 +15,11 @@ struct MenuPopover: View {
             PopoverHeader(model: model, eyes: eyes)
             PopoverNotices(model: model)
             PopoverMeeting(meetings: model.meetings)
+            PopoverReadyMeeting(model: model)
             PopoverMicrophone(preview: model.audioPreview, microphones: model.microphones) { dismiss.then { model.openSettings(.audio) } }
             HStack(spacing: 8) { PopoverCleanup(model: model); PopoverTone() }
             PopoverRecents(model: model)
+            PopoverMeetingsList(model: model)
             PopoverFooter(model: model)
         }
         .padding(8)
@@ -626,7 +628,7 @@ func circle(_ symbol: String, on: Bool) -> some View {
 }
 
 @MainActor
-private func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = false, inset: CGFloat = PopoverModule.inset,
+func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = false, inset: CGFloat = PopoverModule.inset,
                       action: @escaping () -> Void) -> some View {
     Button(action: action) {
         HStack {
@@ -640,7 +642,7 @@ private func menuItem(_ title: String, shortcut: String? = nil, chevron: Bool = 
     .buttonStyle(MenuRowStyle())
 }
 
-private struct MenuRowStyle: ButtonStyle {
+struct MenuRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { Row(configuration: configuration) }
 
     private struct Row: View {

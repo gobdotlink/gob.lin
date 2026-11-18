@@ -33,9 +33,11 @@ public struct TranscriptTurn: Codable, Sendable, Identifiable, Hashable {
     public var end: Double
     public var text: String
     public var words: [TranscriptWord]
+    /// Seconds of talking in the turn, when it joins lines with pauses between them; nil means `end - start`.
+    public var spoken: Double? = nil
 
     public init(id: UUID = UUID(), speaker: String, label: String? = nil, track: MeetingTrack, start: Double, end: Double,
-                text: String, words: [TranscriptWord] = []) {
+                text: String, words: [TranscriptWord] = [], spoken: Double? = nil) {
         self.id = id
         self.speaker = speaker
         self.label = label
@@ -44,7 +46,11 @@ public struct TranscriptTurn: Codable, Sendable, Identifiable, Hashable {
         self.end = end
         self.text = text
         self.words = words
+        self.spoken = spoken
     }
+
+    /// How long this voice talked in the turn, without the pauses between the lines it joins.
+    public var talkSeconds: Double { spoken ?? max(0, end - start) }
 }
 
 enum WordAssembly {

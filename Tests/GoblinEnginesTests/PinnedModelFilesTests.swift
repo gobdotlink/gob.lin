@@ -30,3 +30,15 @@ func theMeetingSpeakerModelIsPinnedLikeTheSpeechModels(preset: String) throws {
     #expect(!SpeechModelCatalog.parakeetCompact.servesMeetings)
     #expect(!SpeechModelCatalog.whisperLarge.servesMeetings)
 }
+
+@Test func theVoiceModelIsPinnedToTheV2Conversion() throws {
+    let manifest = SpeechModelAssets.manifest(for: "campplus-v2")
+    let bundles = ["CamPlusPreprocessor_v2.mlmodelc/", "CamPlusPlus_v2.mlmodelc/"]
+    let files = ["analytics/coremldata.bin", "coremldata.bin", "metadata.json", "model.mil", "weights/weight.bin"]
+    #expect(Set(manifest.files.map(\.destination)) == Set(bundles.flatMap { bundle in files.map { bundle + $0 } }))
+    #expect(manifest.files.allSatisfy { $0.repository == "FluidInference/campplus-coreml" && $0.path == $0.destination })
+    #expect(Set(manifest.files.map(\.revision)).count == 1)
+    #expect(manifest.files.allSatisfy { $0.revision.count == 40 && $0.sha256.count == 64 && $0.size > 0 })
+    // v1 gave unrelated voiceprints at some lengths; only v2 may be pinned.
+    #expect(!manifest.files.contains { $0.destination.hasPrefix("CamPlusPlus.mlmodelc") || $0.destination.hasPrefix("CamPlusPreprocessor.mlmodelc") })
+}

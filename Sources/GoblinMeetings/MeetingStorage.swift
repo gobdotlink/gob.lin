@@ -26,6 +26,19 @@ public enum MeetingStorage {
     public static let debugLogKey = "meetingsDebugAccessibilityLog"
     public static var debugLogging: Bool { UserDefaults.standard.bool(forKey: debugLogKey) }
 
+    /// Adds a timestamped line to a meeting's events.log, after the recording has closed its own handle. Best effort:
+    /// a log line is never worth failing the work it describes.
+    public static func appendEvent(_ message: String, to directory: URL) {
+        let path = directory.appendingPathComponent(eventsFile).path
+        // O_APPEND puts each whole line at the end in one write, whichever process (the app, the CLI) writes it.
+        let descriptor = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        let line = Array("\(ISO8601DateFormatter().string(from: Date())) \(message)\n".utf8)
+        _ = line.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+    }
+
+
     // File names inside a meeting folder.
     public static let sessionFile = "session.json"
     public static let segmentsFile = "segments.jsonl"
@@ -41,6 +54,8 @@ public enum MeetingStorage {
     public static let diarizationFile = "diarization.json"
     /// Diarized label → the name a person gave that speaker.
     public static let speakersFile = "speakers.json"
+    /// Voiceprints of the meeting's voices and what People matched them to, kept only while Remember voices is on.
+    public static let voicesFile = "voices.json"
     /// A rerun's new attribution and the names carried onto it, as one file, while they replace attributed.json and
     /// speakers.json; one left behind is finished first by the next run or render.
     public static let relabelFile = "relabel.json"

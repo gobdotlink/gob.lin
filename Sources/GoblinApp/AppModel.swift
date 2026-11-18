@@ -79,8 +79,10 @@ final class AppModel: ObservableObject {
         history = HistoryModel(directory: dataDirectory, defaults: defaults)
         historySync = HistorySyncModel(history: history, enabled: servicesEnabled)
         history.sync = historySync
-        dictionary = DictionaryModel(repository: dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault,
-                                     defaults: defaults)
+        let dictionaryRepository = dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault
+        dictionary = DictionaryModel(repository: dictionaryRepository, defaults: defaults)
+        // Meeting transcripts read the same words when they're shown, from disk, so an edit applies to the next render.
+        MeetingVocabulary.dictionary = { (try? dictionaryRepository.load()) ?? [] }
         meetings.vocabulary = { [dictionary] in dictionary.entries.map(\.spelling) }
         permissions = PermissionModel(snapshot: servicesEnabled ? nil : .init(microphone: .notDetermined, accessibility: false, inputMonitoring: false), monitorSystem: servicesEnabled, diagnostics: diagnostics)
         hotkeys = HotkeyService(permissions: permissions, defaults: defaults, monitorSystem: servicesEnabled, diagnostics: diagnostics)
@@ -217,8 +219,7 @@ final class AppModel: ObservableObject {
             }
         }
         meetingSurfaces = MeetingSurfaces(meetings: meetings, overlay: overlay, defaults: defaults, servicesEnabled: servicesEnabled) { [weak self] id in
-            self?.meetings.show(meetingID: id)
-            self?.openSettings(.meetings)
+            self?.openMeeting(id)
         }
         permissions.onboardingContent = { [weak self] in self.map { AnyView(OnboardingView(model: $0)) } ?? AnyView(EmptyView()) }
         hotkeys.onAction = { [weak self] action in self?.handleHotkey(action) }

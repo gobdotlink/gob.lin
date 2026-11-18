@@ -95,6 +95,20 @@ public enum MeetingSpeakerModel {
     static func bundleName(preset: String) -> String { config(preset: preset).modelFileName }
 }
 
+/// What Remember voices needs while a meeting is processed.
+public struct MeetingVoiceOptions: Sendable {
+    /// Read at each run, so turning the switch off stops the next one.
+    public var enabled: @Sendable () -> Bool
+    public var embed: VoiceprintEmbed
+    public var people: PeopleStore
+
+    public init(enabled: @escaping @Sendable () -> Bool, embed: @escaping VoiceprintEmbed, people: PeopleStore) {
+        self.enabled = enabled
+        self.embed = embed
+        self.people = people
+    }
+}
+
 public struct MeetingPostProcessOptions: Sendable {
     public static let presets = ["offline", "fast32", "fast128"]
 
@@ -105,6 +119,9 @@ public struct MeetingPostProcessOptions: Sendable {
     /// Transcribes what the live transcript left in deferred.jsonl. Nil: a meeting with any fails until it's processed
     /// where a speech model can run.
     public var transcribeLater: MeetingLateTranscriber?
+    /// Remember voices: voiceprints for each voice, names from People, and People learning from the meeting. Nil (tests,
+    /// the CLI) leaves voices alone.
+    public var voices: MeetingVoiceOptions?
 
     /// `modelDownload` hears how far the speaker model's one-time download has got (0...1), then nil once it's done
     /// or failed; it's never called when the model is already on this Mac.
@@ -219,8 +236,11 @@ public enum MeetingPostProcessor {
         let systemWords = system.flatMap(\.words).sorted { $0.start < $1.start }
         var microphone: [TranscriptSegment] = []
         for segment in segments where segment.track == .microphone {
-            // While the call is muted, what the mic hears was never said to the meeting.
-            if muted.contains(where: { $0.contains((segment.start + segment.end) / 2) }) { mutedDropped += 1; continue }
+            // While the call is muted, what the mic hears was never said to the meeting. Word by word, so a line that
+            // runs across an unmute keeps what was said after it.
+            let (audible, silenced) = removeMuted(segment, spans: muted)
+            if silenced { mutedDropped += 1 }
+            guard let segment = audible else { continue }
             let (undictated, trimmed) = removeDictation(segment, spans: dictations)
             if trimmed { dictationDropped += 1 }
             guard let segment = undictated else { continue }
@@ -243,6 +263,7 @@ public enum MeetingPostProcessor {
             turns += systemTurns(system, spans: spans, remote: participants.others)
         }
         turns.sort { $0.start < $1.start }
+        turns = smoothFlicker(turns)
         turns = merge(turns, by: { $0.label ?? $0.speaker })
 
         // Run again (Try Again, or the CLI): the voices may be numbered differently now, so names follow the voice
@@ -250,6 +271,10 @@ public enum MeetingPostProcessor {
         // The names and the attribution they're for are a pair: both go into relabel.json in one write, then replace
         // the old pair, so a run cut off in between never leaves names on another voice.
         try finishRelabel(directory)
+        // Voiceprints belong to one attribution: a new one (another preset, Try Again) makes the old ones wrong, and so
+        // is anything People learned from them. They go before the new attribution is written, so a failure later
+        // never leaves old voiceprints beside new labels. Recognition below makes them again when it's on.
+        try invalidateVoiceprints(directory, people: options.voices?.people)
         let attributedURL = directory.appendingPathComponent(MeetingStorage.attributedFile)
         var namesCleared: [String] = []
         let names = speakerNames(directory)
@@ -265,6 +290,21 @@ public enum MeetingPostProcessor {
             try JSONEncoder.pretty.encode(turns).write(to: attributedURL, options: .atomic)
         }
         try JSONEncoder.pretty.encode(participants).write(to: directory.appendingPathComponent(MeetingStorage.participantsFile), options: .atomic)
+        if let voices = options.voices, voices.enabled() {
+            // A voice that couldn't be recognised is only a name not filled in: the transcript is still finished.
+            do {
+                var audio: [MeetingTrack: [Float]] = [:]
+                if !inPerson { audio[.system] = systemSamples }
+                // In person the mic is what was diarized, already read.
+                audio[.microphone] = inPerson ? diarizedSamples : try samples(.microphone)
+                try await recognizeVoices(directory, turns: turns, audio: audio, inPerson: inPerson, spans: spans,
+                                          microphoneExcluded: muted + dictations, participants: participants, session: session,
+                                          options: voices, log: log)
+            } catch {
+                if error is CancellationError || Task.isCancelled { throw error }
+                log("voices: \(error.localizedDescription)")
+            }
+        }
         let report = PostProcessReport(preset: options.preset, systemSeconds: Double(systemSamples.count) / MeetingAudio.sampleRate,
                                        diarizeSeconds: diarization.diarizeSeconds, modelLoadSeconds: diarization.modelLoadSeconds,
                                        speakers: [:], echoSegmentsDropped: echoDropped, dictationSegmentsDropped: dictationDropped,
@@ -294,12 +334,18 @@ public enum MeetingPostProcessor {
             try JSONEncoder.pretty.encode(base).write(to: attributedURL, options: .atomic)
         }
         let names = speakerNames(directory)
+        let participants = MeetingParticipants.read(directory)
+        let vocabulary = MeetingVocabulary(dictionary: MeetingVocabulary.dictionary(),
+                                           names: participants.all + names.values + MeetingVocabulary.peopleNames(),
+                                           protecting: MeetingNotesFile.stored(directory)?.fixes
+                                            .flatMap { $0.dismissed ? [$0.heard] : [$0.heard, $0.meant] } ?? [])
+        // Joined into paragraphs first, then corrected: a phrase the notes protect can span two lines.
         let named = merge(base.map { turn in
             var turn = turn
             let label = turn.label ?? turn.speaker
             turn.speaker = names[label] ?? label
             return turn
-        }, by: \.speaker)
+        }, by: \.speaker, joining: .paragraphs).map(vocabulary.correct)
         // The notes' spelling fixes, applied last.
         let turns = MeetingNotesFile.rendered(named, directory: directory)
         try JSONEncoder.pretty.encode(turns).write(to: transcriptURL, options: .atomic)
@@ -307,18 +353,82 @@ public enum MeetingPostProcessor {
         let session = try? JSONDecoder.meeting.decode(MeetingSessionInfo.self,
                                                       from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.sessionFile)))
         try markdown(turns, title: MeetingTitles.display(directory: directory, session: session), session: session,
-                     participants: MeetingParticipants.read(directory))
+                     participants: participants)
             .write(to: directory.appendingPathComponent(MeetingStorage.transcriptMarkdownFile), atomically: true, encoding: .utf8)
 
         let reportURL = directory.appendingPathComponent(MeetingStorage.reportFile)
         if var report = try? JSONDecoder.meeting.decode(PostProcessReport.self, from: Data(contentsOf: reportURL)) {
             var talk: [String: Double] = [:]
-            for turn in turns { talk[turn.speaker, default: 0] += turn.end - turn.start }
+            for turn in turns { talk[turn.speaker, default: 0] += turn.talkSeconds }
             report.speakers = talk
             report.turns = turns.count
             try JSONEncoder.pretty.encode(report).write(to: reportURL, options: .atomic)
         }
         return turns
+    }
+
+    // MARK: Voices
+
+    /// Makes a voiceprint of each voice, names the unnamed ones that clearly sound like someone in People (and keeps the
+    /// closer calls as suggestions for Who's this?), then lets People learn from the meeting's named voices.
+    static func recognizeVoices(_ directory: URL, turns: [TranscriptTurn], audio: [MeetingTrack: [Float]], inPerson: Bool,
+                                spans: [DiarizedSpan] = [], microphoneExcluded: [ClosedRange<Double>] = [],
+                                participants: MeetingParticipants, session: MeetingSessionInfo?,
+                                options: MeetingVoiceOptions, log: @Sendable (String) -> Void) async throws {
+        let voices = try await VoiceStretches.voices(in: turns, audio: audio, inPerson: inPerson, spans: spans,
+                                                     microphoneExcluded: microphoneExcluded, embed: options.embed)
+        let id = directory.lastPathComponent
+        // Embedding takes a while; Remember voices may have been turned off meanwhile, and then nothing is kept.
+        try Task.checkCancellation()
+        guard options.enabled() else {
+            log("voices: Remember voices was turned off, so nothing was kept")
+            return
+        }
+        var names = speakerNames(directory)
+        // This meeting's own earlier samples would only match themselves.
+        let people = options.people.people().map { person in
+            var person = person
+            person.samples.removeAll { $0.meetingID == id }
+            return person
+        }
+        let open = voices.filter { VoiceMatching.waitsForName($0.label, names: names) }
+        let matches = VoiceMatching.bestPerLane(VoiceMatching.match(open, people: people, participants: participants, inPerson: inPerson),
+                                                names: names)
+        var named = 0
+        let before = names
+        for (label, match) in matches where match.named {
+            nameVoice(shownAs: label, match.name, names: &names, before: before, labels: voices.map(\.label))
+            named += 1
+        }
+        if named > 0 { try writeSpeakerNames(names, to: directory) }
+        try MeetingVoices(voices: voices, matches: matches).write(directory)
+        let title = MeetingMetadata.read(directory).title ?? session?.title ?? MeetingStorage.title(fromFolderName: id)
+        try options.people.learn(meetingID: id, title: title, startedAt: session?.startedAt ?? Date(), inPerson: inPerson,
+                                 voices: voices, names: names, me: participants.me)
+        // Turned off while those were written: its forgetting may already have run, so take them back out.
+        guard options.enabled() else {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(MeetingStorage.voicesFile))
+            try? options.people.forget(meetingID: id)
+            log("voices: Remember voices was turned off, so nothing was kept")
+            return
+        }
+        log("voices: \(voices.count) voiceprints; named \(named) from People, \(matches.count - named) suggested")
+    }
+
+    /// Names the voice shown as `label` (before any name was given this round), including every label someone merged
+    /// into it, so a merged voice keeps one lane under its new name.
+    static func nameVoice(shownAs label: String, _ name: String, names: inout [String: String], before: [String: String],
+                          labels: [String]) {
+        let shown = before[label] ?? label
+        // The lane's own label too: the voice everything was merged into may have no voiceprint of its own.
+        for other in Set(labels + Array(before.keys) + [label, shown]) where (before[other] ?? other) == shown { names[other] = name }
+    }
+
+    /// Writes speakers.json, labels to names, the way every writer of it does.
+    static func writeSpeakerNames(_ names: [String: String], to directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(names).write(to: directory.appendingPathComponent(MeetingStorage.speakersFile), options: .atomic)
     }
 
     /// relabel.json: a rerun's attribution and the names carried onto it.
@@ -336,11 +446,24 @@ public enum MeetingPostProcessor {
             try FileManager.default.removeItem(at: url)
             return
         }
+        // A new attribution replaces the one the voiceprints were made from.
+        try invalidateVoiceprints(directory, people: nil)
         try JSONEncoder.pretty.encode(relabel.turns).write(to: directory.appendingPathComponent(MeetingStorage.attributedFile), options: .atomic)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(relabel.names).write(to: directory.appendingPathComponent(MeetingStorage.speakersFile), options: .atomic)
         try FileManager.default.removeItem(at: url)
+    }
+
+    /// Removes a meeting's voiceprints and what People learned from them, because its attribution is about to change.
+    /// People is reached even without voice options (the CLI, a test, a relabel finished on read): it sits beside the
+    /// meetings folder. A voices.json that won't go is an error; one that isn't there is fine.
+    static func invalidateVoiceprints(_ directory: URL, people: PeopleStore?) throws {
+        let voices = directory.appendingPathComponent(MeetingStorage.voicesFile)
+        if FileManager.default.fileExists(atPath: voices.path) { try FileManager.default.removeItem(at: voices) }
+        // A People file that won't read can't be changed, and nothing learns from it either; the transcript still
+        // finishes rather than every meeting failing on it.
+        try? (people ?? PeopleStore(meetingsRoot: directory.deletingLastPathComponent())).forget(meetingID: directory.lastPathComponent)
     }
 
     /// speakers.json: diarized label → name. Labels are only stable for one diarization run; a re-run
@@ -459,6 +582,29 @@ public enum MeetingPostProcessor {
         struct Take: Decodable { let start: Double; let end: Double }
         return text.split(separator: "\n").compactMap { try? JSONDecoder().decode(Take.self, from: Data($0.utf8)) }
             .compactMap { $0.start <= $0.end ? $0.start...$0.end : nil }
+    }
+
+    /// Leaves out the words said while the call showed this person muted: those whose middle falls in a muted span. A
+    /// line without word timings goes when its own middle was muted. Returns the kept segment (nil if nothing is left)
+    /// and whether anything was removed.
+    static func removeMuted(_ segment: TranscriptSegment, spans: [ClosedRange<Double>]) -> (TranscriptSegment?, Bool) {
+        guard spans.contains(where: { $0.overlaps(segment.start...segment.end) }) else { return (segment, false) }
+        func muted(_ start: Double, _ end: Double) -> Bool { spans.contains { $0.contains((start + end) / 2) } }
+        guard !segment.words.isEmpty else { return muted(segment.start, segment.end) ? (nil, true) : (segment, false) }
+        let kept = segment.words.filter { !muted($0.start, $0.end) }
+        guard kept.count < segment.words.count else { return (segment, false) }
+        return (keeping(kept, of: segment), true)
+    }
+
+    /// `segment` cut down to `kept`, a subset of its words in order; nil when no word with letters or digits is left.
+    static func keeping(_ kept: [TranscriptWord], of segment: TranscriptSegment) -> TranscriptSegment? {
+        guard let first = kept.first, let last = kept.last, kept.contains(where: { !normalizedKey($0.text).isEmpty }) else { return nil }
+        var trimmed = segment
+        trimmed.words = kept
+        trimmed.text = kept.map(\.text).joined(separator: " ")
+        trimmed.start = first.start
+        trimmed.end = last.end
+        return trimmed
     }
 
     static func mutedSpans(_ url: URL, end: Double) -> [ClosedRange<Double>] {
@@ -697,12 +843,85 @@ public enum MeetingPostProcessor {
             .filter { $0.1 <= limit }.min { $0.1 < $1.1 }?.0
     }
 
-    /// Joins consecutive turns with the same key on the same track less than 1.5 s apart. A name given to both the mic
-    /// and a remote voice keeps a turn per track, as each plays from its own track's file.
-    static func merge(_ turns: [TranscriptTurn], by key: (TranscriptTurn) -> String) -> [TranscriptTurn] {
+    enum Flicker {
+        /// A turn this short between two of another voice's can be the diarizer flickering rather than someone talking.
+        static let maximumWords = 3
+        /// Both gaps around it are shorter than this: the surrounding voice never really stopped.
+        static let maximumGap = 1.0
+        /// Short replies that are someone else talking even mid-sentence.
+        static let interjections: Set<String> = ["yeah", "yes", "yep", "no", "nope", "okay", "ok", "right", "sure", "mmhmm", "mhm",
+                                                 "uhhuh", "hmm", "mm", "cool", "great", "perfect", "nice", "thanks", "exactly",
+                                                 "totally", "true", "wow", "oh", "ah", "sorry", "hi", "hello", "bye"]
+        /// Short replies of two or three words, taken whole: "Thank you." is someone answering, though "you" alone isn't.
+        static let replyPhrases: Set<String> = ["thank you", "thanks a lot", "got it", "i agree", "agreed", "makes sense",
+                                                "sounds good", "fair enough", "of course", "me too", "i see", "all right",
+                                                "that's right", "thats right", "good point", "no problem", "not really",
+                                                "yeah exactly", "oh nice", "oh wow", "oh okay", "okay cool", "go on",
+                                                "fair point", "love it", "for sure", "no worries"]
+    }
+
+    /// Gives a short turn back to the voice on both sides of it when it sits inside that voice's sentence: two or three
+    /// words of another voice, no real pause either side, and the sentence before it unfinished (or the one after it
+    /// carrying on in lower case). Those are the diarizer flickering, as in "…with your | roadmap. But | it'd be great…".
+    /// Short replies said over someone ("Yeah.", "Mm-hmm.") stay with whoever said them. Each track is smoothed on its own.
+    static func smoothFlicker(_ turns: [TranscriptTurn]) -> [TranscriptTurn] {
+        var result = turns
+        for track in MeetingTrack.allCases {
+            let indices = result.indices.filter { result[$0].track == track }
+            guard indices.count >= 3 else { continue }
+            for position in 1..<(indices.count - 1) {
+                let before = result[indices[position - 1]], turn = result[indices[position]], after = result[indices[position + 1]]
+                let label = before.label ?? before.speaker
+                // A question is someone asking ("Which day?"), never a piece of another voice's sentence.
+                guard (after.label ?? after.speaker) == label, (turn.label ?? turn.speaker) != label,
+                      !turn.text.trimmingCharacters(in: .whitespaces).hasSuffix("?"),
+                      turn.words.count <= Flicker.maximumWords, !turn.words.isEmpty,
+                      turn.start - before.end < Flicker.maximumGap, after.start - turn.end < Flicker.maximumGap,
+                      !isInterjection(turn.text) else { continue }
+                // A complete sentence answered between two of another voice's ("…by | Friday. | That works.") is a reply.
+                if endsSentence(turn.text), after.text.first?.isUppercase == true { continue }
+                let unfinished = !endsSentence(before.text)
+                let carriesOn = !endsSentence(turn.text) && after.text.first?.isLowercase == true
+                guard unfinished || carriesOn else { continue }
+                result[indices[position]].label = before.label
+                result[indices[position]].speaker = before.speaker
+            }
+        }
+        return result
+    }
+
+    static func endsSentence(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespaces).last else { return true }
+        return ".?!…".contains(last)
+    }
+
+    /// Whether every word of a short turn is a reply word, so it's someone answering rather than a broken-off piece.
+    static func isInterjection(_ text: String) -> Bool {
+        let words = text.split(whereSeparator: { $0.isWhitespace }).map { normalizedKey(String($0)) }.filter { !$0.isEmpty }
+        if Flicker.replyPhrases.contains(words.joined(separator: " ")) { return true }
+        return !words.isEmpty && words.allSatisfy(Flicker.interjections.contains)
+    }
+
+    /// How the shown transcript joins one person's lines: with nobody else between them, across a pause up to `gap`
+    /// seconds, into paragraphs no longer than `longest` seconds, so a timestamp stays a useful place to jump to.
+    struct Joining {
+        var gap: Double
+        var longest: Double
+        /// attributed.json: lines a short breath apart, never longer than a paragraph may be, so smoothing a flicker out of a
+        /// long stretch can't leave one turn the paragraphs then can't split.
+        static let lines = Joining(gap: 1.5, longest: 90)
+        /// transcript.json and the Markdown: a person's paragraph.
+        static let paragraphs = Joining(gap: 5, longest: 90)
+    }
+
+    /// Joins consecutive turns with the same key on the same track (by default less than 1.5 s apart). A name given to
+    /// both the mic and a remote voice keeps a turn per track, as each plays from its own track's file.
+    static func merge(_ turns: [TranscriptTurn], by key: (TranscriptTurn) -> String, joining: Joining = .lines) -> [TranscriptTurn] {
         var merged: [TranscriptTurn] = []
         for turn in turns {
-            if let last = merged.last, key(last) == key(turn), last.track == turn.track, turn.start - last.end < 1.5 {
+            if let last = merged.last, key(last) == key(turn), last.track == turn.track, turn.start - last.end < joining.gap,
+               turn.end - last.start <= joining.longest {
+                merged[merged.count - 1].spoken = last.talkSeconds + turn.talkSeconds
                 merged[merged.count - 1].end = max(last.end, turn.end)
                 merged[merged.count - 1].text += " " + turn.text
                 merged[merged.count - 1].words += turn.words

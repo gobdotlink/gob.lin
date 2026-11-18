@@ -12,6 +12,11 @@ struct MeetingDetailView: View {
     let revision: Int
     /// What processing is doing right now: sorting out voices, or the speaker model's one-time download.
     var processingLine = MeetingCopy.processing(download: nil)
+    /// Remember voices is on: names given here are learned, and Who's this? says so.
+    var remembersVoices = false
+    /// Open Who's this? on the first voice without a name once the voices load, then say so with `onAskedWho`.
+    var askWho = false
+    var onAskedWho: () -> Void = {}
     let onEdited: () -> Void
 
     @StateObject private var player = MeetingPlayer()
@@ -59,11 +64,28 @@ struct MeetingDetailView: View {
             .padding(28)
         }
         // The meeting's state too: processing that finishes in the background brings the transcript and voices.
-        .task(id: "\(revision)-\(reloads)-\(meeting.state.rawValue)-\(notesModel.writing.contains(meeting.id))") { await load() }
+        .task(id: "\(revision)-\(reloads)-\(meeting.state.rawValue)-\(notesModel.writing.contains(meeting.id))") {
+            await load()
+            if askWho, let lane = lanes.first(where: \.needsName) {
+                who = lane
+                onAskedWho()
+            } else if askWho, !lanes.isEmpty {
+                onAskedWho()
+            }
+        }
         .onDisappear { player.stop() }
+        // Names, suggestions and marks changed elsewhere (learning voices, People) show here without reopening.
+        .onReceive(NotificationCenter.default.publisher(for: .meetingsEdited)) { _ in reloads += 1 }
+        // Asked again while this meeting is already showing.
+        .onChange(of: askWho) { _, asked in
+            guard asked, let lane = lanes.first(where: \.needsName) else { return }
+            who = lane
+            onAskedWho()
+        }
         .sheet(item: $who) { lane in
             WhoIsThisSheet(meeting: meeting, lane: lane, lanes: lanes, turns: turns,
-                           participants: detail?.participants ?? MeetingParticipants(), player: player,
+                           participants: detail?.participants ?? MeetingParticipants(),
+                           voiceSuggestions: detail?.voiceSuggestions[lane.name] ?? [], remembersVoices: remembersVoices, player: player,
                            onName: { name in who = nil; rename(lane, to: name) }, onClose: { who = nil })
         }
         .alert("Rename \(renaming?.name ?? "")", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -99,7 +121,9 @@ struct MeetingDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             FlowRows(spacing: 6) {
                 ForEach(lanes) { lane in
-                    SpeakerChip(lane: lane, others: lanes.filter { $0.id != lane.id }, onName: { who = lane },
+                    SpeakerChip(lane: lane, others: lanes.filter { $0.id != lane.id },
+                                namedFromVoice: detail?.namedFromVoice.contains(lane.name) ?? false,
+                                offersWho: !(detail?.voiceSuggestions[lane.name] ?? []).isEmpty, onName: { who = lane },
                                 onRename: { startRename(lane) }, onMerge: { merge(lane, into: $0) })
                 }
             }
@@ -276,6 +300,8 @@ struct MeetingDetailView: View {
         lanes = MeetingTimeline.lanes(next.turns, kind: meeting.kind)
         savedNotes = try? await store.notes(meeting.id)
         notesStale = (try? await store.notesAreStale(meeting.id)) ?? false
+        // Named meanwhile (learning voices in the background): Who's this? for a voice that's gone would name nothing.
+        if let asking = who, !lanes.contains(where: { $0.name == asking.name && $0.needsName == asking.needsName }) { who = nil }
     }
 
     private func startRename(_ lane: MeetingLane) {
@@ -353,6 +379,10 @@ struct MeetingDetailView: View {
 struct SpeakerChip: View {
     let lane: MeetingLane
     let others: [MeetingLane]
+    /// I named this voice because it sounded like someone in People.
+    var namedFromVoice = false
+    /// A voice with a stand-in name ("Them") that sounds like someone: its menu offers Who's This? too.
+    var offersWho = false
     let onName: () -> Void
     let onRename: () -> Void
     let onMerge: (MeetingLane) -> Void
@@ -365,6 +395,7 @@ struct SpeakerChip: View {
                     .accessibilityLabel("\(lane.name), no name yet. Who's this?")
             } else {
                 Menu {
+                    if offersWho { Button("Who's This?…", action: onName) }
                     Button("Rename…", action: onRename)
                     if !others.isEmpty {
                         Section("Merge Into") {
@@ -373,7 +404,8 @@ struct SpeakerChip: View {
                     }
                 } label: { face }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-                .accessibilityLabel("\(lane.name), talked \(MeetingTimeline.length(lane.talkSeconds))")
+                .help(namedFromVoice ? "I knew this voice from People. Rename it if I got it wrong." : "")
+                .accessibilityLabel("\(lane.name), talked \(MeetingTimeline.length(lane.talkSeconds))\(namedFromVoice ? ", named from their voice" : "")")
             }
         }
     }
@@ -382,6 +414,9 @@ struct SpeakerChip: View {
         HStack(spacing: 6) {
             Initials(name: lane.name, unnamed: lane.needsName)
             Text(lane.name).font(.status.weight(.medium)).lineLimit(1)
+            if namedFromVoice {
+                Image(systemName: "waveform").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
             Text(lane.needsName ? "Who's this?" : MeetingTimeline.length(lane.talkSeconds))
                 .font(.meta).foregroundStyle(lane.needsName ? AnyShapeStyle(GoblinBrand.candle) : AnyShapeStyle(.secondary)).monospacedDigit()
         }

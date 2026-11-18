@@ -30,6 +30,7 @@ struct SettingsCapture {
         defaults.set(true, forKey: MeetingsController.setupFinishedKey)
         defaults.set(["com.apple.FaceTime": "always"], forKey: MeetingsController.appPoliciesKey)
         defaults.set(["com.hnc.Discord"], forKey: MeetingsController.neverAskKey)
+        defaults.set(true, forKey: MeetingsController.rememberVoicesKey)
         SystemAudioAccess.shared.override = .granted
         let sampleMeetings = try SampleMeetings.write(in: directory.appendingPathComponent("Meetings", isDirectory: true))
         // Notes were said yes to once, so the weekly sync has them; the design crit shows what writing them looks like.
@@ -164,8 +165,8 @@ struct SettingsCapture {
                         let player = MeetingPlayer()
                         player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
                         let sheet = WhoIsThisSheet(meeting: detail.summary, lane: lanes.first { $0.name == voice }!, lanes: lanes, turns: detail.turns,
-                                                   participants: detail.participants, player: player,
-                                                   onName: { _ in }, onClose: {})
+                                                   participants: detail.participants, voiceSuggestions: detail.voiceSuggestions[voice] ?? [],
+                                                   remembersVoices: true, player: player, onName: { _ in }, onClose: {})
                             .background(Color(nsColor: .windowBackgroundColor))
                         for dark in [false, true] {
                             try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: name == "meetings-who" ? 700 : 560), dark: dark)
@@ -218,8 +219,17 @@ struct SettingsCapture {
                     }
                 }
                 if wanted("popover") {
-                    try await shoot("popover", popover(model), size: NSSize(width: 420, height: 720))
-                    try await shoot("popover-dark", popover(model), size: NSSize(width: 420, height: 720), dark: true)
+                    // Recent meetings join the popover once the list has loaded.
+                    model.meetings.refreshList()
+                    try await Task.sleep(for: .milliseconds(600))
+                    model.meetings.previewUnopened(nil)
+                    try await shoot("popover", popover(model), size: NSSize(width: 420, height: 900))
+                    try await shoot("popover-dark", popover(model), size: NSSize(width: 420, height: 900), dark: true)
+                    // A call just finished: the ready card, with a voice still to name.
+                    model.meetings.previewUnopened(sampleMeetings.weekly)
+                    try await shoot("popover-meeting-ready", popover(model), size: NSSize(width: 420, height: 1040))
+                    try await shoot("popover-meeting-ready-dark", popover(model), size: NSSize(width: 420, height: 1040), dark: true)
+                    model.meetings.previewUnopened(nil)
                     model.diagnostics.report(.requiredPermissionsMissing)
                     model.diagnostics.report(.rewriteConfiguration)
                     try await shoot("popover-attention-dark", popover(model), size: NSSize(width: 420, height: 720), dark: true)
@@ -623,7 +633,7 @@ private enum SampleMeetings {
             ("Speaker 1", 22, "Agreed. Next up is the pricing page."),
         ])
         // Its audio went after a week; the transcript stays.
-        try meeting(in: root, title: "Hiring debrief", source: "Google Chrome", start: now.addingTimeInterval(-4 * 86_400), minutes: 33,
+        let debrief = try meeting(in: root, title: "Hiring debrief", source: "Google Chrome", start: now.addingTimeInterval(-4 * 86_400), minutes: 33,
                                  participants: MeetingParticipants(all: ["Will", "Lena Park", "Jonas Berg"], me: "Will"),
                                  names: ["Speaker 1": "Lena Park", "Speaker 2": "Jonas Berg"], audio: false, lines: [
             ("Speaker 1", 0.3, "Strong on systems, quieter on product sense."),
@@ -631,6 +641,7 @@ private enum SampleMeetings {
             ("You", 4, "Same. Let's do the final round next week."),
         ])
         try writeNotes(in: root.appendingPathComponent(weekly, isDirectory: true))
+        try seedPeople(root: root, weekly: weekly, crit: design, stopped: stopped, debrief: debrief, inPerson: inPerson)
         return IDs(weekly: weekly, inPerson: inPerson, stopped: stopped, design: design)
     }
 
@@ -675,6 +686,47 @@ private enum SampleMeetings {
                                              promptVersion: MeetingNotesPrompt.version))
         try MeetingNotesFile.write(notes, to: directory)
         try MeetingPostProcessor.render(directory: directory)
+    }
+
+    /// People known by voice, from synthetic voiceprints: who each named meeting taught, Sam named from his voice in the
+    /// weekly sync, and its third voice sounding a little like Ana.
+    static func seedPeople(root: URL, weekly: String, crit: String, stopped: String, debrief: String, inPerson: String) throws {
+        func print(_ seed: Int) -> [Float] {
+            Voiceprint.normalized((0..<VoiceprintModel.dimensions).map { Float(sin(Double($0 * (seed + 3)) * 0.37 + Double(seed))) })
+        }
+        func voice(_ label: String, _ seed: Int, track: MeetingTrack = .system, seconds: Double = 40) -> MeetingVoice {
+            MeetingVoice(label: label, track: track, seconds: seconds, clipStart: 30, clipEnd: 42, embedding: print(seed))
+        }
+        let people = PeopleStore(meetingsRoot: root)
+        let taught: [(String, [MeetingVoice], [String: String], Bool)] = [
+            (debrief, [voice("Speaker 1", 2), voice("Speaker 2", 3), voice("You", 9, track: .microphone, seconds: 48)],
+             ["Speaker 1": "Lena Park", "Speaker 2": "Jonas Berg"], false),
+            (stopped, [voice("Speaker 1", 3), voice("Speaker 2", 2), voice("You", 9, track: .microphone, seconds: 31)],
+             ["Speaker 1": "Jonas Berg", "Speaker 2": "Lena Park"], false),
+            (crit, [voice("Ana Ruiz", 4, seconds: 64), voice("You", 9, track: .microphone, seconds: 52)], [:], false),
+            (weekly, [voice("Speaker 1", 5, seconds: 95), voice("Speaker 2", 6, seconds: 71), voice("Speaker 3", 7, seconds: 22),
+                      voice("You", 9, track: .microphone, seconds: 58)], ["Speaker 1": "Priya Shah", "Speaker 2": "Sam Okafor"], false),
+        ]
+        for (id, voices, names, inPerson) in taught {
+            let directory = root.appendingPathComponent(id, isDirectory: true)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let session = try decoder.decode(MeetingSessionInfo.self,
+                                                         from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.sessionFile)))
+            var matches: [String: MeetingVoices.Match] = [:]
+            if id == weekly {
+                matches["Speaker 2"] = MeetingVoices.Match(personID: UUID(), name: "Sam Okafor", similarity: 0.86, named: true)
+            }
+            try MeetingVoices(voices: voices, matches: matches).write(directory)
+            try people.learn(meetingID: id, title: session.title, startedAt: session.startedAt, inPerson: inPerson, voices: voices,
+                             names: names, me: "Will")
+        }
+        // The weekly sync's third voice sounds a little like Ana, so Who's this? offers her first.
+        let directory = root.appendingPathComponent(weekly, isDirectory: true)
+        if var voices = MeetingVoices.read(directory), let ana = people.people().first(where: { $0.name == "Ana Ruiz" }) {
+            voices.matches["Speaker 3"] = MeetingVoices.Match(personID: ana.id, name: ana.name, similarity: 0.72, named: false)
+            try voices.write(directory)
+        }
     }
 
     @discardableResult

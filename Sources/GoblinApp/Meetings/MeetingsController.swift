@@ -32,8 +32,10 @@ final class MeetingsController: ObservableObject {
         var backlog = 0
         /// The call app's own mute state, when its window shows one.
         var muted: Bool?
-        /// When the call app let go of the mic; recording stops 60 s later once the call is quiet.
+        /// When the call app let go of the mic; recording stops `releaseTimeout` later once the call is quiet.
         var releasedSince: Date?
+        /// How long after the app lets go of the mic recording stops: 60 s for a call app, 10 s for a browser.
+        var releaseTimeout: TimeInterval = MeetingsController.releaseTimeout
         /// The meeting's folder name, its ID in `MeetingStore`.
         var meetingID = ""
         /// Moments marked so far, in time order.
@@ -56,7 +58,7 @@ final class MeetingsController: ObservableObject {
         /// Seconds of auto-stop countdown left, while the call app has let go of the mic.
         func autoStopRemaining(at date: Date = Date()) -> TimeInterval? {
             guard let releasedSince, !keepRecording else { return nil }
-            return max(0, MeetingsController.releaseTimeout - date.timeIntervalSince(releasedSince))
+            return max(0, releaseTimeout - date.timeIntervalSince(releasedSince))
         }
     }
 
@@ -123,6 +125,7 @@ final class MeetingsController: ObservableObject {
     }
 
     static let enabledKey = "meetings.enabled"
+    static let unopenedKey = "meetings.unopened"
     /// Legacy list of apps not to ask about; read once into `appPoliciesKey` as Never.
     static let neverAskKey = "meetings.neverAskBundles"
     /// `[bundleID: "ask" | "always" | "never"]`. Apps not listed are Ask.
@@ -131,8 +134,12 @@ final class MeetingsController: ObservableObject {
     static let showSidekickKey = "meetings.showSidekick"
     /// Bool, default false: the elapsed time beside the menu-bar goblin while recording.
     static let menuBarTimeKey = "meetings.menuBarTime"
-    /// How long after the call app lets go of the mic recording stops, once the call audio is quiet too.
+    /// How long after the call app lets go of the mic recording stops, once the call audio is quiet too. Zoom and Slack
+    /// can let go of it briefly mid-call (a device change, a huddle moving to a window), so they get a minute.
     nonisolated static let releaseTimeout: TimeInterval = 60
+    /// The same for a call in a browser tab. Meet keeps the mic while muted and lets go only when you leave, and people
+    /// stopped by hand within seconds of leaving rather than wait a minute, so a browser stops after 10 quiet seconds.
+    nonisolated static let browserReleaseTimeout: TimeInterval = 10
     static let quietLevel: Float = -50
     /// Live lines kept for the Sidekick's scroll-back; Copy All reads every line.
     static let liveLineLimit = 1_000
@@ -140,7 +147,7 @@ final class MeetingsController: ObservableObject {
     @Published private(set) var phase: Phase = .off {
         didSet {
             // Levels and live lines change the recording many times a second; only a change of kind is logged.
-            if phase.name != oldValue.name { logger.info("phase: \(oldValue.name, privacy: .public) → \(self.phase.name, privacy: .public)") }
+            if phase.name != oldValue.name { logger.notice("phase: \(oldValue.name, privacy: .public) → \(self.phase.name, privacy: .public)") }
             if MeetingOfferGate.blockerCleared(from: Self.offerBlocker(oldValue, starting: starting), to: offerBlocker) {
                 scheduleOfferCheck()
             }
@@ -172,11 +179,30 @@ final class MeetingsController: ObservableObject {
     var willStop: () -> Void = {}
     /// The meeting the Meetings page should select when it next shows, such as after Open on the ready chip.
     @Published var focusedMeetingID: String?
+    /// The meeting whose Who's this? should open as soon as its page shows, from the popover's Who's This?.
+    @Published var askWhoMeetingID: String?
+    /// The newest finished meeting nobody has opened yet, for the popover's ready card. Kept across launches, so a
+    /// call that finished while the popover was closed still gets its card.
+    @Published private(set) var unopenedMeetingID: String? {
+        didSet { defaults.set(unopenedMeetingID, forKey: Self.unopenedKey) }
+    }
     /// How far the speaker model's one-time download has got (0...1) while processing waits on it; nil otherwise.
     @Published private(set) var speakerModelDownload: Double?
     /// How far the meeting's own speech model has downloaded (0...1), the first time a meeting needs it because
     /// dictation uses another model; nil otherwise.
     @Published private(set) var speechModelDownload: Double?
+
+    /// Remember voices was just turned on and I'm making voiceprints from the meetings already recorded.
+    @Published private(set) var learningVoices = false
+    /// The people known by voice, refreshed whenever People or a meeting's names change.
+    @Published private(set) var people: [Person] = []
+    /// Remember voices was turned off but some voiceprints couldn't be deleted; Settings offers Try Again.
+    @Published private(set) var voiceCleanupFailure: String?
+    /// The last change to People that didn't save, for the People page to say.
+    @Published var peopleEditFailure: String?
+    /// Learning from the meetings already recorded stopped on an error (the voice model wouldn't download, say);
+    /// Settings offers Try Again.
+    @Published private(set) var voiceLearningFailure: String?
 
     /// What processing is doing, for the popover, settings and the meeting's page.
     var processingLine: String { MeetingCopy.processing(download: speakerModelDownload, speechModel: speechModelDownload) }
@@ -196,6 +222,14 @@ final class MeetingsController: ObservableObject {
     private let notifications = MeetingNotifications()
     private let logger = Logger(subsystem: "app.goblin.dictation", category: "meetings")
     private var detector: MeetingDetector?
+    /// The call the overlay last asked about and when, for the meeting's events.log. Only that call, from that same
+    /// stretch on the mic, uses it.
+    private var offered: (id: String, since: Date, at: Date)?
+    /// Learning voices from the meetings already recorded, after Remember voices was turned on.
+    private var voiceLearning: Task<Void, Never>?
+    /// Deleting every voiceprint after Remember voices was turned off. Turning it back on waits for this first, so the
+    /// deleting can't take away what the new learning writes.
+    private var voiceCleanup: Task<Void, Never>?
     private var engine: MeetingSpeechEngine?
     private var session: MeetingSession?
     private var probe: AccessibilityProbe?
@@ -262,6 +296,7 @@ final class MeetingsController: ObservableObject {
         self.gate = gate
         let relay = DownloadRelay()
         let speechDownload: @Sendable (Double?) -> Void = relay.sendSpeech
+        let rememberVoices = DefaultsFlag(defaults, key: Self.rememberVoicesKey)
         library = MeetingLibrary(root: root, modelDownload: relay.send, transcribeLater: { [gate, speechModels] chunks, options in
             // Its own engine for the job: dictation's when that's Parakeet, else a Parakeet loaded and unloaded here.
             let engine = MeetingSpeechEngine(gate: gate, dictationEngine: { try await speechModels.backgroundEngine() },
@@ -274,7 +309,10 @@ final class MeetingsController: ObservableObject {
                 await engine.unload()
                 throw error
             }
-        })
+        }, rememberVoices: { rememberVoices.value }, voiceModelDownload: relay.send)
+        let people = library.people
+        // Names in People read right in every transcript, even meetings they weren't matched in.
+        MeetingVocabulary.peopleNames = { rememberVoices.value ? people.people().map(\.name) : [] }
         MeetingDetector.removeLog(unless: defaults.bool(forKey: MeetingStorage.debugLogKey))
         var policies = (defaults.dictionary(forKey: Self.appPoliciesKey) as? [String: String] ?? [:])
             .compactMapValues(AppPolicy.init(rawValue:))
@@ -283,6 +321,14 @@ final class MeetingsController: ObservableObject {
         neverAsk = policies.filter { $0.value == .never }.map(\.key).sorted()
         notes = MeetingNotesModel(defaults: defaults, store: library.store, discovers: servicesEnabled, vocabulary: { [weak self] in self?.vocabulary() ?? [] })
         notes.meetingsEnabled = { [weak self] in self?.enabled ?? false }
+        unopenedMeetingID = defaults.string(forKey: Self.unopenedKey)
+        // Remember voices was turned off but deleting didn't finish (a quit, a failure): finish it now, whether or not
+        // Meetings is on, and say so if it still can't.
+        if servicesEnabled, !defaults.bool(forKey: Self.rememberVoicesKey) {
+            let store = library.store
+            // Kept as the pending cleanup, so turning Remember voices on straight away waits for it.
+            voiceCleanup = Task { if await store.hasVoiceprints() { await forgetVoices() } }
+        }
         gate.observeWaits { [weak self] milliseconds in
             Task { @MainActor in self?.dictationWaited(milliseconds) }
         }
@@ -339,17 +385,19 @@ final class MeetingsController: ObservableObject {
         defaults.set(on, forKey: Self.enabledKey)
         objectWillChange.send()
         if on {
-            logger.info("meetings turned on")
+            logger.notice("meetings turned on")
             activate()
+            // Launched with Meetings off, the list was never read: the popover, the status menu and a ready card need it.
+            refreshList()
             Task {
                 if NotificationAccess.step(for: await notifications.authorizationStatus()) == .request {
                     let granted = await notifications.requestAuthorization()
-                    logger.info("notifications requested when turning on: \(granted ? "allowed" : "not allowed", privacy: .public)")
+                    logger.notice("notifications requested when turning on: \(granted ? "allowed" : "not allowed", privacy: .public)")
                 }
                 await refreshNotificationStatus()
             }
         } else {
-            logger.info("meetings turned off")
+            logger.notice("meetings turned off")
             Task { await deactivate() }
         }
     }
@@ -388,10 +436,14 @@ final class MeetingsController: ObservableObject {
         refreshSystemAudioPermission()
         Task { await refreshNotificationStatus() }
         processLeftovers()
+        resumePendingLearning()
     }
 
     private func deactivate() async {
         startGeneration += 1
+        // Nothing reads meetings while Meetings is off: learning stops, still pending, and carries on when it's back on.
+        voiceLearning?.cancel()
+        voiceLearning = nil
         if isRecording { stop(reason: "turned off") }
         await stopping?.value
         detector?.stop()
@@ -418,7 +470,7 @@ final class MeetingsController: ObservableObject {
         // A call recorded and then stopped by hand isn't offered again until its app lets go of the mic. Only this
         // call: another app on the mic is asked about once the recording ends.
         offerGate.hold(candidate)
-        logger.info("starting: \(candidate.id, privacy: .public)")
+        logger.notice("starting: \(candidate.id, privacy: .public)")
         let generation = startGeneration
         startTask = Task { await begin(.call(candidate), title: title, generation: generation) }
     }
@@ -429,7 +481,7 @@ final class MeetingsController: ObservableObject {
         guard canStart else { return }
         starting = true
         if case .offered(let offered) = phase { notifications.withdraw(bundleID: offered.id) }
-        logger.info("starting: in person")
+        logger.notice("starting: in person")
         let generation = startGeneration
         startTask = Task { await begin(.inPerson, title: nil, generation: generation) }
     }
@@ -457,7 +509,7 @@ final class MeetingsController: ObservableObject {
     func dismissOffer(neverForThisApp: Bool = false) {
         guard case .offered(let candidate) = phase else { return }
         notifications.withdraw(bundleID: candidate.id)
-        logger.info("offer declined: \(candidate.id, privacy: .public)\(neverForThisApp ? ", never for this app" : "", privacy: .public)")
+        logger.notice("offer declined: \(candidate.id, privacy: .public)\(neverForThisApp ? ", never for this app" : "", privacy: .public)")
         if neverForThisApp { setPolicy(.never, for: candidate.id) }
         phase = .idle
         unrecordedCall = neverForThisApp ? nil : candidate
@@ -472,7 +524,7 @@ final class MeetingsController: ObservableObject {
     func policy(for bundleID: String) -> AppPolicy { appPolicies[bundleID] ?? .ask }
 
     func setPolicy(_ policy: AppPolicy, for bundleID: String) {
-        if self.policy(for: bundleID) != policy { logger.info("policy for \(bundleID, privacy: .public): \(policy.rawValue, privacy: .public)") }
+        if self.policy(for: bundleID) != policy { logger.notice("policy for \(bundleID, privacy: .public): \(policy.rawValue, privacy: .public)") }
         appPolicies[bundleID] = policy == .ask ? nil : policy
         savePolicies()
         guard policy == .never else { return }
@@ -497,8 +549,24 @@ final class MeetingsController: ObservableObject {
         }
     }
 
-    /// Asks the Meetings page to select this meeting.
-    func show(meetingID: String) { focusedMeetingID = meetingID }
+    /// Asks the Meetings page to select this meeting; with `askWho`, also to open Who's this? on its first unnamed voice.
+    func show(meetingID: String, askWho: Bool = false) {
+        focusedMeetingID = meetingID
+        if askWho { askWhoMeetingID = meetingID }
+        if unopenedMeetingID == meetingID { unopenedMeetingID = nil }
+    }
+
+    /// Done with the popover's ready card without opening the meeting.
+    func dismissUnopened() { unopenedMeetingID = nil }
+
+    /// The meeting's transcript as Markdown on the clipboard. Returns whether there was one to copy.
+    @discardableResult
+    func copyTranscript(_ meetingID: String) async -> Bool {
+        guard let markdown = try? await library.store.markdown(meetingID) else { return false }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+        return true
+    }
 
     /// The ready chip for `meetingID` was shown: clears that meeting's finished state only. With notes, the chip can
     /// come after another meeting has finished or failed, and that one's state stays until it's seen.
@@ -548,13 +616,13 @@ final class MeetingsController: ObservableObject {
         switch NotificationAccess.step(for: status) {
         case .none: break
         case .openSettings:
-            logger.info("notifications are off; opening System Settings")
+            logger.notice("notifications are off; opening System Settings")
             openNotificationSettings()
         case .request:
             // An agent app's request is easy to miss unless gob.lin is in front.
             NSApp.activate()
             let granted = await notifications.requestAuthorization()
-            logger.info("notifications requested: \(granted ? "allowed" : "not allowed", privacy: .public)")
+            logger.notice("notifications requested: \(granted ? "allowed" : "not allowed", privacy: .public)")
         }
         await refreshNotificationStatus()
         // The answer can come from System Settings or a banner while gob.lin stays in the background: look again
@@ -579,10 +647,120 @@ final class MeetingsController: ObservableObject {
         Task {
             let list = await library.list()
             if list != meetings { meetings = list }
+            refreshPeople()
         }
     }
 
+    // MARK: Remember voices
+
+    static let rememberVoicesKey = "meetings.rememberVoices"
+    /// Set while learning from the meetings already recorded hasn't finished, so a quit doesn't leave it half done.
+    static let learningPendingKey = "meetings.learningVoicesPending"
+
+    /// Keep voice samples on this Mac and name people from them. Off by default: a voiceprint identifies someone.
+    var rememberVoices: Bool { defaults.bool(forKey: Self.rememberVoicesKey) }
+
+    /// Turning it on learns from the meetings already recorded; turning it off forgets every voice.
+    func setRememberVoices(_ on: Bool) {
+        guard on != rememberVoices else { return }
+        objectWillChange.send()
+        defaults.set(on, forKey: Self.rememberVoicesKey)
+        logger.notice("remember voices \(on ? "on" : "off", privacy: .public)")
+        let store = library.store
+        if on {
+            voiceCleanupFailure = nil
+            learnFromRecordedMeetings()
+        } else {
+            defaults.removeObject(forKey: Self.learningPendingKey)
+            // Learning still running stops first, so it can't write voiceprints back after they're deleted.
+            let learning = voiceLearning
+            learning?.cancel()
+            voiceLearning = nil
+            voiceCleanup = Task {
+                await learning?.value
+                await forgetVoices()
+            }
+        }
+    }
+
+    /// Learning from the meetings already recorded was cut short (a quit, a crash, Meetings turned off): carry on once
+    /// launch repair is done. Only while Meetings is on.
+    private func resumePendingLearning() {
+        guard servicesEnabled, enabled, rememberVoices, defaults.bool(forKey: Self.learningPendingKey) else { return }
+        Task { [weak self] in
+            await self?.leftovers?.value
+            guard let self, self.enabled else { return }
+            self.learnFromRecordedMeetings()
+        }
+    }
+
+    /// Learns voices from the meetings already recorded, after any pending cleanup. Try Again after a failure runs it again
+    /// without forgetting what's already learned.
+    func learnFromRecordedMeetings() {
+        guard rememberVoices, voiceLearning == nil || !learningVoices else { return }
+        let store = library.store, cleanup = voiceCleanup
+        voiceLearningFailure = nil
+        learningVoices = true
+        defaults.set(true, forKey: Self.learningPendingKey)
+        voiceLearning = Task {
+            await cleanup?.value
+            guard !Task.isCancelled else { learningVoices = false; return }
+            let work = Task.detached(priority: .utility) { () -> Result<Int, Error> in
+                do { return .success(try await store.learnVoices()) } catch { return .failure(error) }
+            }
+            let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+            learningVoices = false
+            switch result {
+            case .success(let named):
+                logger.notice("learned voices: \(named, privacy: .public) named")
+                defaults.removeObject(forKey: Self.learningPendingKey)
+            case .failure(let error) where error is CancellationError || Task.isCancelled: logger.notice("learning voices stopped")
+            case .failure(let error):
+                logger.error("learning voices failed: \(error.localizedDescription, privacy: .private)")
+                voiceLearningFailure = error.localizedDescription
+            }
+            refreshList()
+            NotificationCenter.default.post(name: .meetingsEdited, object: nil)
+        }
+    }
+
+    /// Deletes every voiceprint; a failure stays in Settings with Try Again until it works.
+    func forgetVoices() async {
+        do {
+            try await library.store.forgetVoices()
+            voiceCleanupFailure = nil
+        } catch {
+            logger.error("couldn't forget voices: \(error.localizedDescription, privacy: .private)")
+            voiceCleanupFailure = error.localizedDescription
+        }
+        refreshList()
+    }
+
+    func refreshPeople() {
+        let list = library.people.people()
+        if list != people { people = list }
+    }
+
+    /// Runs a People edit, then refreshes everything that shows names.
+    func editPeople(_ change: (PeopleStore) throws -> Void) {
+        do {
+            try change(library.people)
+            peopleEditFailure = nil
+        } catch {
+            logger.error("couldn't change People: \(error.localizedDescription, privacy: .private)")
+            peopleEditFailure = error.localizedDescription
+        }
+        refreshPeople()
+        NotificationCenter.default.post(name: .meetingsEdited, object: nil)
+    }
+
     // MARK: Screenshots
+
+    /// For `scripts/capture-settings.sh`: the popover's ready card for a synthetic meeting. Ignored in the running app.
+    func previewUnopened(_ meetingID: String?) {
+        guard !servicesEnabled else { return }
+        unopenedMeetingID = meetingID
+    }
 
     /// For `scripts/capture-settings.sh`: shows synthetic state with nothing recording. Ignored in the running app.
     func preview(_ phase: Phase, unrecordedCall: MeetingCandidate? = nil, quiet: Bool = false,
@@ -739,7 +917,7 @@ final class MeetingsController: ObservableObject {
     private func dictationWaited(_ milliseconds: Double) {
         guard session != nil else { return }
         meetingMaximumWait = max(meetingMaximumWait, milliseconds)
-        logger.info("dictation began during a meeting chunk and was behind it for \(milliseconds, format: .fixed(precision: 1)) ms")
+        logger.notice("dictation began during a meeting chunk and was behind it for \(milliseconds, format: .fixed(precision: 1)) ms")
         session?.note(String(format: "a dictation began during a meeting chunk; it was behind it for %.1f ms", milliseconds))
     }
 
@@ -800,7 +978,7 @@ final class MeetingsController: ObservableObject {
             _ = await session.stop(transcriptDeadline: .zero)
             await engine.unload()
             try? FileManager.default.removeItem(at: session.directory)
-            logger.info("start abandoned: meetings turned off or quitting")
+            logger.notice("start abandoned: meetings turned off or quitting")
             return
         }
         self.session = session
@@ -832,6 +1010,12 @@ final class MeetingsController: ObservableObject {
         var recording = Recording(title: title, app: appName, bundleID: candidate?.app.bundleID, startedAt: session.startedAt)
         recording.meetingID = folder
         recording.inPerson = target == .none
+        if candidate?.app.callApp?.kind == .browser { recording.releaseTimeout = Self.browserReleaseTimeout }
+        if let candidate {
+            let askedAt = offered.flatMap { $0.id == candidate.id && $0.since == candidate.since ? $0.at : nil }
+            session.note(Self.startNote(candidate, offeredAt: askedAt, startedAt: session.startedAt))
+        }
+        offered = nil
         recording.dictating = speaking
         phase = .recording(recording)
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
@@ -898,7 +1082,7 @@ final class MeetingsController: ObservableObject {
             return
         }
         if recording != self.recording {
-            logger.info("recording: mic \(recording.microphoneLost ? "lost" : "ok", privacy: .public), call sound \(recording.systemAudioLost ? "lost" : "ok", privacy: .public), captions \(String(describing: recording.captions), privacy: .public)")
+            logger.notice("recording: mic \(recording.microphoneLost ? "lost" : "ok", privacy: .public), call sound \(recording.systemAudioLost ? "lost" : "ok", privacy: .public), captions \(String(describing: recording.captions), privacy: .public)")
             phase = .recording(recording)
         }
     }
@@ -929,7 +1113,8 @@ final class MeetingsController: ObservableObject {
                 quietQuestion = nil
             }
         } else if let released = recording.releasedSince, !recording.keepRecording,
-                  now.timeIntervalSince(released) >= Self.releaseTimeout, now.timeIntervalSince(systemSoundAt) >= 10 {
+                  now.timeIntervalSince(released) >= recording.releaseTimeout,
+                  now.timeIntervalSince(systemSoundAt) >= min(10, recording.releaseTimeout) {
             // Auto-stop: the call app let go of the mic a minute ago and the call has gone quiet.
             stop(reason: "call ended")
             return
@@ -947,7 +1132,7 @@ final class MeetingsController: ObservableObject {
         for id in muted { microphoneMidpoints[id] = nil }
         transcriptLines.removeAll { muted.contains($0.id) }
         recording.lines.removeAll { muted.contains($0.id) }
-        logger.info("took back \(muted.count, privacy: .public) live mic lines said while muted")
+        logger.notice("took back \(muted.count, privacy: .public) live mic lines said while muted")
     }
 
     /// What keeps a new offer back in this phase, or nil when one may be made.
@@ -994,6 +1179,7 @@ final class MeetingsController: ObservableObject {
             case .offer(let call): candidate = call
             }
             phase = .offered(candidate)
+            offered = (candidate.id, candidate.since, Date())
             unrecordedCall = candidate
             // The overlay asks; a notification asks instead while the screen is locked and the overlay can't show.
             if Self.screenLocked {
@@ -1005,7 +1191,7 @@ final class MeetingsController: ObservableObject {
                 if current != candidate { phase = .offered(current) }
             } else {
                 notifications.withdraw(bundleID: candidate.id)
-                logger.info("offer withdrawn: \(candidate.id, privacy: .public) let go of the mic")
+                logger.notice("offer withdrawn: \(candidate.id, privacy: .public) let go of the mic")
                 phase = .idle
             }
         case .recording(var recording):
@@ -1015,11 +1201,11 @@ final class MeetingsController: ObservableObject {
                 recording.releasedSince = nil
                 recording.keepRecording = false
                 session?.note("\(bundle) took the mic back")
-                logger.info("\(bundle, privacy: .public) took the mic back; auto-stop cancelled")
+                logger.notice("\(bundle, privacy: .public) took the mic back; auto-stop cancelled")
             } else if !holding, recording.releasedSince == nil {
                 recording.releasedSince = Date()
                 session?.note("\(bundle) released the mic")
-                logger.info("\(bundle, privacy: .public) released the mic; stopping in \(Int(Self.releaseTimeout), privacy: .public) s once the call is quiet")
+                logger.notice("\(bundle, privacy: .public) released the mic; stopping in \(Int(recording.releaseTimeout), privacy: .public) s once the call is quiet")
             } else { return }
             phase = .recording(recording)
         case .off, .processing: break
@@ -1037,7 +1223,7 @@ final class MeetingsController: ObservableObject {
         let line = parts.joined(separator: "; ")
         guard line != lastOfferLog else { return }
         lastOfferLog = line
-        if !line.isEmpty { logger.info("offer: \(line, privacy: .public)") }
+        if !line.isEmpty { logger.notice("offer: \(line, privacy: .public)") }
     }
 
     private func respond(_ response: MeetingNotifications.Response) {
@@ -1062,7 +1248,7 @@ final class MeetingsController: ObservableObject {
         guard case .recording = phase, session != nil, stopping == nil else { return }
         willStop()
         guard case .recording(let recording) = phase, let session else { return }
-        logger.info("stopping: \(reason, privacy: .public) after \(Int(Date().timeIntervalSince(recording.startedAt)), privacy: .public) s, \(recording.marks.count, privacy: .public) marks")
+        logger.notice("stopping: \(reason, privacy: .public) after \(Int(Date().timeIntervalSince(recording.startedAt)), privacy: .public) s, \(recording.marks.count, privacy: .public) marks")
         timer?.invalidate()
         timer = nil
         probe?.stop()
@@ -1168,9 +1354,11 @@ final class MeetingsController: ObservableObject {
                 phase = failure.map { .failed("I kept the recording, but couldn't finish the transcript: \($0)") } ?? .finished(meetingID: id)
             }
             if let failure { logger.error("meeting processing failed: \(failure, privacy: .private)") }
-            else { logger.info("processing done: \(id, privacy: .private)") }
+            else { logger.notice("processing done: \(id, privacy: .private)") }
             refreshList()
             guard failure == nil else { return }
+            // The popover's ready card as soon as the transcript is there; the notes fill in its title when they come.
+            unopenedMeetingID = id
             // Notes on their own task, so the next meeting's processing doesn't wait for a model; the ready chip waits
             // for them, so it has the title they found.
             Task { [weak self] in
@@ -1181,6 +1369,20 @@ final class MeetingsController: ObservableObject {
                                                voicesToName: summary.speakers.filter(Self.isUnnamedVoice).count)
             }
         }
+    }
+
+    /// The first line of a call's events.log: when its app took the mic, when I asked, and how long until recording
+    /// began, so a transcript that starts late says whether the person joined late or answered late.
+    nonisolated static func startNote(_ candidate: MeetingCandidate, offeredAt: Date?, startedAt: Date) -> String {
+        let clock = ISO8601DateFormatter()
+        var parts = ["\(candidate.id) took the mic at \(clock.string(from: candidate.since))"]
+        if let offeredAt, offeredAt >= candidate.since {
+            parts.append(String(format: "asked %.0f s later", offeredAt.timeIntervalSince(candidate.since)))
+            parts.append(String(format: "recording began %.0f s after asking", startedAt.timeIntervalSince(offeredAt)))
+        } else {
+            parts.append(String(format: "recording began %.0f s later without asking", startedAt.timeIntervalSince(candidate.since)))
+        }
+        return parts.joined(separator: "; ")
     }
 
     /// A voice nobody has named yet: "Speaker 2".
@@ -1196,9 +1398,11 @@ final class MeetingsController: ObservableObject {
             try? await gate.waitForQuiet()
             guard !Task.isCancelled else { return }
             // Each message starts with the meeting's folder name, which holds its title.
-            let repaired = await store.repairUnfinished { message in logger.info("\(message, privacy: .private)") }
+            let repaired = await store.repairUnfinished { message in logger.notice("\(message, privacy: .private)") }
             let removed = await store.applyRetention()
             if !repaired.isEmpty || !removed.isEmpty { refreshList() }
+            // The ready card first, as after Stop; notes follow.
+            await announceRepaired(repaired, store: store)
             // Meetings finished now, after a quit or crash, get their notes as they would have after Stop. Only those
             // that processed: the repaired list includes failed attempts.
             for id in repaired where (try? await store.summary(id))?.state == .ready {
@@ -1207,6 +1411,29 @@ final class MeetingsController: ObservableObject {
                     refreshList()
                 }
             }
+        }
+    }
+
+    /// A meeting finished at launch, after a quit or crash cut it short, gets the ready card like any other, unless a
+    /// newer meeting already has it.
+    private func announceRepaired(_ ids: [String], store: MeetingStore) async {
+        var newest: MeetingSummary?
+        for id in ids {
+            guard let summary = try? await store.summary(id), summary.state == .ready else { continue }
+            if summary.startedAt > (newest?.startedAt ?? .distantPast) { newest = summary }
+        }
+        guard let newest else { return }
+        if let current = unopenedMeetingID, let shown = try? await store.summary(current), shown.startedAt >= newest.startedAt { return }
+        unopenedMeetingID = newest.id
+    }
+
+    /// The ready card's meeting while the card can show: nothing more urgent holds the popover's meeting module and the
+    /// meeting is finished. The recent-meetings list leaves out only this one.
+    var visibleUnopenedMeeting: MeetingSummary? {
+        guard enabled, let id = unopenedMeetingID else { return nil }
+        switch phase {
+        case .recording, .processing, .failed: return nil
+        default: return meetings.first { $0.id == id && $0.state == .ready }
         }
     }
 
@@ -1273,6 +1500,19 @@ extension MeetingsController {
 
 /// Carries the speaker model's download progress from the store's worker back to the controller, which doesn't
 /// exist yet when the store is made.
+/// A Bool in UserDefaults read from background work. UserDefaults is thread-safe; it just isn't marked Sendable.
+private final class DefaultsFlag: @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let key: String
+
+    init(_ defaults: UserDefaults, key: String) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    var value: Bool { defaults.bool(forKey: key) }
+}
+
 @MainActor private final class DownloadRelay {
     weak var target: MeetingsController?
 

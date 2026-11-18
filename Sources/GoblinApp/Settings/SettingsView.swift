@@ -6,12 +6,12 @@ import ServiceManagement
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case insights = "Insights", history = "History", meetings = "Meetings"
+    case insights = "Insights", history = "History", meetings = "Meetings", people = "People"
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
     case cleanup = "Cleanup", tone = "Tone", meetingRecording = "Meeting Recording", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
     /// Pages that show only while Meetings is on.
-    var needsMeetings: Bool { self == .meetings || self == .meetingRecording }
+    var needsMeetings: Bool { self == .meetings || self == .people || self == .meetingRecording }
     /// Pages that draw their own toolbar title (a list beside a detail).
     var ownsToolbar: Bool { self == .history || self == .meetings }
     var symbol: String {
@@ -26,6 +26,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .history: "clock"
         case .overlay: "rectangle.bottomhalf.inset.filled"
         case .meetings: "person.2.wave.2"
+        case .people: "person.crop.circle"
         case .meetingRecording: "headphones"
         case .diagnostics: "stethoscope"
         case .about: "info.circle"
@@ -100,7 +101,12 @@ struct SettingsView: View {
         case .tone: ToneSettingsView()
         case .history, .insights, .meetings: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
-        case .meetingRecording: MeetingRecordingSettingsView(meetings: model.meetings)
+        case .meetingRecording: MeetingRecordingSettingsView(meetings: model.meetings, openPeople: { model.settingsSelection = .people })
+        case .people:
+            PeopleSettingsView(meetings: model.meetings, openMeeting: { id in
+                model.meetings.focusedMeetingID = id
+                model.settingsSelection = .meetings
+            })
         case .diagnostics: DiagnosticsView(model: model.diagnostics)
         case .about: AboutSettingsView(updates: model.updates, history: model.history, speechModels: model.speechModels, eyes: eyes)
         }

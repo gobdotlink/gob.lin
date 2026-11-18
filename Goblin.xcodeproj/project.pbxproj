@@ -65,6 +65,7 @@
 		F80F9DD8AE1771A3DE51D7BA /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E70CBB2B7B3635E728ED1BF /* HistoryView.swift */; };
 		9A92597F1B62E2E74C247A02 /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5198EA655922CC9BD973385C /* MeetingDetailView.swift */; };
 		36D8835A30C6BA5486938762 /* MeetingLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ED40A9355CE9AC4B19088EE /* MeetingLibrary.swift */; };
+		615565ABD1A418335FA04328 /* PeopleSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDACD6F0B7B1358CB35D37C0 /* PeopleSettingsView.swift */; };
 		AB9882D083604FA48F3689A2 /* MeetingMarkHotkey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FCC47E38BA84A861FD863D /* MeetingMarkHotkey.swift */; };
 		F3658465E197ACCE149FF02B /* MeetingNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E79F278851092F181DB923 /* MeetingNotifications.swift */; };
 		981B411618B2C26EA309805B /* MeetingNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DADFD92892A952A8AA9BF3BF /* MeetingNotesView.swift */; };
@@ -145,6 +146,7 @@
 		F6C202A50D173370B735918F /* GoblinApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinApplicationDelegate.swift; sourceTree = "<group>"; };
 		5198EA655922CC9BD973385C /* MeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
 		9ED40A9355CE9AC4B19088EE /* MeetingLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingLibrary.swift; sourceTree = "<group>"; };
+		DDACD6F0B7B1358CB35D37C0 /* PeopleSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleSettingsView.swift; sourceTree = "<group>"; };
 		72FCC47E38BA84A861FD863D /* MeetingMarkHotkey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingMarkHotkey.swift; sourceTree = "<group>"; };
 		28E79F278851092F181DB923 /* MeetingNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotifications.swift; sourceTree = "<group>"; };
 		DADFD92892A952A8AA9BF3BF /* MeetingNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotesView.swift; sourceTree = "<group>"; };
@@ -281,6 +283,7 @@
 			children = (
 				5198EA655922CC9BD973385C /* MeetingDetailView.swift */,
 				9ED40A9355CE9AC4B19088EE /* MeetingLibrary.swift */,
+				DDACD6F0B7B1358CB35D37C0 /* PeopleSettingsView.swift */,
 				72FCC47E38BA84A861FD863D /* MeetingMarkHotkey.swift */,
 				28E79F278851092F181DB923 /* MeetingNotifications.swift */,
 				DADFD92892A952A8AA9BF3BF /* MeetingNotesView.swift */,
@@ -514,6 +517,7 @@
 				8416436293597290804FB2C4 /* UpdateSettingsView.swift in Sources */,
 				9A92597F1B62E2E74C247A02 /* MeetingDetailView.swift in Sources */,
 				36D8835A30C6BA5486938762 /* MeetingLibrary.swift in Sources */,
+				615565ABD1A418335FA04328 /* PeopleSettingsView.swift in Sources */,
 				AB9882D083604FA48F3689A2 /* MeetingMarkHotkey.swift in Sources */,
 				F3658465E197ACCE149FF02B /* MeetingNotifications.swift in Sources */,
 				981B411618B2C26EA309805B /* MeetingNotesView.swift in Sources */,

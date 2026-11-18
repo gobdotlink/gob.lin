@@ -53,6 +53,11 @@ public struct MeetingDetail: Codable, Sendable {
     public var speakerNames: [String: String]
     /// marks.jsonl, oldest first.
     public var marks: [MeetingMark] = []
+    /// Shown names that Remember voices filled in from People, rather than a person.
+    public var namedFromVoice: Set<String> = []
+    /// Shown name of an unnamed voice → who it sounds like, closest first: someone in People, or another voice of this
+    /// meeting the diarizer may have split off.
+    public var voiceSuggestions: [String: [SpeakerSuggestion]] = [:]
 }
 
 public enum MeetingStoreError: Error, LocalizedError, Equatable {
@@ -61,6 +66,8 @@ public enum MeetingStoreError: Error, LocalizedError, Equatable {
     case noTranscript(String)
     case speakerNotFound(String)
     case destinationNotEmpty(String)
+    /// Remember voices was turned off, but these voiceprints couldn't be deleted (meeting titles, or "People").
+    case voicesNotForgotten([String])
 
     public var errorDescription: String? {
         switch self {
@@ -69,6 +76,7 @@ public enum MeetingStoreError: Error, LocalizedError, Equatable {
         case .noTranscript(let id): "\(id) has no transcript yet."
         case .speakerNotFound(let name): "No speaker called \(name) in this meeting."
         case .destinationNotEmpty(let path): "\(path) already exists and is not empty."
+        case .voicesNotForgotten(let places): "Some voiceprints couldn't be deleted: \(places.joined(separator: ", "))."
         }
     }
 }
@@ -165,10 +173,14 @@ public actor MeetingStore {
             let url = directory.appendingPathComponent(MeetingStorage.audioFile(track))
             return Self.audioBytes(url) > 44 ? url : nil
         }
+        let names = MeetingPostProcessor.speakerNames(directory)
+        let voices = MeetingVoices.read(directory)
+        let people = options.voices?.people.people() ?? []
         return MeetingDetail(summary: summary, turns: turns, participants: MeetingParticipants.read(directory),
                              microphoneAudio: audio(.microphone), systemAudio: audio(.system), report: report,
-                             speakerNames: MeetingPostProcessor.speakerNames(directory),
-                             marks: MeetingMark.read(directory))
+                             speakerNames: names, marks: MeetingMark.read(directory),
+                             namedFromVoice: voices.map { VoiceSuggestions.namedFromVoice($0, names: names) } ?? [],
+                             voiceSuggestions: voices.map { VoiceSuggestions.suggestions($0, names: names, people: people) } ?? [:])
     }
 
     /// The meeting's folder. IDs are folder names; anything that could leave the root is rejected.
@@ -230,7 +242,8 @@ public actor MeetingStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(names).write(to: directory.appendingPathComponent(MeetingStorage.speakersFile), options: .atomic)
         Self.forgetClearedNames(directory)
-        return try MeetingPostProcessor.render(directory: directory)
+        // People follows the names as soon as they're saved, before anything derived from them can fail.
+        return try learnThenRender(directory)
     }
 
     /// speakers.json as it stands: diarized label → name. Pair with `setSpeakerNames` to undo a rename or merge.
@@ -254,7 +267,139 @@ public actor MeetingStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(kept).write(to: directory.appendingPathComponent(MeetingStorage.speakersFile), options: .atomic)
         Self.forgetClearedNames(directory)
-        return try MeetingPostProcessor.render(directory: directory)
+        return try learnThenRender(directory)
+    }
+
+    // MARK: Voices
+
+    /// People learns the meeting's names as they now stand, from its voiceprints; nothing without Remember voices.
+    /// After names are saved: People follows them first, then the transcript. The transcript is written even when People
+    /// can't be (a damaged people.json), so names and transcript always agree; People's failure is still reported.
+    private func learnThenRender(_ directory: URL) throws -> [TranscriptTurn] {
+        var learning: (any Error)?
+        do { try relearn(directory) } catch { learning = error }
+        let turns = try MeetingPostProcessor.render(directory: directory)
+        if let learning { throw learning }
+        return turns
+    }
+
+    private func relearn(_ directory: URL) throws {
+        guard let voices = options.voices, voices.enabled(), let saved = MeetingVoices.read(directory) else { return }
+        let session = Self.session(directory)
+        let id = directory.lastPathComponent
+        try voices.people.learn(meetingID: id, title: MeetingMetadata.read(directory).title ?? session?.title ?? MeetingStorage.title(fromFolderName: id),
+                                 startedAt: session?.startedAt ?? Date(), inPerson: session?.kind == .inPerson, voices: saved.voices,
+                                 names: MeetingPostProcessor.speakerNames(directory), me: MeetingParticipants.read(directory).me)
+    }
+
+    /// Remember voices just turned on: voiceprints for every finished meeting that still has its audio, People learning
+    /// from the voices already named, then names and suggestions for the rest. Returns how many voices it named.
+    @discardableResult
+    public func learnVoices(log: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Int {
+        guard let voiceOptions = options.voices else { return 0 }
+        let meetings = list().filter { $0.state == .ready && !recording.contains($0.id) && !processing.contains($0.id) }
+        // Named voices first, oldest meeting first, so every meeting can be matched against all of them.
+        var prepared: [(MeetingSummary, MeetingVoices, TranscriptStamp)] = []
+        for meeting in meetings.reversed() {
+            try Task.checkCancellation()
+            let directory = meeting.directory
+            // A meeting processed before attributed.json existed is migrated first; without attribution there are no
+            // voices to make, and an empty voices.json would stand in for them from then on.
+            if !FileManager.default.fileExists(atPath: directory.appendingPathComponent(MeetingStorage.attributedFile).path) {
+                guard (try? MeetingPostProcessor.render(directory: directory)) != nil,
+                      FileManager.default.fileExists(atPath: directory.appendingPathComponent(MeetingStorage.attributedFile).path) else { continue }
+            }
+            // Voiceprints belong to the attribution they were made from; one that changes meanwhile (the CLI processing
+            // the meeting again) makes them stale, and then the meeting is left for its own processing.
+            let attribution = Self.attributionStamp(directory)
+            var saved = MeetingVoices.read(directory)
+            if saved == nil, meeting.hasAudio {
+                let voices: [MeetingVoice]
+                do {
+                    voices = try await VoiceStretches.voices(inMeeting: directory, embed: voiceOptions.embed,
+                                                             dictationSpans: options.dictationSpans)
+                } catch is DecodingError {
+                    // One meeting's damaged attribution only leaves that meeting out; Try Again on it rebuilds it.
+                    log("\(meeting.id): its attribution won't read, so its voices were skipped")
+                    continue
+                }
+                // Turned off while that was embedding: keep nothing, and leave the rest to forgetting.
+                try Task.checkCancellation()
+                guard voiceOptions.enabled() else { return 0 }
+                guard isCurrent(meeting.id, attribution) else { continue }
+                saved = MeetingVoices(voices: voices)
+                try saved?.write(directory)
+            }
+            guard let saved else { continue }
+            prepared.append((meeting, saved, attribution))
+            try voiceOptions.people.learn(meetingID: meeting.id, title: meeting.title, startedAt: meeting.startedAt,
+                                          inPerson: meeting.kind == .inPerson, voices: saved.voices,
+                                          names: MeetingPostProcessor.speakerNames(directory), me: MeetingParticipants.read(directory).me)
+        }
+        var named = 0
+        for (meeting, saved, attribution) in prepared {
+            try Task.checkCancellation()
+            guard voiceOptions.enabled() else { return named }
+            guard isCurrent(meeting.id, attribution) else { continue }
+            let directory = meeting.directory
+            var names = MeetingPostProcessor.speakerNames(directory)
+            let people = voiceOptions.people.people().map { person in
+                var person = person
+                person.samples.removeAll { $0.meetingID == meeting.id }
+                return person
+            }
+            let open = saved.voices.filter { VoiceMatching.waitsForName($0.label, names: names) }
+            let matches = VoiceMatching.bestPerLane(VoiceMatching.match(open, people: people, participants: MeetingParticipants.read(directory),
+                                                                        inPerson: meeting.kind == .inPerson), names: names)
+            var updated = saved
+            // Names given from a voice before keep their mark while the meeting still uses them.
+            let standing = saved.matches.filter { label, match in match.named && names[label] == match.name }
+            updated.matches = standing.merging(matches) { _, new in new }
+            try updated.write(directory)
+            let newlyNamed = matches.filter(\.value.named)
+            guard !newlyNamed.isEmpty else { continue }
+            let before = names
+            for (label, match) in newlyNamed {
+                MeetingPostProcessor.nameVoice(shownAs: label, match.name, names: &names, before: before, labels: saved.voices.map(\.label))
+            }
+            try MeetingPostProcessor.writeSpeakerNames(names, to: directory)
+            _ = try learnThenRender(directory)
+            named += newlyNamed.count
+        }
+        log("learned voices from \(prepared.count) meetings; named \(named) voices")
+        return named
+    }
+
+    /// attributed.json's size and modification time: which attribution a meeting's voiceprints were made from.
+    static func attributionStamp(_ directory: URL) -> TranscriptStamp {
+        let values = try? directory.appendingPathComponent(MeetingStorage.attributedFile)
+            .resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        return TranscriptStamp(modified: values?.contentModificationDate, size: values?.fileSize)
+    }
+
+    /// The meeting isn't being processed and still has the attribution `stamp` was taken from.
+    private func isCurrent(_ id: String, _ stamp: TranscriptStamp) -> Bool {
+        guard !processing.contains(id), !recording.contains(id), let directory = try? directory(for: id) else { return false }
+        return Self.attributionStamp(directory) == stamp
+    }
+
+    /// Whether any voiceprint is on disk: People, or a meeting's voices.json.
+    public func hasVoiceprints() -> Bool {
+        if let people = options.voices?.people, FileManager.default.fileExists(atPath: people.url.path) { return true }
+        return list().contains { FileManager.default.fileExists(atPath: $0.directory.appendingPathComponent(MeetingStorage.voicesFile).path) }
+    }
+
+    /// Remember voices turned off: every voiceprint goes, from People and from each meeting. Names already given stay.
+    public func forgetVoices() throws {
+        // Every file is tried even when one fails, so a single stuck folder doesn't leave the rest behind.
+        var failures: [String] = []
+        for meeting in list() {
+            let url = meeting.directory.appendingPathComponent(MeetingStorage.voicesFile)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            do { try FileManager.default.removeItem(at: url) } catch { failures.append(meeting.title) }
+        }
+        do { try options.voices?.people.removeAll() } catch { failures.append("People") }
+        if !failures.isEmpty { throw MeetingStoreError.voicesNotForgotten(failures) }
     }
 
     /// Bytes of audio kept across every meeting, for the storage line in Settings.
@@ -274,6 +419,8 @@ public actor MeetingStore {
     public func delete(_ id: String) throws {
         let directory = try directory(for: id)
         try ensureIdle(id, directory)
+        // What the meeting taught about voices goes first: once the folder is gone nothing points back to it.
+        try options.voices?.people.forget(meetingID: id)
         try FileManager.default.removeItem(at: directory)
     }
 
@@ -319,20 +466,31 @@ public actor MeetingStore {
         try? started.write(directory)
         var options = self.options
         if let preset, preset != options.preset {
-            let transcribeLater = options.transcribeLater
+            let transcribeLater = options.transcribeLater, voices = options.voices
             options = MeetingPostProcessOptions(preset: preset, dictationSpans: options.dictationSpans)
             options.transcribeLater = transcribeLater
+            options.voices = voices
         }
+        // What processing did goes in the meeting's events.log too, after the recording's own lines, so one file
+        // says how the whole meeting went.
+        let logged: @Sendable (String) -> Void = { message in
+            MeetingStorage.appendEvent("processing: \(message)", to: directory)
+            log(message)
+        }
+        let began = Date()
+        logged("started (\(options.preset))")
         do {
-            let turns = try await MeetingPostProcessor.run(directory: directory, options: options, log: log)
+            let turns = try await MeetingPostProcessor.run(directory: directory, options: options, log: logged)
             var metadata = MeetingMetadata.read(directory)
             metadata.failure = nil
             metadata.pending = false
             try metadata.write(directory)
+            logged(String(format: "done in %.1f s", Date().timeIntervalSince(began)))
             return turns
         } catch {
             // Stopped on quit: still pending, so the next launch runs it again rather than calling it failed.
-            if error is CancellationError || Task.isCancelled { throw error }
+            if error is CancellationError || Task.isCancelled { logged("stopped by quit; it runs again at launch"); throw error }
+            logged("failed: \(error.localizedDescription)")
             var metadata = MeetingMetadata.read(directory)
             metadata.failure = error.localizedDescription
             metadata.pending = false

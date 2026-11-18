@@ -45,6 +45,12 @@ extension AppModel {
         openWindow?("settings")
     }
 
+    /// The Meetings page, on `meetingID` when given; `askWho` opens Who's this? on its first voice without a name.
+    func openMeeting(_ meetingID: String? = nil, askWho: Bool = false) {
+        if let meetingID { meetings.show(meetingID: meetingID, askWho: askWho) }
+        openSettings(.meetings)
+    }
+
     func openHistory(_ filter: HistoryFilter = .all, focus: UUID? = nil) {
         history.filter = filter
         if focus != nil { history.searchText = "" }

@@ -10,6 +10,10 @@ struct WhoIsThisSheet: View {
     let lanes: [MeetingLane]
     let turns: [TranscriptTurn]
     let participants: MeetingParticipants
+    /// Who this voice sounds like, from People or another voice of this meeting, closest first.
+    var voiceSuggestions: [SpeakerSuggestion] = []
+    /// Remember voices is on, so the name given here is learned.
+    var remembersVoices = false
     @ObservedObject var player: MeetingPlayer
     let onName: (String) -> Void
     let onClose: () -> Void
@@ -21,11 +25,16 @@ struct WhoIsThisSheet: View {
     private var inPerson: Bool { meeting.kind == .inPerson }
     private var clips: [TranscriptTurn] { MeetingTimeline.clips(of: lane.name, in: turns) }
     private var suggestions: [SpeakerSuggestion] {
-        inPerson ? [] : SpeakerSuggestions.suggestions(lanes: lanes, participants: participants)
+        // A voice that sounds like someone comes first; the participant list fills in the rest.
+        let listed = inPerson ? [] : SpeakerSuggestions.suggestions(lanes: lanes, participants: participants)
+        let heard = voiceSuggestions.filter { $0.name != lane.name }
+        return Array((heard + listed.filter { item in !heard.contains { $0.name == item.name } }).prefix(4))
     }
     private var extraVoices: Int { inPerson ? 0 : SpeakerSuggestions.extraVoices(lanes: lanes, participants: participants) }
     /// In person, nobody is You until someone says so.
-    private var offerMe: Bool { inPerson && !lanes.contains(where: \.isYou) }
+    private var offerMe: Bool {
+        inPerson && !lanes.contains(where: \.isYou) && !voiceSuggestions.contains { $0.name == MeetingPostProcessor.microphoneLabel }
+    }
     private var owners: [String] { lanes.filter { !$0.needsName && !$0.isYou }.map(\.name) }
 
     var body: some View {
@@ -55,7 +64,9 @@ struct WhoIsThisSheet: View {
                         ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
                             if index > 0 || offerMe { Hairline().padding(.horizontal, 10) }
                             suggestionRow(name: suggestion.name, reason: suggestion.reason,
-                                          button: "That's \(SpeakerSuggestions.firstName(suggestion.name))")
+                                          button: suggestion.name == MeetingPostProcessor.microphoneLabel ? "That's Me"
+                                              : MeetingTimeline.isUnnamed(suggestion.name) ? "Same Voice"
+                                              : "That's \(SpeakerSuggestions.firstName(suggestion.name))")
                         }
                     }
                 }
@@ -71,7 +82,8 @@ struct WhoIsThisSheet: View {
             .padding(.top, 14)
 
             HStack(spacing: 10) {
-                Text("Remember voices is off, so I'll ask again next time.").font(.status).foregroundStyle(.secondary)
+                Text(remembersVoices ? "I'll remember this voice for next time." : "Remember voices is off, so I'll ask again next time.")
+                    .font(.status).foregroundStyle(.secondary)
                 Spacer()
                 Button("Not Now", action: onClose).keyboardShortcut(.cancelAction)
             }

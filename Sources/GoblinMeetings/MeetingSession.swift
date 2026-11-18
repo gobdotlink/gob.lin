@@ -158,6 +158,8 @@ public final class MeetingSession: @unchecked Sendable {
     public func start() async throws {
         let hostStart = HostClock.now
         let started = Date()
+        // Before the transcriber exists: a model dictation already loaded is ready at once, and that line comes after.
+        log("preparing speech model")
         let transcriber = MeetingTranscriber(engine: engine, options: recognition, maximumBacklog: Self.maximumBacklog,
                                              onSegment: { [weak self] segment in self?.record(segment) },
                                              onError: { [weak self] message in self?.log(message) },
@@ -201,9 +203,8 @@ public final class MeetingSession: @unchecked Sendable {
         } catch {
             log("microphone unavailable, recording system audio only: \(error.localizedDescription)")
         } }
-        saveInfo()
         // Capture is already running; chunks wait in the transcriber's queue while it loads the model.
-        log("preparing speech model")
+        saveInfo()
     }
 
     /// Stops capture and closes both tracks at once, then waits for the live transcript to catch up. With a

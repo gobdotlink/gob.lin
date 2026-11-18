@@ -50,6 +50,11 @@ struct MeetingsLabsSection: View {
                 StatusRow(.ready, Text("On. Meetings sits under History.")) {
                     Button("Meeting Recording…") { model.settingsSelection = .meetingRecording }
                 }
+            } else if let failure = meetings.voiceCleanupFailure {
+                // Meeting Recording is hidden while Meetings is off, so voiceprints left behind are reported here.
+                StatusRow(.problem, Text("I couldn't delete every voiceprint. \(failure)")) {
+                    Button("Try Again") { Task { await meetings.forgetVoices() } }
+                }
             }
         } header: { CapsHeader("Labs") }
         .sheet(isPresented: $showingSetup) { MeetingsSetupSheet(meetings: meetings) { showingSetup = false } }
@@ -59,8 +64,11 @@ struct MeetingsLabsSection: View {
 /// Settings → Meeting Recording: the switch, what happens when a call starts, and what's kept.
 struct MeetingRecordingSettingsView: View {
     @ObservedObject var meetings: MeetingsController
+    /// Shows the People page.
+    var openPeople: () -> Void = {}
     @ObservedObject private var systemAudio = SystemAudioAccess.shared
     @State private var showingSetup = false
+    @State private var confirmingForget = false
     @State private var audioBytes: Int?
     @State private var count = 0
 
@@ -105,11 +113,37 @@ struct MeetingRecordingSettingsView: View {
         } header: { CapsHeader("In the room") }
         .disabled(!meetings.enabled)
         Section {
-            Toggle(isOn: .constant(false)) {
+            Toggle(isOn: Binding(get: { meetings.rememberVoices }, set: { on in
+                if on { meetings.setRememberVoices(true) } else { confirmingForget = true }
+            })) {
                 Text("Remember voices")
-                Text("Coming later. Keeps voice samples on this Mac so I can name people next time.").rowDetail()
+                Text("Keeps voiceprints on this Mac so I can name people next time.").rowDetail()
+                Text("I make a voiceprint of each voice you name, in calls and in the room, and name that person when I hear them again. Close calls are offered in Who's this? instead. Voiceprints never leave this Mac, and turning this off forgets them all.")
             }
-            .disabled(true)
+            // On the row, not the section: a section's modifiers reach its small-caps header too.
+            // Only turning voices on and off waits for Meetings; deleting what's left never does.
+            .disabled(!meetings.enabled)
+            .confirmationDialog("Forget every voice?", isPresented: $confirmingForget) {
+                Button("Turn Off and Forget", role: .destructive) { meetings.setRememberVoices(false) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("I'll delete the voiceprints of everyone in People. Names already given in meetings stay.")
+            }
+            if meetings.rememberVoices, let failure = meetings.voiceLearningFailure, !meetings.learningVoices {
+                StatusRow(.problem, Text("I couldn't learn from every meeting. \(failure)")) {
+                    Button("Try Again") { meetings.learnFromRecordedMeetings() }
+                }
+                .disabled(!meetings.enabled)
+            } else if meetings.rememberVoices {
+                StatusRow(meetings.learningVoices ? .waiting : .ready, Text(speakersLine)) {
+                    Button("People…", action: openPeople)
+                }
+                .disabled(!meetings.enabled)
+            } else if let failure = meetings.voiceCleanupFailure {
+                StatusRow(.problem, Text("I couldn't delete every voiceprint. \(failure)")) {
+                    Button("Try Again") { Task { await meetings.forgetVoices() } }
+                }
+            }
         } header: { CapsHeader("Speakers") }
         MeetingNotesSettingsSection(model: meetings.notes)
             .disabled(!meetings.enabled)
@@ -147,6 +181,16 @@ struct MeetingRecordingSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             systemAudio.refresh()
             Task { await meetings.refreshNotificationStatus() }
+        }
+    }
+
+    private var speakersLine: String {
+        if meetings.learningVoices { return "Learning voices from the meetings you've already named…" }
+        let others = meetings.people.filter { !$0.isMe }.count
+        switch others {
+        case 0: return "I don't know anyone's voice yet. Name a voice in a meeting and I'll remember it."
+        case 1: return "I know 1 person by voice."
+        default: return "I know \(others) people by voice."
         }
     }
 

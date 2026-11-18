@@ -11,6 +11,8 @@ enum MeetingsCommand {
            goblin meetings show <id> [--markdown] [--root <dir>]
            goblin meetings process <folder> [--preset offline|fast32|fast128] [--verbose]
            goblin meetings export-fixture <id> <destination> [--root <dir>]
+           goblin meetings voices <folder>
+           goblin meetings learn-voices [--root <dir>]
            goblin meetings notes <id> [--tool codex|claude] [--notes-model <id>] [--thinking <level>] [--template <id>]
              [--style concise|detailed] [--out <file>] [--print-prompt] [--dictionary <file>] [--root <dir>] [--verbose]
            goblin meetings notes-tools
@@ -42,8 +44,12 @@ enum MeetingsCommand {
         guard let command = arguments.first else { throw CommandError.usage(usage) }
         arguments.removeFirst()
         var options = try Options(arguments)
+        // Transcripts are shown with the person's dictionary, as the app shows them.
+        MeetingVocabulary.dictionary = { (try? DictionaryRepository.applicationDefault.load()) ?? [] }
         let rootOption = try options.take("--root").map { URL(fileURLWithPath: $0, isDirectory: true) }
         let root = rootOption ?? MeetingStorage.root
+        // And with the names in People, as the app shows them; People sits beside the meetings folder.
+        MeetingVocabulary.peopleNames = { PeopleStore(meetingsRoot: root).people().map(\.name) }
         let verbose = options.flag("--verbose")
         let log: @Sendable (String) -> Void = { message in
             if verbose { FileHandle.standardError.write(Data((message + "\n").utf8)) }
@@ -69,6 +75,7 @@ enum MeetingsCommand {
                     || FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingStorage.audioFile(.system)).path) else {
                 throw CommandError.usage("\(folder.path) is not a meeting folder (no segments.jsonl or system.wav).")
             }
+            MeetingVocabulary.peopleNames = { PeopleStore(meetingsRoot: folder.deletingLastPathComponent()).people().map(\.name) }
             var processOptions = MeetingPostProcessOptions(preset: preset)
             if let engine { processOptions.transcribeLater = Self.transcribeLater(engine) }
             let store = MeetingStore(root: folder.deletingLastPathComponent(), options: processOptions)
@@ -76,6 +83,22 @@ enum MeetingsCommand {
             let started = Date()
             try await store.process(id, log: log)
             try write(Processed(seconds: Date().timeIntervalSince(started), meeting: try await store.detail(id)))
+        case "learn-voices":
+            // What turning Remember voices on does: People learns from every named meeting, then names the rest.
+            // People lives beside the root, so --root keeps a test library out of the real one.
+            try options.finish(positional: 0)
+            let people = PeopleStore(meetingsRoot: root)
+            var processOptions = MeetingPostProcessOptions()
+            processOptions.voices = MeetingVoiceOptions(enabled: { true }, embed: VoiceprintEmbedder.lazy(), people: people)
+            let store = MeetingStore(root: root, options: processOptions)
+            let named = try await store.learnVoices(log: log)
+            try write(LearnedVoices(named: named, people: people.people().map {
+                LearnedVoices.Known(name: $0.name, isMe: $0.isMe, meetings: $0.meetingIDs.count, seconds: $0.secondsHeard)
+            }))
+        case "voices":
+            // Voiceprints of a processed meeting's voices, for checking how alike voices across meetings are.
+            let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
+            try write(try await VoiceStretches.voices(inMeeting: folder, embed: VoiceprintEmbedder.lazy()))
         case "export-fixture":
             let values = try options.finish(positional: 2)
             let destination = URL(fileURLWithPath: values[1], isDirectory: true).standardizedFileURL
@@ -200,6 +223,12 @@ enum MeetingsCommand {
     private struct Processed: Encodable { let seconds: Double; let meeting: MeetingDetail }
     private struct Simulated: Encodable { let liveSeconds: Double; let seconds: Double; let meeting: MeetingDetail }
     private struct Exported: Encodable { let destination: String; let files: [String] }
+
+    struct LearnedVoices: Encodable {
+        struct Known: Encodable { let name: String; let isMe: Bool; let meetings: Int; let seconds: Double }
+        let named: Int
+        let people: [Known]
+    }
 
     private static func write<T: Encodable>(_ value: T) throws {
         let encoder = JSONEncoder()

@@ -61,7 +61,7 @@ public enum MeetingTimeline {
             var lane = lanes[turn.speaker] ?? MeetingLane(name: turn.speaker, isYou: false, needsName: isUnnamed(turn.speaker),
                                                            stretches: [], talkSeconds: 0)
             lane.isYou = lane.isYou || (kind == .call ? turn.track == .microphone : turn.speaker == MeetingPostProcessor.microphoneLabel)
-            lane.talkSeconds += turn.end - turn.start
+            lane.talkSeconds += turn.talkSeconds
             if var last = lane.stretches.last, last.track == turn.track, turn.start - last.end <= joinGap {
                 last.end = max(last.end, turn.end)
                 last.turnIDs.append(turn.id)
@@ -112,7 +112,29 @@ public enum MeetingTimeline {
             if aPickup != bPickup { return !aPickup }
             return (a.end - a.start, b.start) > (b.end - b.start, a.start)
         }
-        return Array(ranked.prefix(count)).sorted { $0.start < $1.start }
+        return Array(ranked.prefix(count)).sorted { $0.start < $1.start }.map { shortened($0) }
+    }
+
+    /// A clip plays at most this long: a turn in the shown transcript can be a minute-long paragraph.
+    public static let longestClip = 15.0
+
+    /// The start of a long turn, cut at the last word that ends within `longestClip`. A turn without word timings, or a
+    /// short one, is left as it is.
+    static func shortened(_ turn: TranscriptTurn) -> TranscriptTurn {
+        guard turn.end - turn.start > longestClip, !turn.words.isEmpty else { return turn }
+        let kept = turn.words.filter { $0.end <= turn.start + longestClip }
+        guard let last = kept.last, kept.count < turn.words.count else { return turn }
+        var clip = turn
+        clip.words = kept
+        clip.end = last.end
+        // The shown text keeps the transcript's corrections ("Eye phone" → "iPhone"), so it's cut by share of words
+        // rather than rebuilt from what was heard.
+        let shown = turn.text.split(whereSeparator: \.isWhitespace)
+        let share = shown.count == turn.words.count ? kept.count
+            : max(1, Int((Double(shown.count) * Double(kept.count) / Double(turn.words.count)).rounded()))
+        clip.text = shown.prefix(share).joined(separator: " ") + "…"
+        clip.spoken = nil
+        return clip
     }
 
     static func endsASentence(_ text: String) -> Bool {
@@ -143,7 +165,7 @@ public enum MeetingTimeline {
 }
 
 /// A name "Who's this?" offers for an unnamed voice, with why.
-public struct SpeakerSuggestion: Sendable, Hashable, Identifiable {
+public struct SpeakerSuggestion: Codable, Sendable, Hashable, Identifiable {
     public var id: String { name }
     public var name: String
     public var reason: String
@@ -189,6 +211,9 @@ public enum SpeakerSuggestions {
     public static func guestName(on owner: String) -> String {
         "Guest on \(owner)'s laptop"
     }
+
+    /// Whether a name is `guestName`'s: a voice known only by whose laptop it came through.
+    public static func isGuestName(_ name: String) -> Bool { name.hasPrefix("Guest on ") && name.hasSuffix("'s laptop") }
 
     /// "Mira" from "Mira Patel", for "That's Mira".
     public static func firstName(_ name: String) -> String {

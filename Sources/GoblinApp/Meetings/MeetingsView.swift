@@ -71,6 +71,14 @@ struct MeetingsView: View {
             .onChange(of: meetings.focusedMeetingID, initial: true) { _, focus in
                 if let focus { selectedID = focus; meetings.focusedMeetingID = nil; revision += 1 }
             }
+            // Seeing the meeting the popover's ready card is about is opening it.
+            .onChange(of: selectedID) { _, id in
+                if let id, id == meetings.unopenedMeetingID { meetings.dismissUnopened() }
+            }
+            // A meeting that finishes while it's the one on show has been seen.
+            .onChange(of: meetings.unopenedMeetingID) { _, id in
+                if let id, id == selectedID { meetings.dismissUnopened() }
+            }
             .onChange(of: list.map(\.id)) { _, ids in
                 if selectedID.map({ ids.contains($0) }) != true { selectedID = shown.first?.id }
             }
@@ -113,8 +121,12 @@ struct MeetingsView: View {
                 Rectangle().fill(.primary.opacity(0.1)).frame(width: 1)
                 Group {
                     if let meeting = selected {
-                        MeetingDetailView(meeting: meeting, store: store, notesModel: meetings.notes, revision: revision, processingLine: meetings.processingLine) {
+                        MeetingDetailView(meeting: meeting, store: store, notesModel: meetings.notes, revision: revision,
+                                          processingLine: meetings.processingLine, remembersVoices: meetings.rememberVoices,
+                                          askWho: meetings.askWhoMeetingID == meeting.id, onAskedWho: { meetings.askWhoMeetingID = nil }) {
                             revision += 1
+                            // The popover and the status menu read the controller's list: their voices-to-name counts too.
+                            meetings.refreshList()
                             NotificationCenter.default.post(name: .meetingsEdited, object: nil)
                         }
                         .id(meeting.id)

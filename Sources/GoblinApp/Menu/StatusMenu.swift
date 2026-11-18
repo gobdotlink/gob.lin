@@ -1,4 +1,5 @@
 import AppKit
+import GoblinMeetings
 import SwiftUI
 
 /// One entry in the popover's ⋯ menu or the menu-bar icon's right-click menu. Both are built from
@@ -7,7 +8,13 @@ struct MenuCommand {
     var title: String
     var shortcut: KeyboardShortcut?
     var enabled = true
-    var perform: () -> Void
+    /// A second line under the title, in the native menu only.
+    var subtitle: String? = nil
+    /// An amber dot before the title: something there needs you.
+    var attention = false
+    /// Items of a submenu; `perform` isn't used when there are any.
+    var submenu: [[MenuCommand]] = []
+    var perform: () -> Void = {}
 }
 
 extension AppModel {
@@ -42,14 +49,36 @@ extension AppModel {
         guard meetings.enabled else { return [] }
         if meetings.isRecording {
             return [[MenuCommand(title: "Mark This (\(MeetingMarkHotkey.title))") { self.meetings.mark() },
-                     MenuCommand(title: "Stop Recording") { self.meetings.stop() }]]
+                     MenuCommand(title: "Stop Recording") { self.meetings.stop() }], meetingsShortcuts]
         }
         var items: [MenuCommand] = []
         if let call = meetings.unrecordedCall ?? meetings.detectedCandidate {
             items.append(MenuCommand(title: "Record \(call.app.name) Call", enabled: meetings.canStart) { self.meetings.start(call) })
         }
         items.append(MenuCommand(title: "Record Conversation", enabled: meetings.canStart) { self.meetings.startConversation() })
-        return [items]
+        return [items, meetingsShortcuts]
+    }
+
+    /// Recent Meetings, with the five newest, and Open Meetings: the Meetings page without going through Settings.
+    private var meetingsShortcuts: [MenuCommand] {
+        let recent = meetings.meetings.filter { $0.state != .recording }.prefix(5).map { meeting in
+            let toName = meeting.speakers.filter(MeetingsController.isUnnamedVoice).count
+            let when = meeting.startedAt.formatted(.relative(presentation: .named))
+            let subtitle = toName > 0 ? "\(when) · \(toName) \(toName == 1 ? "voice" : "voices") to name"
+                : meeting.state == .processing ? "\(when) · processing" : "\(when) · \(MeetingTimeline.length(meeting.duration))"
+            return MenuCommand(title: meeting.title, subtitle: subtitle, attention: toName > 0) { self.openMeeting(meeting.id) }
+        }
+        var items: [MenuCommand] = []
+        if !recent.isEmpty {
+            var submenu = [Array(recent)]
+            // The newest meeting with a finished transcript.
+            if let last = meetings.meetings.first(where: { $0.state == .ready }) {
+                submenu.append([MenuCommand(title: "Copy Transcript of \(last.title)") { Task { await self.meetings.copyTranscript(last.id) } }])
+            }
+            items.append(MenuCommand(title: "Recent Meetings", submenu: submenu))
+        }
+        items.append(MenuCommand(title: "Open Meetings") { self.openMeeting() })
+        return items
     }
 }
 
@@ -87,7 +116,16 @@ private extension NSMenu {
         autoenablesItems = false
         for (index, section) in sections.enumerated() {
             if index > 0 { addItem(.separator()) }
-            section.forEach { addItem(CommandItem($0)) }
+            for command in section {
+                if command.submenu.isEmpty {
+                    addItem(CommandItem(command))
+                } else {
+                    let item = NSMenuItem(title: command.title, action: nil, keyEquivalent: "")
+                    item.submenu = NSMenu(command.submenu)
+                    item.isEnabled = command.enabled
+                    addItem(item)
+                }
+            }
         }
     }
 }
@@ -100,6 +138,8 @@ private final class CommandItem: NSMenuItem {
         super.init(title: command.title, action: #selector(run), keyEquivalent: command.shortcut.map { String($0.key.character) } ?? "")
         target = self
         isEnabled = command.enabled
+        if let subtitle = command.subtitle { self.subtitle = subtitle }
+        if command.attention { image = Self.attentionDot }
         let modifiers = command.shortcut?.modifiers ?? []
         var mask: NSEvent.ModifierFlags = []
         if modifiers.contains(.command) { mask.insert(.command) }
@@ -110,6 +150,17 @@ private final class CommandItem: NSMenuItem {
     }
 
     required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// The status lights' amber, as a menu item's leading dot.
+    private static let attentionDot: NSImage = {
+        let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            NSColor(LightState.waiting.color).setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        image.accessibilityDescription = "Needs names"
+        return image
+    }()
 
     @objc private func run() { perform() }
 }
