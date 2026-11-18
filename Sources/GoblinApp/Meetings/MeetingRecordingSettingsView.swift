@@ -3,9 +3,9 @@ import GoblinMeetings
 import SwiftUI
 import UserNotifications
 
-/// The Labs switch for Meetings, wherever it appears (General and Meeting Recording). Turning it on the first
+/// The switch for Meetings, wherever it appears (General and Meeting Recording). Turning it on the first
 /// time runs the setup sheet; after that it flips straight away.
-struct MeetingsLabsSwitch: View {
+struct MeetingsSwitch: View {
     @ObservedObject var meetings: MeetingsController
     @Binding var showingSetup: Bool
 
@@ -13,27 +13,15 @@ struct MeetingsLabsSwitch: View {
         Toggle(isOn: Binding(get: { meetings.enabled }, set: { on in
             if on, !meetings.setupFinished { showingSetup = true } else { meetings.setEnabled(on) }
         })) {
-            HStack(spacing: 6) {
-                Text("Record meetings")
-                LabsTag()
-            }
+            Text("Record meetings")
             Text("Asks before recording a call, and transcribes it on this Mac.").rowDetail()
             Text("Turning it on asks for System Audio Recording and Notifications. Meetings then shows up in the sidebar under History. Nothing loads while it's off.")
         }
     }
 }
 
-struct LabsTag: View {
-    var body: some View {
-        Text("LABS").font(.system(size: 9, weight: .semibold)).tracking(0.7).foregroundStyle(GoblinBrand.mossText)
-            .padding(.horizontal, 5).padding(.vertical, 1.5)
-            .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-            .accessibilityLabel("Labs")
-    }
-}
-
-/// The Labs group on General: the switch, and once it's on, a way to its settings page.
-struct MeetingsLabsSection: View {
+/// The Meetings group on General: the switch, and once it's on, a way to its settings page.
+struct MeetingsGeneralSection: View {
     let model: AppModel
     @ObservedObject private var meetings: MeetingsController
     @State private var showingSetup = false
@@ -45,7 +33,7 @@ struct MeetingsLabsSection: View {
 
     var body: some View {
         Section {
-            MeetingsLabsSwitch(meetings: meetings, showingSetup: $showingSetup)
+            MeetingsSwitch(meetings: meetings, showingSetup: $showingSetup)
             if meetings.enabled {
                 StatusRow(.ready, Text("On. Meetings sits under History.")) {
                     Button("Meeting Recording…") { model.settingsSelection = .meetingRecording }
@@ -56,7 +44,7 @@ struct MeetingsLabsSection: View {
                     Button("Try Again") { Task { await meetings.forgetVoices() } }
                 }
             }
-        } header: { CapsHeader("Labs") }
+        } header: { CapsHeader("Meetings") }
         .sheet(isPresented: $showingSetup) { MeetingsSetupSheet(meetings: meetings) { showingSetup = false } }
     }
 }
@@ -74,7 +62,7 @@ struct MeetingRecordingSettingsView: View {
 
     var body: some View {
         Section {
-            MeetingsLabsSwitch(meetings: meetings, showingSetup: $showingSetup)
+            MeetingsSwitch(meetings: meetings, showingSetup: $showingSetup)
             statusRow
         }
         .sheet(isPresented: $showingSetup) { MeetingsSetupSheet(meetings: meetings) { showingSetup = false } }
@@ -234,8 +222,12 @@ struct MeetingRecordingSettingsView: View {
 /// Turning Meetings on, once: the permissions it needs, in first run's setup plate, and the consent note.
 struct MeetingsSetupSheet: View {
     @ObservedObject var meetings: MeetingsController
+    @ObservedObject private var notes: MeetingNotesModel
     @ObservedObject private var systemAudio = SystemAudioAccess.shared
     let close: () -> Void
+    /// On unless switched off here: turning Meetings on with them on is the person's yes to both.
+    @State private var writeNotes = true
+    @State private var rememberVoices = true
     /// Set by previews and captures; otherwise the controller's reading.
     private let previewNotifications: UNAuthorizationStatus?
     @State private var waitingForSystemAudio = false
@@ -243,6 +235,7 @@ struct MeetingsSetupSheet: View {
     /// Previews and captures pass the states they want to show.
     init(meetings: MeetingsController, notifications: UNAuthorizationStatus? = nil, close: @escaping () -> Void) {
         self.meetings = meetings
+        _notes = ObservedObject(wrappedValue: meetings.notes)
         self.close = close
         previewNotifications = notifications
     }
@@ -259,8 +252,8 @@ struct MeetingsSetupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Two switches.").font(.cardTitle)
-            Text("macOS asks for each one. I only record a call after you say yes.")
+            Text("Two permissions, two choices.").font(.cardTitle)
+            Text("macOS asks for each permission. I only record a call after you say yes.")
                 .font(.row).foregroundStyle(.secondary).padding(.top, 4)
             Plate(padding: 4) {
                 VStack(spacing: 0) {
@@ -297,6 +290,25 @@ struct MeetingsSetupSheet: View {
                 PeekingGoblin(sprite: .shut, scale: 2).alignmentGuide(.top) { $0[.bottom] }.padding(.trailing, 24)
             }
             .padding(.top, 150)
+            CapsHeader("After each call").padding(.leading, 14).padding(.top, 16).padding(.bottom, 4)
+            Plate(padding: 4) {
+                VStack(spacing: 0) {
+                    Toggle(isOn: $writeNotes) {
+                        Text("Write notes after each call")
+                        // Shown, not behind the ⓘ: it says where the transcript goes, which is what this yes is for.
+                        Text(notesLine).rowDetail()
+                    }
+                    .toggleStyle(PlateToggleStyle())
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    Hairline().padding(.horizontal, 10)
+                    Toggle(isOn: $rememberVoices) {
+                        Text("Remember voices")
+                        Text("Keeps voiceprints of each call's voices and your own on this Mac, to name people next time.").rowDetail()
+                    }
+                    .toggleStyle(PlateToggleStyle())
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                }
+            }
             Plate {
                 Label {
                     Text("**Tell people before I record them.** In some places everyone on a call has to agree, and that part is up to you.")
@@ -313,7 +325,11 @@ struct MeetingsSetupSheet: View {
                 Button("Cancel", action: close).keyboardShortcut(.cancelAction)
                 Button("Turn On") {
                     meetings.setupFinished = true
+                    // Leaving notes on here is the yes to sending transcripts to the notes model.
+                    notes.afterEachCall = writeNotes
+                    if writeNotes { notes.consented = true }
                     meetings.setEnabled(true)
+                    if rememberVoices { meetings.setRememberVoices(true) }
                     close()
                 }
                 .prominent().keyboardShortcut(.defaultAction)
@@ -329,12 +345,22 @@ struct MeetingsSetupSheet: View {
         .task {
             await meetings.refreshNotificationStatus()
             systemAudio.refresh()
+            if notes.tools.isEmpty, !notes.scanning { notes.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             systemAudio.refresh()
             if systemAudio.status == .granted { waitingForSystemAudio = false }
             Task { await meetings.refreshNotificationStatus() }
         }
+    }
+
+    /// What the notes switch means: the model and who gets the transcript, or that a tool still needs setting up.
+    private var notesLine: String {
+        if let settings = notes.settings {
+            return "With \(notes.describe(settings)), which sends the transcript to \(settings.tool.company)."
+        }
+        if notes.scanning { return "Looking for Codex or Claude Code on this Mac. They send the transcript to OpenAI or Anthropic." }
+        return "Needs Codex or Claude Code, which send the transcript to OpenAI or Anthropic."
     }
 
     private var allowed: some View {
