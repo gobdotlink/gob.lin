@@ -60,6 +60,8 @@ struct MeetingsView: View {
                             Button("Delete Audio Only…") { deleting = .audio(meeting) }.disabled(!meeting.hasAudio)
                             Button("Delete Meeting…", role: .destructive) { deleting = .meeting(meeting) }
                         }
+                        // A menu with its chevron gets a glass of its own; without it, it shares the copy button's, as History's buttons do.
+                        .menuIndicator(.hidden)
                         .disabled(meeting.state == .recording || meeting.state == .processing)
                         .help("Delete the audio, or the whole meeting")
                     }
