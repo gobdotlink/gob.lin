@@ -6,7 +6,7 @@ import GoblinMeetings
 import os
 import UserNotifications
 
-/// Meeting recording, without any UI: the Labs switch, the "Record this call?" offer, one recording at a time with
+/// Meeting recording, without any UI: the Meetings switch, the "Record this call?" offer, one recording at a time with
 /// its live transcript, auto-stop, and processing afterwards. Views observe `phase` and `meetings` and call the actions.
 @MainActor
 final class MeetingsController: ObservableObject {
@@ -99,7 +99,7 @@ final class MeetingsController: ObservableObject {
     }
 
     enum Phase: Equatable {
-        /// The Labs switch is off: no detector, no model, nothing loaded.
+        /// Meetings is off: no detector, no model, nothing loaded.
         case off
         case idle
         /// A call app has held the mic for 2 s.
@@ -363,7 +363,7 @@ final class MeetingsController: ObservableObject {
     var canStart: Bool { enabled && servicesEnabled && !isRecording && !starting && stopping == nil }
 
     /// While Meetings is on and a meeting records, or a call app holds the mic, dictation must leave the call's sound
-    /// alone. With Meetings off it's always false, so dictation pauses and mutes exactly as it does without Labs. It
+    /// alone. With Meetings off it's always false, so dictation pauses and mutes exactly as it does without Meetings. It
     /// reads the detector's last poll, never the audio process list itself.
     var callInProgress: Bool {
         guard enabled else { return false }
@@ -377,7 +377,7 @@ final class MeetingsController: ObservableObject {
         return detector?.candidates.first(where: \.isLikelyMeeting)
     }
 
-    // MARK: Labs switch
+    // MARK: Meetings switch
 
     func setEnabled(_ on: Bool) {
         guard on != enabled else { return }

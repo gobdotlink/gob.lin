@@ -187,9 +187,10 @@ duration never becomes a guessed speed. Typing saved compares those same words a
 40 words a minute, a typical typing speed, with the audio time. Days use the entry start in the Mac’s current
 calendar/time zone; a current streak can end today or yesterday.
 
-## Meetings (Labs)
+## Meetings
 
-Off by default; turn it on with **Record meetings** in Settings → General → Labs.
+Off by default; turn it on with **Record meetings** in Settings → General → Meetings. Its setup sheet also
+offers notes after each call (with your own Codex or Claude Code) and Remember voices, both on unless you switch them off.
 When a call app such as Zoom, Teams, Slack, FaceTime or a browser meeting picks up
 the microphone, gob.lin asks whether to record it. It records your microphone and
 the call app's audio, shows live captions in the Sidekick panel, and afterwards

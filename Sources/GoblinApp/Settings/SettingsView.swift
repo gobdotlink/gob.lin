@@ -336,7 +336,7 @@ private struct GeneralSettingsView: View {
             }
         } header: { CapsHeader("Typing it in") }
         .onAppear { refreshLoginStatus() }
-        MeetingsLabsSection(model: model)
+        MeetingsGeneralSection(model: model)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshLoginStatus() }
     }
 
