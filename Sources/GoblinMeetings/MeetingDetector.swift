@@ -163,7 +163,7 @@ public struct MeetingCandidate: Sendable, Hashable, Identifiable {
         let browsers = "Google Chrome|Chrome|Arc|Dia|Microsoft Edge|Brave|Helium|Firefox|Safari"
         // The browser name is the last part, optionally followed by a profile name ("- Google Chrome – Will").
         title = title.replacingOccurrences(of: "\\s[-–—]\\s(\(browsers))(\\s[-–—]\\s[^-–—]*)?$", with: "", options: .regularExpression)
-        let indicators = "Microphone recording|Camera recording|Camera and microphone recording|Audio playing|Audio muted|Memory usage[^–-]*|High memory usage[^–-]*"
+        let indicators = "Microphone recording|Camera recording|Camera and microphone recording|Audio playing|Audio muted|(High memory usage|Memory usage)(\\s[-–—]\\s[0-9.,]+\\s?[KMGT]B)?"
         title = title.replacingOccurrences(of: "\\s[-–—]\\s(\(indicators))", with: "", options: .regularExpression)
         return title.trimmingCharacters(in: .whitespaces)
     }
