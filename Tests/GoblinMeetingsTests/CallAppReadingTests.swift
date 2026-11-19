@@ -74,6 +74,10 @@ import Testing
     #expect(MeetingDetector.cleanTitle("Meet – abc-defg-hij – Microphone recording - Google Chrome – Sam") == "Meet – abc-defg-hij")
     #expect(MeetingDetector.cleanTitle("Meet - Design review - Audio playing - Arc") == "Meet - Design review")
     #expect(MeetingDetector.cleanTitle("Meet - Design review - Microphone recording - Helium") == "Meet - Design review")
+    // The memory warning carries its size as a part of its own: "High memory usage - 974 MB".
+    #expect(MeetingDetector.cleanTitle("Meet – Labs Standup – Camera and microphone recording - High memory usage - 974 MB - Helium – You")
+            == "Meet – Labs Standup")
+    #expect(MeetingDetector.cleanTitle("Meet – Labs Standup - High memory usage - 1.0 GB - Google Chrome") == "Meet – Labs Standup")
     #expect(MeetingDetector.cleanTitle("Zoom Meeting") == "Zoom Meeting")
     #expect(MeetingDetector.cleanTitle("Meet – Dia standup - Google Chrome") == "Meet – Dia standup")
     #expect(MeetingDetector.cleanTitle("Meet – Safari review – Microphone recording - Google Chrome – Sam") == "Meet – Safari review")
