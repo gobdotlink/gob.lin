@@ -162,8 +162,7 @@ public struct AudioClientApp: Sendable, Hashable, Identifiable {
         }
     }
 
-    /// Groups helper processes under their host app by bundle ID prefix, which covers
-    /// Chrome-style `com.google.Chrome.helper` helpers. Processes without a bundle ID stay separate.
+    /// Groups audio helpers under their host app. Processes without a bundle ID stay separate.
     @MainActor public static func current(excludingPID excluded: pid_t = ProcessInfo.processInfo.processIdentifier) -> [AudioClientApp] {
         current(running: running(), excludingPID: excluded)
     }
@@ -172,10 +171,16 @@ public struct AudioClientApp: Sendable, Hashable, Identifiable {
     public static func current(running: [Running],
                                excludingPID excluded: pid_t = ProcessInfo.processInfo.processIdentifier) -> [AudioClientApp] {
         let processes = AudioProcess.all().filter { $0.pid != excluded && $0.pid > 0 }
+        return group(processes, running: running, parentPID: parentPID)
+    }
+
+    static func group(_ processes: [AudioProcess], running: [Running], parentPID: (pid_t) -> pid_t?) -> [AudioClientApp] {
         let known = Set(running.map(\.bundleID) + processes.compactMap(\.bundleID))
+        let apps = Dictionary(running.map { ($0.pid, $0.bundleID) }, uniquingKeysWith: { first, _ in first })
         var groups: [String: [AudioProcess]] = [:]
         for process in processes {
-            groups[hostBundleID(for: process, known: known), default: []].append(process)
+            let bundleID = hostBundleID(for: process, known: known, apps: apps, parentPID: parentPID)
+            groups[bundleID, default: []].append(process)
         }
         return groups.map { key, processes in
             let host = running.first { $0.bundleID == key }
@@ -187,14 +192,28 @@ public struct AudioClientApp: Sendable, Hashable, Identifiable {
     }
 
     /// The shortest known bundle ID that prefixes this one (`com.google.Chrome` for
-    /// `com.google.Chrome.helper.Renderer`), else the ID with any `.helper…` tail removed.
-    static func hostBundleID(for process: AudioProcess, known: Set<String>) -> String {
+    /// `com.google.Chrome.helper.Renderer`); else the running app that launched it, for helpers named after another
+    /// app (Dia's are `company.thebrowser.browser.helper`); else the ID with any `.helper…` tail removed.
+    private static func hostBundleID(for process: AudioProcess, known: Set<String>, apps: [pid_t: String],
+                                     parentPID: (pid_t) -> pid_t?) -> String {
         guard let bundleID = process.bundleID else { return "pid:\(process.pid)" }
         if bundleID == "com.apple.WebKit.GPU" { return "com.apple.Safari" }
         let hosts = known.filter { ($0 == bundleID || bundleID.hasPrefix($0 + ".")) && $0.split(separator: ".").count >= 3 }
-        if let host = hosts.min(by: { $0.count < $1.count }), host != bundleID { return host }
+        let prefixed = hosts.min(by: { $0.count < $1.count }).flatMap { $0 == bundleID ? nil : $0 }
+        if let prefixed, apps.values.contains(prefixed) { return prefixed }
+        if let parent = parentPID(process.pid), let host = apps[parent], host != bundleID {
+            return host
+        }
+        if let prefixed { return prefixed }
         if let range = bundleID.range(of: ".helper") { return String(bundleID[..<range.lowerBound]) }
         return bundleID
+    }
+
+    private static func parentPID(_ pid: pid_t) -> pid_t? {
+        var info = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout.size(ofValue: info))
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { return nil }
+        return pid_t(exactly: info.pbsi_ppid)
     }
 
     private static func processName(_ pid: pid_t?) -> String? {
