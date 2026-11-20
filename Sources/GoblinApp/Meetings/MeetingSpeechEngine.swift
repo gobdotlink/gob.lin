@@ -31,6 +31,9 @@ actor MeetingSpeechEngine: PCMSpeechEngine {
 
     func prepare() async throws { _ = try await resolve() }
 
+    /// The model last announced to `onSource`, such as one an offer loaded before its recording began.
+    var announced: String? { source }
+
     /// Unloads the meeting's own copy, if it made one. Dictation's engine is never unloaded from here.
     func unload() async {
         let runtime = own, ready = ownReady
@@ -66,6 +69,9 @@ actor MeetingSpeechEngine: PCMSpeechEngine {
             announce("\(engine.identifier), shared with dictation")
             return engine
         }
+        // Whoever asked may have given up while dictation's model was looked up (an offer answered no while dictation
+        // switched models): a copy made now would outlive the unload that followed, with nothing left to unload it.
+        if own == nil { try Task.checkCancellation() }
         let runtime = own ?? SpeechRuntimeFactory.make(SpeechModelCatalog.parakeet)
         own = runtime
         let ready = ownReady ?? Task { [onDownload] in

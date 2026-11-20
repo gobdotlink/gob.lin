@@ -253,7 +253,7 @@ struct MeetingsSetupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Two permissions, two choices.").font(.cardTitle)
-            Text("macOS asks for each permission. I only record a call after you say yes.")
+            Text("macOS asks for each permission. I listen while I ask, and keep a call only if you say yes.")
                 .font(.row).foregroundStyle(.secondary).padding(.top, 4)
             Plate(padding: 4) {
                 VStack(spacing: 0) {

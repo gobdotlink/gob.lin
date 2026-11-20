@@ -11,6 +11,8 @@ struct InsertionAnchor {
     var prefix: String
     var inserted: String
     var suffix: String
+    /// A full stop typed with the dictation at the end of `prefix`; see `EditObservation.evaluate`.
+    var restored = ""
     var normalizesEmptyLineBreak = false
 }
 
@@ -99,7 +101,7 @@ final class PostPasteWatcher {
         }
         let observedValue = current.anchor.normalizesEmptyLineBreak && value == "\n" ? "" : value
         switch EditObservation.evaluate(prefix: current.anchor.prefix, inserted: current.anchor.inserted,
-                                        suffix: current.anchor.suffix, current: observedValue) {
+                                        suffix: current.anchor.suffix, current: observedValue, restored: current.anchor.restored) {
         case .region(let text, let distance):
             current.lastRegion = text
             current.lastDistance = distance

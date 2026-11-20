@@ -9,7 +9,7 @@ enum MeetingsCommand {
     static let usage = """
     Usage: goblin meetings list [--root <dir>]
            goblin meetings show <id> [--markdown] [--root <dir>]
-           goblin meetings process <folder> [--preset offline|fast32|fast128] [--verbose]
+           goblin meetings process <folder> [--preset offline|fast32|fast128] [--no-echo-cancel] [--verbose]
            goblin meetings export-fixture <id> <destination> [--root <dir>]
            goblin meetings voices <folder>
            goblin meetings learn-voices [--root <dir>]
@@ -18,20 +18,24 @@ enum MeetingsCommand {
            goblin meetings notes-tools
       notes writes notes.json into the meeting, or only to --out when given; --print-prompt sends nothing.
            goblin meetings simulate --system <audio> [--mic <audio>] [--echo <gain>] [--title <text>]
-             [--preset offline|fast32|fast128] [--root <dir>] [--verbose]
-      simulate writes to a new temporary folder unless --root is given.
+             [--preset offline|fast32|fast128] [--no-echo-cancel] [--root <dir>] [--verbose]
+      simulate writes to a new temporary folder unless --root is given. --no-echo-cancel keeps a call's live microphone
+      lines rather than transcribing its microphone again with the call's sound taken out.
     """
 
     /// Whether these arguments need a speech model: `simulate` transcribes, and so does `process` for a folder whose
-    /// live transcript left speech for after the call.
+    /// live transcript left speech for after the call, or a call whose microphone it transcribes again after taking out
+    /// the call's sound.
     static func needsSpeechModel(_ arguments: [String]) -> Bool {
         let rest = Array(arguments.dropFirst())
         switch rest.first {
         case "simulate": return true
         case "process":
+            let cancelsEcho = !rest.contains("--no-echo-cancel")
             return rest.dropFirst().contains { argument in
-                FileManager.default.fileExists(atPath: URL(fileURLWithPath: argument, isDirectory: true)
-                    .appendingPathComponent(MeetingStorage.deferredFile).path)
+                let folder = URL(fileURLWithPath: argument, isDirectory: true)
+                return FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingStorage.deferredFile).path)
+                    || (cancelsEcho && MeetingPostProcessor.cancelsEcho(in: folder))
             }
         default: return false
         }
@@ -70,6 +74,7 @@ enum MeetingsCommand {
             }
         case "process":
             let preset = try options.preset()
+            let cancelsEcho = !options.flag("--no-echo-cancel")
             let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
             guard FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingStorage.segmentsFile).path)
                     || FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingStorage.audioFile(.system)).path) else {
@@ -77,6 +82,7 @@ enum MeetingsCommand {
             }
             MeetingVocabulary.peopleNames = { PeopleStore(meetingsRoot: folder.deletingLastPathComponent()).people().map(\.name) }
             var processOptions = MeetingPostProcessOptions(preset: preset)
+            processOptions.cancelsEcho = cancelsEcho
             if let engine { processOptions.transcribeLater = Self.transcribeLater(engine) }
             let store = MeetingStore(root: folder.deletingLastPathComponent(), options: processOptions)
             let id = folder.lastPathComponent
@@ -111,6 +117,7 @@ enum MeetingsCommand {
             guard let echo = Float(echoText), echo >= 0, echo <= 1 else { throw CommandError.usage("--echo takes a gain from 0 to 1") }
             let title = try options.take("--title") ?? "Simulation"
             let preset = try options.preset()
+            let cancelsEcho = !options.flag("--no-echo-cancel")
             try options.finish(positional: 0)
             for path in [system] + (microphone.map { [$0] } ?? []) where !FileManager.default.isReadableFile(atPath: path) {
                 throw CommandError.usage("Audio file not found: \(path)")
@@ -123,8 +130,12 @@ enum MeetingsCommand {
             let directory = try await MeetingSimulator.run(system: URL(fileURLWithPath: system), microphone: microphone.map { URL(fileURLWithPath: $0) },
                                                            echoGain: echo, engine: engine, recognition: recognition, title: title, root: simulationRoot, log: log)
             let live = Date().timeIntervalSince(started)
+            // Loaded again only for what's transcribed after the call, such as the echo-cancelled microphone.
             await engine.unload()
-            let store = MeetingStore(root: directory.deletingLastPathComponent(), options: MeetingPostProcessOptions(preset: preset))
+            var processOptions = MeetingPostProcessOptions(preset: preset)
+            processOptions.cancelsEcho = cancelsEcho
+            processOptions.transcribeLater = Self.transcribeLater(engine)
+            let store = MeetingStore(root: directory.deletingLastPathComponent(), options: processOptions)
             try await store.process(directory.lastPathComponent, log: log)
             try write(Simulated(liveSeconds: live, seconds: Date().timeIntervalSince(started),
                                 meeting: try await store.detail(directory.lastPathComponent)))
@@ -215,7 +226,8 @@ enum MeetingsCommand {
     }
     private struct ToolsFound: Encodable { let tools: [FoundTool]; let pick: NotesSettings? }
 
-    /// Deferred speech, transcribed on the CLI's own engine, which the CLI unloads when it's done.
+    /// Speech transcribed after the call (deferred chunks, the echo-cancelled microphone) on the CLI's own engine, which
+    /// the CLI unloads when it's done.
     private static func transcribeLater(_ engine: any PCMSpeechEngine) -> MeetingLateTranscriber {
         { chunks, options in try await MeetingTranscriber.transcribeAll(chunks, engine: engine, options: options) }
     }

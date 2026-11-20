@@ -60,10 +60,12 @@ private final class RewriteStubProtocol: URLProtocol, @unchecked Sendable {
 
 @Suite(.serialized)
 struct RewriteSafetyTests {
-    private func client() -> RewriteClient {
+    /// A minute's deadline unless the test is about the deadline: these run beside every other test, and on a small
+    /// machine the wait for a turn alone can pass the app's four seconds.
+    private func client(deadline: TimeInterval = 60) -> RewriteClient {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [RewriteStubProtocol.self]
-        return RewriteClient(session: URLSession(configuration: config))
+        return RewriteClient(session: URLSession(configuration: config), hardTimeout: deadline)
     }
     private let settings = RewriteSettings(enabled: true, baseURL: "https://provider.invalid/v1", model: "fixture-model", cleanup: .light)
     private let success = #"{"choices":[{"message":{"content":"Cleaned text."}}]}"#
@@ -131,6 +133,34 @@ struct RewriteSafetyTests {
         }
     }
 
+    @Test func cleanupThatLowersTheFirstWordAfterAFinishedTakeStillStartsASentence() async throws {
+        // The field reads as mid-sentence, so cleanup may fit the take to it; the tone pass on this Mac decides.
+        let field = "Please make that change"
+        let context = DictationContext(application: "Notes", windowTitle: nil, fieldText: field, selection: NSRange(location: 23, length: 0))
+            .following(PreviousTake(application: 501, text: field, removedFullStop: true), in: 501)
+        var consented = settings
+        consented.usesScreenContext = true
+        for (tone, expected) in [(DictationTone.casual, "Also I want you to check the logs"), (.veryCasual, "also I want you to check the logs")] {
+            RewriteStubState.shared.prepare([StubReply(status: 200, body: #"{"choices":[{"message":{"content":"also I want you to check the logs."}}]}"#)])
+            let result = await TranscriptPostprocessor(rewriteClient: client()).process("also I want you to check the logs", dictionaryEntries: [],
+                tone: tone, rewriteSettings: consented, apiKey: "fixture-key", context: context)
+            #expect(result.finalText == expected && result.restoresFullStop && result.removedFullStop && result.polished)
+        }
+        // Cleanup is told the tone and usually leaves the full stop out itself: the take was still a finished sentence,
+        // and one that trailed off still wasn't.
+        for (said, typed, finished) in [("please make that change.", "Please make that change", true), ("and I think", "And I think", false)] {
+            RewriteStubState.shared.prepare([StubReply(status: 200, body: #"{"choices":[{"message":{"content":"\#(typed)"}}]}"#)])
+            let result = await TranscriptPostprocessor(rewriteClient: client()).process(said, dictionaryEntries: [], tone: .casual,
+                                                                                         rewriteSettings: consented, apiKey: "fixture-key")
+            #expect(result.finalText == typed && result.removedFullStop == finished && result.polished)
+        }
+        // A failed cleanup falls back to the exact transcript, with nothing typed before it.
+        RewriteStubState.shared.prepare([StubReply(status: 429, body: "{}")])
+        let failed = await TranscriptPostprocessor(rewriteClient: client()).process("also the logs", dictionaryEntries: [],
+            tone: .casual, rewriteSettings: consented, apiKey: "fixture-key", context: context)
+        #expect(failed.warning != nil && failed.finalText == "also the logs" && !failed.restoresFullStop && !failed.removedFullStop)
+    }
+
     @Test func providerErrorsAreExplicitRawFallbackAndUnrelated400DoesNotRetry() async throws {
         RewriteStubState.shared.prepare([StubReply(status: 429, body: "{}")])
         let result = await client().rewrite("Raw dictation", settings: settings, apiKey: "fixture-key")
@@ -157,7 +187,7 @@ struct RewriteSafetyTests {
         let reject = #"{"error":{"message":"reasoning_effort none is unsupported"}}"#
         RewriteStubState.shared.prepare([StubReply(status: 400, body: reject, delay: 2.2), StubReply(status: 200, body: success, delay: 2.2)])
         let start = ContinuousClock.now
-        let result = await client().rewrite("Raw dictation", settings: settings, apiKey: "fixture-key")
+        let result = await client(deadline: RewriteClient.hardTimeout).rewrite("Raw dictation", settings: settings, apiKey: "fixture-key")
         let elapsed = start.duration(to: .now)
         #expect(result.failure == .timeout && result.outputText == "Raw dictation")
         #expect(elapsed < .seconds(5.2))

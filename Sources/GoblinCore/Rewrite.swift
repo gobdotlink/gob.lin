@@ -303,16 +303,20 @@ public enum RewritePrompt {
 public actor RewriteClient {
     public static let hardTimeout: TimeInterval = 4
     private let session: URLSession
+    /// The one deadline all of a cleanup's attempts share. `hardTimeout` everywhere but in tests that aren't about the
+    /// deadline: there, time lost to a busy machine would read as a slow provider.
+    private let timeout: TimeInterval
     private struct EffortScope: Hashable { let endpoint: URL; let model: String }
     private var rejectedEfforts: [EffortScope: Set<String>] = [:]
     private var lastPrewarm: (endpoint: URL, at: ContinuousClock.Instant)?
 
-    public init(session: URLSession? = nil) {
+    public init(session: URLSession? = nil, hardTimeout: TimeInterval = RewriteClient.hardTimeout) {
+        timeout = hardTimeout
         if let session { self.session = session }
         else {
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = Self.hardTimeout
-            configuration.timeoutIntervalForResource = Self.hardTimeout
+            configuration.timeoutIntervalForRequest = hardTimeout
+            configuration.timeoutIntervalForResource = hardTimeout
             configuration.httpCookieStorage = nil
             configuration.urlCache = nil
             self.session = URLSession(configuration: configuration, delegate: NoRewriteRedirects(), delegateQueue: nil)
@@ -361,7 +365,7 @@ public actor RewriteClient {
             let scope = EffortScope(endpoint: endpoint, model: settings.model)
             // Only Automatic can relax a rejected setting. Explicit Off/effort choices are never changed.
             let canRetryEffort = settings.reasoning == .automatic && ![.openRouter, .vercel, .zai].contains(settings.provider)
-            let deadline = ContinuousClock.now.advanced(by: .seconds(Self.hardTimeout))
+            let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
             var effort = canRetryEffort ? nextEffort(for: scope) : "none"
             let anthropic = settings.provider == .anthropic
             while true {

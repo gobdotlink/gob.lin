@@ -571,6 +571,29 @@ struct AudioCaptureCheck {
         try evidence.check(audio, requireNonzero: true); precondition(bluetooth ? audio.preRollSampleCount == 0 : audio.preRollSampleCount > 0)
         evidence.report(label: bluetooth ? "verified Bluetooth device, not kept warm" : "verified device warm", audio: audio)
         try await service.setWarmMicrophone(enabled: false, ranking: MicrophoneRanking())
+        // Key-down opens the mic silently so the take starts with pre-roll; a key-down without a take gives it back,
+        // and one whose take never comes closes on its own. Bluetooth waits for the take, as in warm mode.
+        try await service.prepareForTake(ranking: only(verifiedUID))
+        let preparedInput = await service.inputResolution
+        precondition(bluetooth ? preparedInput == nil : preparedInput != nil, "Key-down opens the microphone, except Bluetooth")
+        try await Task.sleep(for: .milliseconds(300))
+        let preparedEvidence = CaptureEvidence()
+        let preparedID = try await service.start(ranking: only(verifiedUID), directory: directory, onEvent: preparedEvidence.record)
+        try await Task.sleep(for: .seconds(bluetooth ? 3 : 1))
+        let preparedAudio = try await service.stop(sessionID: preparedID)
+        try preparedEvidence.check(preparedAudio, requireNonzero: true)
+        precondition(bluetooth ? preparedAudio.preRollSampleCount == 0 : preparedAudio.preRollSampleCount > 0, "A take after key-down keeps its pre-roll")
+        preparedEvidence.report(label: "verified device opened at key-down", audio: preparedAudio)
+        let afterTake = await service.inputResolution
+        precondition(afterTake == nil, "Without warm mode the take closes the microphone")
+        try await service.prepareForTake(ranking: only(verifiedUID))
+        await service.endPreparation()
+        let abandoned = await service.inputResolution
+        precondition(abandoned == nil, "A key-down without a take closes the microphone")
+        try await service.prepareForTake(ranking: only(verifiedUID))
+        try await Task.sleep(for: .milliseconds(2_300))
+        let expired = await service.inputResolution
+        precondition(expired == nil, "A key-down whose take never starts closes the microphone on its own")
         let cancelledID = try await service.start(ranking: only(verifiedUID), directory: directory, onEvent: { _ in })
         try await Task.sleep(for: .milliseconds(250))
         try await service.cancel(sessionID: cancelledID)

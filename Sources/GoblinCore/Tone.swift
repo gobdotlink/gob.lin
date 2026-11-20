@@ -30,7 +30,14 @@ public enum DictationTone: String, CaseIterable, Codable, Sendable, Identifiable
 public enum ToneFormatter {
     /// `continuesSentence`: the text lands mid-sentence, so an ordinary first word is lowered whatever the tone.
     public static func format(_ input: String, tone: DictationTone, protectedTerms: [String] = [], continuesSentence: Bool = false) -> String {
-        guard !input.isEmpty else { return input }
+        formatted(input, tone: tone, protectedTerms: protectedTerms, continuesSentence: continuesSentence).text
+    }
+
+    /// `format`'s text, and whether it removed the text's final full stop. That full stop ended a finished sentence, so
+    /// the next take typed straight after it starts a new one; see `DictationContext.followsFinishedTake`.
+    public static func formatted(_ input: String, tone: DictationTone, protectedTerms: [String] = [],
+                                 continuesSentence: Bool = false) -> (text: String, removedFullStop: Bool) {
+        guard !input.isEmpty else { return (input, false) }
         var text = input
         var protected = protectedRanges(in: text, terms: protectedTerms)
         let regex = try! NSRegularExpression(pattern: #"(?:^\s*|[.!?]\s+)["'“‘(\[{]?([\p{L}\p{M}][\p{L}\p{M}\p{N}'’]*)"#)
@@ -62,7 +69,7 @@ public enum ToneFormatter {
                 if !protected.contains(where: { NSIntersectionRange($0, range).length > 0 }) { text.replaceSubrange(index...index, with: ",") }
             }
         }
-        guard let last = text.lastIndex(where: { !$0.isWhitespace }) else { return text }
+        guard let last = text.lastIndex(where: { !$0.isWhitespace }) else { return (text, false) }
         var ending = last
         while ending > text.startIndex, #")"'”’]}"#.contains(text[ending]) { ending = text.index(before: ending) }
         let endingRange = NSRange(ending...ending, in: text)
@@ -74,9 +81,25 @@ public enum ToneFormatter {
             }
         } else if text[ending] == ".", !protectedEnd {
             let before = ending > text.startIndex ? text[text.index(before: ending)] : nil
-            if before != "." { text.remove(at: ending) }
+            if before != "." { text.remove(at: ending); return (text, true) }
         }
-        return text
+        return (text, false)
+    }
+
+    /// The last character of `text` that isn't a space or a closing quote or bracket.
+    private static func lastSpoken(_ text: String) -> (character: Character, before: Character?)? {
+        guard var ending = text.lastIndex(where: { !$0.isWhitespace }) else { return nil }
+        while ending > text.startIndex, #")"'”’]}"#.contains(text[ending]) { ending = text.index(before: ending) }
+        return (text[ending], ending > text.startIndex ? text[text.index(before: ending)] : nil)
+    }
+
+    /// Whether `said` ended a sentence with a full stop that `typed` doesn't have: a casual tone's finished take, whether
+    /// `formatted` removed the full stop or cleanup, told to write that tone, had left it out already. The recognizer
+    /// ends a finished sentence with one and a take that trails off without, so what was said decides, not who typed it.
+    public static func leftOutFullStop(said: String, typed: String, tone: DictationTone) -> Bool {
+        guard tone != .formal, let spoken = lastSpoken(said), spoken.character == ".", spoken.before != ".",
+              let shown = lastSpoken(typed) else { return false }
+        return shown.character.isLetter || shown.character.isNumber
     }
 
     private static func capitalizingFirst(_ text: String) -> String {

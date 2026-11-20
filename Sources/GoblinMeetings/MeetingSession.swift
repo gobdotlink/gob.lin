@@ -77,8 +77,8 @@ public final class MeetingSession: @unchecked Sendable {
     private var info: MeetingSessionInfo
     private var microphone: TrackRecorder?
     private var system: TrackRecorder?
-    private var microphoneCapture: MicrophoneCapture?
-    private var tap: SystemAudioTap?
+    private var microphoneCapture: (any MeetingAudioSource)?
+    private var tap: (any MeetingAudioSource)?
     private var transcriber: MeetingTranscriber?
     private let segmentsFile: FileHandle
     private let eventsFile: FileHandle
@@ -97,11 +97,12 @@ public final class MeetingSession: @unchecked Sendable {
     /// `onProblem` hears capture dropping out or coming back, and the live transcript falling behind.
     public init(title: String, source: String, target: SystemAudioTarget, recordMicrophone: Bool = true,
                 engine: any PCMSpeechEngine, recognition: RecognitionOptions = .init(language: "en"),
+                root: URL = MeetingStorage.root,
                 onSegment: @escaping @Sendable (TranscriptSegment) -> Void,
                 onEvent: @escaping @Sendable (String) -> Void,
                 onProblem: @escaping @Sendable (MeetingSessionProblem) -> Void = { _ in }) throws {
         let now = Date()
-        directory = try MeetingStorage.newDirectory(title: title, date: now)
+        directory = try MeetingStorage.newDirectory(title: title, date: now, in: root)
         self.target = target
         self.recordMicrophone = recordMicrophone
         self.engine = engine
@@ -155,9 +156,15 @@ public final class MeetingSession: @unchecked Sendable {
         }
     }
 
-    public func start() async throws {
-        let hostStart = HostClock.now
-        let started = Date()
+    /// Starts capture and the live transcript. With `offer`, the call heard since it was offered comes first: the
+    /// timeline starts at its first buffered sample (`startedAt` moves back with it), the buffered audio goes through
+    /// the same recorders as live audio, and the offer's running captures carry on into them with nothing lost or
+    /// repeated. A track the offer couldn't capture is started here.
+    public func start(handingOver offer: OfferBuffer? = nil) async throws {
+        let heard = await offer?.freeze()
+        let hostNow = HostClock.now, now = Date()
+        let hostStart = heard?.firstHost ?? hostNow
+        let started = now.addingTimeInterval(hostStart - hostNow)
         // Before the transcriber exists: a model dictation already loaded is ready at once, and that line comes after.
         log("preparing speech model")
         let transcriber = MeetingTranscriber(engine: engine, options: recognition, maximumBacklog: Self.maximumBacklog,
@@ -181,8 +188,8 @@ public final class MeetingSession: @unchecked Sendable {
         let system = inPerson ? nil : try TrackRecorder(track: .system, directory: directory, sessionStart: hostStart,
                                                         onChunk: { transcriber.submit($0) }, onEvent: event,
                                                         onWriteFailure: writeFailed)
-        let microphoneCapture = MicrophoneCapture()
-        let tap = inPerson ? nil : SystemAudioTap(target: target)
+        let microphoneCapture: any MeetingAudioSource = heard?.microphone ?? MicrophoneCapture()
+        let tap: (any MeetingAudioSource)? = inPerson ? nil : heard?.system ?? SystemAudioTap(target: target)
         lock.withLock {
             info.startedAt = started
             self.transcriber = transcriber
@@ -191,18 +198,26 @@ public final class MeetingSession: @unchecked Sendable {
             self.microphoneCapture = microphoneCapture
             self.tap = tap
         }
-        if let tap, let system {
+        if let tap, let system, heard?.system == nil {
             try tap.start(onEvent: event, onProblem: problem) { system.append($0) }
-            lock.withLock { info.systemFormat = tap.formatDescription }
         }
-        if inPerson {
-            // Without the mic there is nothing to record.
-            try microphoneCapture.start(onEvent: event, onProblem: problem) { microphone.append($0) }
-        } else if recordMicrophone { do {
-            try microphoneCapture.start(onEvent: event, onProblem: problem) { microphone.append($0) }
-        } catch {
-            log("microphone unavailable, recording system audio only: \(error.localizedDescription)")
-        } }
+        if let tap = tap as? SystemAudioTap { lock.withLock { info.systemFormat = tap.formatDescription } }
+        // A mic heard since the offer is running already.
+        if heard?.microphone == nil {
+            if inPerson {
+                // Without the mic there is nothing to record.
+                try microphoneCapture.start(onEvent: event, onProblem: problem) { microphone.append($0) }
+            } else if recordMicrophone { do {
+                try microphoneCapture.start(onEvent: event, onProblem: problem) { microphone.append($0) }
+            } catch {
+                log("microphone unavailable, recording system audio only: \(error.localizedDescription)")
+            } }
+        }
+        if let offer, heard != nil {
+            let handed = offer.handOver(microphone: { microphone.append($0) }, system: { system?.append($0) },
+                                        onEvent: { [weak self] date, message in self?.log(message, at: date) }, onProblem: problem)
+            if handed { log(String(format: "included %.1f s heard before acceptance", hostNow - hostStart)) }
+        }
         // Capture is already running; chunks wait in the transcriber's queue while it loads the model.
         saveInfo()
     }
@@ -311,8 +326,8 @@ public final class MeetingSession: @unchecked Sendable {
         onSegment(segment)
     }
 
-    private func log(_ message: String) {
-        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+    private func log(_ message: String, at date: Date = Date()) {
+        let line = "\(ISO8601DateFormatter().string(from: date)) \(message)\n"
         lock.withLock { if !closed { append(Data(line.utf8), to: eventsFile) } }
         onEvent(message)
     }

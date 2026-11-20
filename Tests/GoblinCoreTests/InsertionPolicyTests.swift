@@ -62,3 +62,25 @@ private func pasted(_ before: String, _ observed: String, _ inserted: String) ->
     #expect(!restores(before: nil, observed: "Quote hi "))
     #expect(!restores(observed: nil))
 }
+
+@Test func aRestoredFullStopSitsBeforeTheTakeAndOutsideItsSpan() {
+    #expect(InsertionPolicy.restoredFullStop(before: "Also check the logs", trailingSpace: true) == ". ")
+    #expect(InsertionPolicy.restoredFullStop(before: " Also check the logs", trailingSpace: true) == ".")
+    // Without the trailing space takes already run together; only the full stop is added.
+    #expect(InsertionPolicy.restoredFullStop(before: "Also check the logs", trailingSpace: false) == ".")
+
+    let before = "Please make that change", take = InsertionPolicy.text("Also check the logs", trailingSpace: true)
+    let lead = InsertionPolicy.restoredFullStop(before: "Also check the logs", trailingSpace: true)
+    let location = (before as NSString).length
+    let expected = InsertionPolicy.expectedValue(before: before, selectedRange: NSRange(location: location, length: 0), inserted: lead + take)
+    #expect(expected == "Please make that change. Also check the logs ")
+    let span = InsertionPolicy.span(of: lead + take, at: location, lead: (lead as NSString).length, in: expected!)
+    #expect(span?.prefix == "Please make that change. " && span?.dictated == "Also check the logs " && span?.suffix == "")
+    // A later edit is measured against what was dictated; the full stop is part of the text around it.
+    #expect(EditObservation.evaluate(prefix: span!.prefix, inserted: span!.dictated, suffix: span!.suffix,
+                                     current: "Please make that change. Also check the error logs ")
+        == .region(text: "Also check the error logs ", distance: 6))
+    #expect(InsertionPolicy.span(of: take, at: location, in: before + take)?.dictated == take)
+    #expect(InsertionPolicy.span(of: take, at: location + 1, in: before + take) == nil)
+    #expect(InsertionPolicy.span(of: ". ", at: 0, lead: 3, in: ". ") == nil)
+}

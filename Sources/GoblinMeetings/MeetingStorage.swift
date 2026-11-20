@@ -42,6 +42,10 @@ public enum MeetingStorage {
     // File names inside a meeting folder.
     public static let sessionFile = "session.json"
     public static let segmentsFile = "segments.jsonl"
+    /// A call's microphone lines transcribed after the call from its audio with the call's sound taken out, which stand
+    /// in for the live microphone lines of segments.jsonl; one line per segment, like it. postprocess.json says
+    /// whether the transcript used them.
+    public static let echoCancelledSegmentsFile = "microphone-echo-cancelled.jsonl"
     public static let eventsFile = "events.log"
     /// The call window's raw text, written only with `debugLogging` on.
     public static let accessibilityFile = "accessibility.jsonl"

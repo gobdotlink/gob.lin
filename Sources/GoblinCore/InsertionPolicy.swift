@@ -6,6 +6,22 @@ public enum InsertionPolicy {
         return transcript + " "
     }
 
+    /// What goes before a take that restores the previous take's full stop (`TranscriptProcessingResult.restoresFullStop`):
+    /// the full stop, then the space the trailing space would have put there, unless the take brings its own.
+    public static func restoredFullStop(before transcript: String, trailingSpace: Bool) -> String {
+        trailingSpace && transcript.first?.isWhitespace != true ? ". " : "."
+    }
+
+    /// `expected` split around the take typed at `location` (UTF-16): `inserted` began with a `lead` units long restored
+    /// full stop, which counts with the text before, so a later edit is measured against what was dictated.
+    public static func span(of inserted: String, at location: Int, lead: Int = 0,
+                            in expected: String) -> (prefix: String, dictated: String, suffix: String)? {
+        let value = expected as NSString, text = inserted as NSString
+        let start = location + lead, end = location + text.length
+        guard location >= 0, lead >= 0, start <= end, end <= value.length else { return nil }
+        return (value.substring(to: start), text.substring(from: lead), value.substring(from: end))
+    }
+
     public static func expectedValue(before: String, selectedRange: NSRange, inserted: String,
                                      replacesEmptyLineBreak: Bool = false) -> String? {
         // Some contenteditable editors expose an empty paragraph's placeholder as a newline.

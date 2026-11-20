@@ -25,6 +25,10 @@ public final class AudioCaptureService {
     public private(set) var warmMicrophoneEnabled = false
     public private(set) var inputResolution: AudioInputResolution?
     private var warmRanking = MicrophoneRanking()
+    /// Set while an input opened at key-down waits for its take; see `prepareForTake`.
+    private var prepared: UUID?
+    /// How long an input opened at key-down waits for its take before it closes on its own.
+    private static let preparedLimit: Duration = .seconds(2)
     /// What the running take resolves again if its microphone drops out.
     private var sessionRanking = MicrophoneRanking()
     /// Mics that failed to open during the current outage, left out of the next try.
@@ -78,7 +82,7 @@ public final class AudioCaptureService {
         do {
             try processor!.begin(sessionID: id, directory: try directory ?? Self.defaultDirectory(), resolution: inputResolution!,
                                  feedback: feedback, feedbackSessionID: feedbackSessionID, handler: onEvent)
-            activeSessionID = id; eventHandler = onEvent; cancellationRequested = false; terminalCommitted = false; cancellationError = nil; silenceCause = nil
+            activeSessionID = id; prepared = nil; eventHandler = onEvent; cancellationRequested = false; terminalCommitted = false; cancellationError = nil; silenceCause = nil
             notifyPreviews(.silence(nil))
             try startInput()
             return id
@@ -157,7 +161,36 @@ public final class AudioCaptureService {
         if enabled {
             do { try openWarm() }
             catch { closeInput(); throw error }
-        } else if previews.isEmpty { closeInput() }
+        } else if previews.isEmpty && prepared == nil { closeInput() }
+    }
+
+    /// Key-down, before tap or hold is known: opens the ranked microphone silently, so the take that begins at the
+    /// threshold starts with the pre-roll warm mode keeps instead of waiting for a cold open. An input already open
+    /// (warm, or a settings preview) is left to its owner, and a Bluetooth microphone waits for the take, as in warm mode.
+    /// Nothing is recorded: the pre-roll stays in memory, and the input closes if no take starts within the limit.
+    public func prepareForTake(ranking: MicrophoneRanking) throws {
+        guard activeSessionID == nil, input == nil, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
+        let resolved = try AudioInputDevices.resolve(ranking)
+        guard resolved.device.kind != .bluetooth else { return }
+        do { try prepareInput(resolved); try startInput() }
+        catch { closeInput(); throw error }
+        let token = UUID()
+        prepared = token
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.preparedLimit)
+            guard let self, self.prepared == token else { return }
+            self.endPreparation()
+        }
+    }
+
+    /// The key-down that opened the input ended without a take. Warm mode and previews keep what they need.
+    public func endPreparation() {
+        guard prepared != nil, activeSessionID == nil else { return }
+        prepared = nil
+        guard previews.isEmpty else { return }
+        if warmMicrophoneEnabled {
+            do { try openWarm() } catch { closeInput() }
+        } else { closeInput() }
     }
 
     @discardableResult
@@ -174,7 +207,7 @@ public final class AudioCaptureService {
 
     public func endPreview(_ id: UUID) {
         previews.removeValue(forKey: id)
-        if previews.isEmpty && activeSessionID == nil {
+        if previews.isEmpty && activeSessionID == nil && prepared == nil {
             if warmMicrophoneEnabled {
                 do { try openWarm() } catch { closeInput() }
             } else { closeInput() }
@@ -340,7 +373,7 @@ public final class AudioCaptureService {
     }
 
     private func closeInput(keepProcessor: Bool = false) {
-        generation = UUID(); silenceCause = nil
+        generation = UUID(); silenceCause = nil; prepared = nil
         notifyPreviews(.silence(nil))
         watchdog?.cancel(); watchdog = nil
         if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver); self.sleepObserver = nil }

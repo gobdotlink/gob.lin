@@ -466,10 +466,12 @@ public actor MeetingStore {
         try? started.write(directory)
         var options = self.options
         if let preset, preset != options.preset {
-            let transcribeLater = options.transcribeLater, voices = options.voices
+            let previous = options
             options = MeetingPostProcessOptions(preset: preset, dictationSpans: options.dictationSpans)
-            options.transcribeLater = transcribeLater
-            options.voices = voices
+            options.transcribeLater = previous.transcribeLater
+            options.voices = previous.voices
+            options.echoCanceller = previous.echoCanceller
+            options.cancelsEcho = previous.cancelsEcho
         }
         // What processing did goes in the meeting's events.log too, after the recording's own lines, so one file
         // says how the whole meeting went.
@@ -559,7 +561,7 @@ public actor MeetingStore {
     // MARK: Fixtures
 
     /// Copies what a benchmark needs to replay post-processing into `destination` (created; must be
-    /// new or empty): both WAVs and timing files, segments, session, transcript and its labels,
+    /// new or empty): both WAVs and timing files, live and echo-cancelled segments, session, transcript and its labels,
     /// speakers.json, participants, mute changes and dictation spans. The raw accessibility log is not
     /// copied, only the participant names parsed from it. Returns the files written.
     @discardableResult
@@ -578,9 +580,9 @@ public actor MeetingStore {
         }
         try manager.createDirectory(at: destination, withIntermediateDirectories: true)
         var files = MeetingTrack.allCases.flatMap { [MeetingStorage.audioFile($0), MeetingStorage.timingFile($0)] }
-        files += [MeetingStorage.segmentsFile, MeetingStorage.sessionFile, MeetingStorage.transcriptFile, MeetingStorage.attributedFile,
-                  MeetingStorage.speakersFile, MeetingStorage.muteFile, MeetingStorage.diarizationFile, MeetingStorage.reportFile,
-                  MeetingStorage.deferredFile]
+        files += [MeetingStorage.segmentsFile, MeetingStorage.echoCancelledSegmentsFile, MeetingStorage.sessionFile,
+                  MeetingStorage.transcriptFile, MeetingStorage.attributedFile, MeetingStorage.speakersFile, MeetingStorage.muteFile,
+                  MeetingStorage.diarizationFile, MeetingStorage.reportFile, MeetingStorage.deferredFile]
         var written: [String] = []
         for file in files where manager.fileExists(atPath: directory.appendingPathComponent(file).path) {
             try manager.copyItem(at: directory.appendingPathComponent(file), to: destination.appendingPathComponent(file))

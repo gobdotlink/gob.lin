@@ -5,12 +5,12 @@ import Foundation
 /// sharing their screen, and who's in the call. Keeps mute.jsonl and participants.json; the window's raw text
 /// goes to accessibility.jsonl only with `MeetingStorage.debugLogging` on, for test captures.
 /// The call app's `AccessibilityScope` says which windows and elements are walked.
+/// Made without a folder (while a call is offered) it keeps mute changes in memory and writes nothing, not even the
+/// raw log, until `attach` gives it the recording's folder.
 public final class AccessibilityProbe: @unchecked Sendable {
-    private let pid: pid_t
+    public let pid: pid_t
     private let scope: AccessibilityScope
     private let readsCallState: Bool
-    /// accessibility.jsonl, or nil when the raw log is off.
-    private let url: URL?
     private let queue = DispatchQueue(label: "gob.lin.meetings.ax-probe", qos: .utility)
     private let lock = NSLock()
     private var running = false
@@ -21,11 +21,20 @@ public final class AccessibilityProbe: @unchecked Sendable {
     nonisolated(unsafe) private static let attributes = [kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
                                      kAXValueAttribute, kAXIdentifierAttribute, kAXChildrenAttribute] as [CFString]
 
-    private let muteURL: URL
-    private let participantsURL: URL
+    /// The recording's files. Nil until `attach`: nothing is written.
+    private struct Files {
+        let mute: URL
+        let participants: URL
+        /// accessibility.jsonl, or nil when the raw log is off.
+        let raw: URL?
+    }
+
+    private var files: Files?
+    /// Mute changes made before `attach`, as mute.jsonl would have them.
+    private var unwritten: [(t: Double, muted: Bool, unknown: Bool)] = []
     private var collector = MeetingParticipants.Collector()
     private var savedParticipants = MeetingParticipants()
-    private let sessionStart: Date
+    private var sessionStart: Date
     private var muted: Bool?
     /// When a pass first saw no mute signal while the state was known; it goes unknown `staleAfter` later.
     private var signalLostAt: Date?
@@ -38,7 +47,7 @@ public final class AccessibilityProbe: @unchecked Sendable {
                   sessionStart: sessionStart, rawLog: rawLog)
     }
 
-    public convenience init(pid: pid_t, app: CallApp, directory: URL, sessionStart: Date,
+    public convenience init(pid: pid_t, app: CallApp, directory: URL?, sessionStart: Date,
                             rawLog: Bool = MeetingStorage.debugLogging) {
         self.init(pid: pid, scope: app.scope, readsCallState: app.readsCallState, directory: directory,
                   sessionStart: sessionStart, rawLog: rawLog)
@@ -46,17 +55,39 @@ public final class AccessibilityProbe: @unchecked Sendable {
 
     /// `readsCallState` false leaves mute unknown and sharing off whatever the windows say: the app's phrases aren't
     /// known, and a chat line that happened to read "Unmute my audio" mustn't take your mic lines out.
-    public init(pid: pid_t, scope: AccessibilityScope, readsCallState: Bool, directory: URL, sessionStart: Date,
+    /// A nil `directory` keeps everything in memory until `attach`.
+    public init(pid: pid_t, scope: AccessibilityScope, readsCallState: Bool, directory: URL?, sessionStart: Date,
                 rawLog: Bool = MeetingStorage.debugLogging) {
         self.pid = pid
         self.scope = scope
         self.readsCallState = readsCallState
         self.sessionStart = sessionStart
-        url = rawLog ? directory.appendingPathComponent(MeetingStorage.accessibilityFile) : nil
-        muteURL = directory.appendingPathComponent(MeetingStorage.muteFile)
-        participantsURL = directory.appendingPathComponent(MeetingStorage.participantsFile)
-        if let url { FileManager.default.createFile(atPath: url.path, contents: nil) }
-        FileManager.default.createFile(atPath: muteURL.path, contents: nil)
+        if let directory { attach(directory: directory, sessionStart: sessionStart, rawLog: rawLog) }
+    }
+
+    /// Starts writing into the recording's folder, with times from `sessionStart`. The mute changes read so far move
+    /// onto that clock and go into mute.jsonl first; a change from before it becomes the state at 0. Participants seen
+    /// so far are saved on the next pass. Only the first call does anything.
+    public func attach(directory: URL, sessionStart start: Date, rawLog: Bool) {
+        let raw = rawLog ? directory.appendingPathComponent(MeetingStorage.accessibilityFile) : nil
+        let files = Files(mute: directory.appendingPathComponent(MeetingStorage.muteFile),
+                          participants: directory.appendingPathComponent(MeetingStorage.participantsFile), raw: raw)
+        lock.withLock {
+            guard self.files == nil else { return }
+            let shift = sessionStart.timeIntervalSince(start)
+            let moved = unwritten.map { (t: $0.t + shift, muted: $0.muted, unknown: $0.unknown) }
+            let before = moved.last { $0.t < 0 }.map { (t: 0.0, muted: $0.muted, unknown: $0.unknown) }
+            let lines = (before.map { [$0] } ?? []) + moved.filter { $0.t >= 0 }
+            var rebuilt = MuteTimeline()
+            for line in lines { rebuilt.record(line.muted, at: line.t) }
+            timeline = rebuilt
+            unwritten = []
+            sessionStart = start
+            if let raw { FileManager.default.createFile(atPath: raw.path, contents: nil) }
+            let text = lines.map { Self.muteLine(muted: $0.muted, unknown: $0.unknown, at: $0.t) }.joined()
+            FileManager.default.createFile(atPath: files.mute.path, contents: Data(text.utf8))
+            self.files = files
+        }
     }
 
     /// How long a mute state lasts once the call app stops showing any sign of it (a browser switched to another
@@ -243,6 +274,8 @@ public final class AccessibilityProbe: @unchecked Sendable {
     }
 
     private func loop(_ app: AXUIElement) {
+        // The raw log this pass writes to: none before `attach`, and its first pass after writes the whole window.
+        var logging: URL?
         while lock.withLock({ running }) {
             let started = Date()
             var lines: [String] = []
@@ -272,7 +305,9 @@ public final class AccessibilityProbe: @unchecked Sendable {
             let added = lines.filter { !previous.contains($0) }
             collector.add(added)
             saveParticipantsIfChanged()
-            if url != nil {
+            let raw = lock.withLock { files?.raw }
+            if raw != logging { logging = raw; lastFull = .distantPast }
+            if raw != nil {
                 let now = Date()
                 if now.timeIntervalSince(lastFull) >= 60 {
                     lastFull = now
@@ -328,27 +363,34 @@ public final class AccessibilityProbe: @unchecked Sendable {
 
     /// Applies one pass's reading. A state seen is kept; once no pass has shown one for `staleAfter`, it's unknown,
     /// and a mute that was on ends there, so a tab switched away from the call doesn't leave the mic out for good.
-    private func updateMute(_ state: Bool?, at date: Date) {
-        let t = date.timeIntervalSince(sessionStart)
-        let change = lock.withLock { () -> (muted: Bool, unknown: Bool)? in
-            if let state {
-                signalLostAt = nil
-                guard state != muted else { return nil }
-                muted = state
-                timeline.record(state, at: t)
-                return (state, false)
-            }
-            guard muted != nil else { return nil }
-            guard let lost = signalLostAt else { signalLostAt = date; return nil }
-            guard date.timeIntervalSince(lost) >= Self.staleAfter else { return nil }
-            let wasMuted = muted == true
-            muted = nil
-            signalLostAt = nil
-            guard wasMuted else { return nil }
-            timeline.record(false, at: t)
-            return (false, true)
+    func updateMute(_ state: Bool?, at date: Date) {
+        lock.withLock {
+            let t = date.timeIntervalSince(sessionStart)
+            guard let change = muteChange(state, at: date, t: t) else { return }
+            // Under the lock, so `attach` can't write mute.jsonl in between and put a change out of order.
+            if let files { Self.appendMute(change.muted, unknown: change.unknown, at: t, to: files.mute) }
+            else { unwritten.append((t, change.muted, change.unknown)) }
         }
-        if let change { appendMute(change.muted, unknown: change.unknown, at: t) }
+    }
+
+    /// The change one reading makes, if any. Call with the lock held.
+    private func muteChange(_ state: Bool?, at date: Date, t: Double) -> (muted: Bool, unknown: Bool)? {
+        if let state {
+            signalLostAt = nil
+            guard state != muted else { return nil }
+            muted = state
+            timeline.record(state, at: t)
+            return (state, false)
+        }
+        guard muted != nil else { return nil }
+        guard let lost = signalLostAt else { signalLostAt = date; return nil }
+        guard date.timeIntervalSince(lost) >= Self.staleAfter else { return nil }
+        let wasMuted = muted == true
+        muted = nil
+        signalLostAt = nil
+        guard wasMuted else { return nil }
+        timeline.record(false, at: t)
+        return (false, true)
     }
 
     /// One mute.jsonl line; an expired mute is written as unmuted, marked unknown.
@@ -356,8 +398,8 @@ public final class AccessibilityProbe: @unchecked Sendable {
         "{\"t\":\(String(format: "%.2f", t)),\"muted\":\(muted)\(unknown ? ",\"unknown\":true" : "")}\n"
     }
 
-    private func appendMute(_ muted: Bool, unknown: Bool, at t: Double) {
-        guard let handle = try? FileHandle(forWritingTo: muteURL) else { return }
+    private static func appendMute(_ muted: Bool, unknown: Bool, at t: Double, to url: URL) {
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
         // A full disk throws here rather than ending the app; the recording stops on its own audio's failed write.
         _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: Data(Self.muteLine(muted: muted, unknown: unknown, at: t).utf8))
@@ -367,15 +409,16 @@ public final class AccessibilityProbe: @unchecked Sendable {
     /// participants.json follows the call as people join; written whole each time, so it's never half a file.
     private func saveParticipantsIfChanged() {
         let participants = collector.participants
-        guard participants != savedParticipants, let data = try? JSONEncoder.pretty.encode(participants) else { return }
+        guard let url = lock.withLock({ files?.participants }), participants != savedParticipants,
+              let data = try? JSONEncoder.pretty.encode(participants) else { return }
         do {
-            try data.write(to: participantsURL, options: .atomic)
+            try data.write(to: url, options: .atomic)
             savedParticipants = participants
         } catch {}
     }
 
     private func append(_ object: [String: Any]) {
-        guard let url, let data = try? JSONSerialization.data(withJSONObject: object, options: []),
+        guard let url = lock.withLock({ files?.raw }), let data = try? JSONSerialization.data(withJSONObject: object, options: []),
               let handle = try? FileHandle(forWritingTo: url) else { return }
         _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: data + Data([0x0A]))

@@ -42,3 +42,14 @@ func theMeetingSpeakerModelIsPinnedLikeTheSpeechModels(preset: String) throws {
     // v1 gave unrelated voiceprints at some lengths; only v2 may be pinned.
     #expect(!manifest.files.contains { $0.destination.hasPrefix("CamPlusPlus.mlmodelc") || $0.destination.hasPrefix("CamPlusPreprocessor.mlmodelc") })
 }
+
+@Test func theEchoCancellerIsPinnedToOneLocalVQEBundle() throws {
+    let manifest = SpeechModelAssets.manifest(for: "localvqe-v1.3-256ms")
+    // v1.3 in 256 ms calls, the file FluidAudio 0.17.7 loads for that configuration; the other variants aren't needed.
+    let bundle = "localvqe-v1.3-4.8M-256ms.mlmodelc/"
+    #expect(Set(manifest.files.map(\.destination)) == Set(["analytics/coremldata.bin", "coremldata.bin", "model.mil", "weights/weight.bin"]
+        .map { bundle + $0 }))
+    #expect(manifest.files.allSatisfy { $0.repository == "FluidInference/localvqe-coreml" && $0.path == $0.destination })
+    #expect(Set(manifest.files.map(\.revision)).count == 1)
+    #expect(manifest.files.allSatisfy { $0.revision.count == 40 && $0.sha256.count == 64 && $0.size > 0 })
+}

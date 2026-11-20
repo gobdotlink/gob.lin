@@ -35,10 +35,12 @@ public enum EditObservation {
     }
 
     /// Locate the inserted span in `current` and measure its drift.
-    /// `prefix`/`suffix` are the expected value's text before/after the span.
-    public static func evaluate(prefix: String, inserted: String, suffix: String, current: String) -> Sample {
+    /// `prefix`/`suffix` are the expected value's text before/after the span. `restored` is a full stop typed in the same
+    /// insertion at the end of `prefix`: an undo takes it away with the dictation, which is the dictation deleted.
+    public static func evaluate(prefix: String, inserted: String, suffix: String, current: String, restored: String = "") -> Sample {
         guard current.count <= maximumFieldCharacters else { return .tooLong }
         if current == prefix + inserted + suffix { return .region(text: inserted, distance: 0) }
+        if !restored.isEmpty, !inserted.isEmpty, prefix.hasSuffix(restored), current == prefix.dropLast(restored.count) + suffix { return .deleted }
         guard current.count >= prefix.count + suffix.count,
               current.hasPrefix(prefix), current.hasSuffix(suffix) else { return .anchorLost }
         let region = String(current.dropFirst(prefix.count).dropLast(suffix.count))

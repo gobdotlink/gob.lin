@@ -4051,5 +4051,42 @@
         "sha256": "24c77ee75e17819622b3a69eeaccd57c6f6f05b0f5747c807a6540f032d3f1fb"
       }
     ]
+  },
+  "localvqe-v1.3-256ms": {
+    "languages": [],
+    "files": [
+      {
+        "repository": "FluidInference/localvqe-coreml",
+        "revision": "4205430781c240397073d6f7bf676fb4c732fc12",
+        "path": "localvqe-v1.3-4.8M-256ms.mlmodelc/analytics/coremldata.bin",
+        "destination": "localvqe-v1.3-4.8M-256ms.mlmodelc/analytics/coremldata.bin",
+        "size": 243,
+        "sha256": "a0e97d957f54c9a144993bfbb9d3d8320def9de35a77844e20fbf0703fa461c6"
+      },
+      {
+        "repository": "FluidInference/localvqe-coreml",
+        "revision": "4205430781c240397073d6f7bf676fb4c732fc12",
+        "path": "localvqe-v1.3-4.8M-256ms.mlmodelc/coremldata.bin",
+        "destination": "localvqe-v1.3-4.8M-256ms.mlmodelc/coremldata.bin",
+        "size": 3531,
+        "sha256": "9ac719cbfbc018ce1f1168062ee1629b77bd86f4881567bca8668591817f402f"
+      },
+      {
+        "repository": "FluidInference/localvqe-coreml",
+        "revision": "4205430781c240397073d6f7bf676fb4c732fc12",
+        "path": "localvqe-v1.3-4.8M-256ms.mlmodelc/model.mil",
+        "destination": "localvqe-v1.3-4.8M-256ms.mlmodelc/model.mil",
+        "size": 349829,
+        "sha256": "11da4803a13bcc357550904fcbfeb4a169b0c4b38e529787aeed8a9b233c528c"
+      },
+      {
+        "repository": "FluidInference/localvqe-coreml",
+        "revision": "4205430781c240397073d6f7bf676fb4c732fc12",
+        "path": "localvqe-v1.3-4.8M-256ms.mlmodelc/weights/weight.bin",
+        "destination": "localvqe-v1.3-4.8M-256ms.mlmodelc/weights/weight.bin",
+        "size": 19281728,
+        "sha256": "fc5f290cbfb497718d9d9568ee965c352bfe4663bab49b30a10e91f8fcfff826"
+      }
+    ]
   }
 }

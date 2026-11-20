@@ -59,14 +59,7 @@ final class TrackRecorder: @unchecked Sendable {
     /// A write failed (a full disk): the track keeps what reached the file and takes no more.
     private var writeFailed = false
 
-    // Chunker state.
-    private var frameRemainder: [Float] = []
-    private var pending: [Float] = []
-    private var pendingStart = 0
-    private var silentFrames = 0
-    private var pendingHasSpeech = false
-    private var noiseFloor: Float = -60
-    private static let frame = 320  // 20 ms
+    private var chunker: SpeechChunker
 
     /// `onWriteFailure` hears the first write that fails; the recording should stop then.
     init(track: MeetingTrack, directory: URL, sessionStart: Double,
@@ -77,6 +70,7 @@ final class TrackRecorder: @unchecked Sendable {
         self.onChunk = onChunk
         self.onEvent = onEvent
         self.onWriteFailure = onWriteFailure
+        chunker = SpeechChunker(track: track)
         queue = DispatchQueue(label: "gob.lin.meetings.track.\(track.rawValue)", qos: .userInitiated)
         audioURL = directory.appendingPathComponent("\(track.fileStem).wav")
         let timingURL = directory.appendingPathComponent("\(track.fileStem).timing.jsonl")
@@ -98,7 +92,7 @@ final class TrackRecorder: @unchecked Sendable {
         queue.sync {
             guard !finished else { return stats }
             finished = true
-            flushChunk(force: true)
+            for chunk in chunker.finish() { onChunk(chunk) }
             try? file.synchronize()
             // After a failed write the header may not fit either; the reader trusts the file's length over it.
             try? WAVFile.patchHeader(file, dataBytes: stats.samples * 2)
@@ -157,7 +151,7 @@ final class TrackRecorder: @unchecked Sendable {
         let clamped = samples.map { $0.isFinite ? max(-1, min(1, $0)) : 0 }
         let pcm = clamped.map { Int16($0 * 32_767) }
         guard pcm.withUnsafeBytes({ append(Data($0), to: file) }) else { return }
-        feedChunker(clamped)
+        for chunk in chunker.feed(clamped) { onChunk(chunk) }
         stats.samples += clamped.count
     }
 
@@ -197,74 +191,6 @@ final class TrackRecorder: @unchecked Sendable {
             return input
         }
         return Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
-    }
-
-    // MARK: Chunking
-
-    private func feedChunker(_ samples: [Float]) {
-        frameRemainder.append(contentsOf: samples)
-        var index = 0
-        while frameRemainder.count - index >= Self.frame {
-            let frame = frameRemainder[index..<index + Self.frame]
-            index += Self.frame
-            var sum: Float = 0
-            for sample in frame { sum += sample * sample }
-            let db = 10 * log10(max(sum / Float(Self.frame), 1e-10))
-            if db < noiseFloor { noiseFloor = db } else { noiseFloor += 0.001 * (db - noiseFloor) }
-            let speech = db > max(-52, noiseFloor + 12)
-            pending.append(contentsOf: frame)
-            if speech { pendingHasSpeech = true; silentFrames = 0 } else { silentFrames += 1 }
-            considerCut()
-        }
-        frameRemainder.removeFirst(index)
-    }
-
-    private func considerCut() {
-        let duration = Double(pending.count) / MeetingAudio.sampleRate
-        if !pendingHasSpeech {
-            // Keep 300 ms of lead-in so a chunk never clips the first syllable.
-            if duration >= 2 { drop(keepingSeconds: 0.3) }
-            return
-        }
-        if (silentFrames >= 25 && duration >= 1) || (silentFrames >= 10 && duration >= 4) {
-            let trailing = max(0, silentFrames - 15) * Self.frame
-            emit(count: pending.count - trailing, remainderHasSpeech: false)
-        } else if duration >= 10 {
-            // Hard cut at the quietest 20 ms frame in the last 3 s.
-            let searchStart = max(0, pending.count - 3 * 16_000)
-            var best = pending.count
-            var bestEnergy = Float.greatestFiniteMagnitude
-            var position = searchStart
-            while position + Self.frame <= pending.count {
-                var sum: Float = 0
-                for sample in pending[position..<position + Self.frame] { sum += sample * sample }
-                if sum < bestEnergy { bestEnergy = sum; best = position + Self.frame / 2 }
-                position += Self.frame
-            }
-            emit(count: best, remainderHasSpeech: true)
-        }
-    }
-
-    private func flushChunk(force: Bool) {
-        frameRemainder.removeAll()
-        if pendingHasSpeech, !pending.isEmpty { emit(count: pending.count, remainderHasSpeech: false) }
-    }
-
-    private func drop(keepingSeconds seconds: Double) {
-        let keep = Int(seconds * MeetingAudio.sampleRate)
-        let removed = max(0, pending.count - keep)
-        pending.removeFirst(removed)
-        pendingStart += removed
-    }
-
-    private func emit(count: Int, remainderHasSpeech: Bool) {
-        let count = min(count, pending.count)
-        guard count > 0 else { return }
-        onChunk(SpeechChunk(track: track, startSample: pendingStart, samples: Array(pending[0..<count])))
-        pending.removeFirst(count)
-        pendingStart += count
-        pendingHasSpeech = remainderHasSpeech
-        silentFrames = 0
     }
 }
 

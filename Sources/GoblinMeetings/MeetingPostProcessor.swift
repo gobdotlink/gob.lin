@@ -32,6 +32,16 @@ public struct PostProcessReport: Codable, Sendable {
     /// Names given before this run that no voice could keep: the voices were sorted out again and none of them
     /// mostly matched the named one.
     public var namesCleared: [String]? = nil
+    /// Whether the microphone's lines came from its audio with the call's sound taken out (microphone-echo-cancelled.jsonl)
+    /// rather than the live transcript: false when that was tried and failed, nil when it wasn't tried.
+    public var echoCancelled: Bool? = nil
+    /// How long taking the call's sound out of the microphone took, and transcribing what was left.
+    public var echoCancelSeconds: Double? = nil
+    public var echoTranscribeSeconds: Double? = nil
+    /// Words on the microphone's live lines and on the lines transcribed after echo cancellation, before anything is
+    /// dropped from either.
+    public var liveMicrophoneWords: Int? = nil
+    public var echoCancelledMicrophoneWords: Int? = nil
 }
 
 /// What split the system track into voices: spans plus how long loading and running took.
@@ -47,8 +57,9 @@ public struct DiarizationResult: Sendable {
     }
 }
 
-/// Transcribes chunks the live transcript left for after the call, in the meeting's language. Throws when the speech
-/// model can't run; the meeting then fails with the reason and Try Again runs it again.
+/// Transcribes speech chunks after the call, in the meeting's language: the ones the live transcript left for then, and
+/// the microphone with the call's sound taken out. Throws when the speech model can't run; for deferred chunks the
+/// meeting then fails with the reason and Try Again runs it again, for the microphone its live lines stand.
 public typealias MeetingLateTranscriber = @Sendable (_ chunks: [SpeechChunk], _ options: RecognitionOptions) async throws -> [TranscriptSegment]
 
 public enum MeetingProcessingError: Error, LocalizedError, Equatable {
@@ -116,22 +127,36 @@ public struct MeetingPostProcessOptions: Sendable {
     public var diarizer: MeetingDiarizer
     /// gob.lin dictations during the meeting, in meeting seconds. Used only when the folder has no dictations.json.
     public var dictationSpans: @Sendable (MeetingSessionInfo) async -> [ClosedRange<Double>]
-    /// Transcribes what the live transcript left in deferred.jsonl. Nil: a meeting with any fails until it's processed
-    /// where a speech model can run.
+    /// Transcribes after the call: what the live transcript left in deferred.jsonl, and a call's echo-cancelled
+    /// microphone. Nil: a meeting with deferred speech fails until it's processed where a speech model can run, and the
+    /// microphone keeps its live lines.
     public var transcribeLater: MeetingLateTranscriber?
+    /// Takes the call's sound out of the microphone track after a call. Nil cancels no echo.
+    public var echoCanceller: MeetingEchoCanceller?
+    /// A call's microphone lines come from its audio with the call's sound taken out, transcribed again, rather than
+    /// the live transcript's, when there's an `echoCanceller` and a `transcribeLater`. Off, the live lines are used as
+    /// they always were; the text echo filter runs either way.
+    public var cancelsEcho = true
     /// Remember voices: voiceprints for each voice, names from People, and People learning from the meeting. Nil (tests,
     /// the CLI) leaves voices alone.
     public var voices: MeetingVoiceOptions?
 
-    /// `modelDownload` hears how far the speaker model's one-time download has got (0...1), then nil once it's done
-    /// or failed; it's never called when the model is already on this Mac.
+    /// `modelDownload` hears how far the speaker model's and echo canceller's one-time downloads have got together
+    /// (0...1), then nil once they're done or failed; it's never called when the models are already on this Mac.
+    /// Without an `echoCanceller`, LocalVQE comes with the default diarizer only: options with an injected diarizer
+    /// (tests) cancel no echo unless given a canceller too, so they never fetch a model.
     public init(preset: String = "offline", diarizer: MeetingDiarizer? = nil,
                 dictationSpans: (@Sendable (MeetingSessionInfo) async -> [ClosedRange<Double>])? = nil,
-                modelDownload: (@Sendable (Double?) -> Void)? = nil, transcribeLater: MeetingLateTranscriber? = nil) {
+                modelDownload: (@Sendable (Double?) -> Void)? = nil, transcribeLater: MeetingLateTranscriber? = nil,
+                echoCanceller: MeetingEchoCanceller? = nil) {
+        let downloads = modelDownload.map(CombinedDownload.init)
         self.preset = preset
-        self.diarizer = diarizer ?? Self.nemotron(preset: preset, modelDownload: modelDownload)
+        self.diarizer = diarizer ?? Self.nemotron(preset: preset, modelDownload: downloads?.part(
+            "speaker", bytes: MeetingSpeakerModel.files(preset: preset).downloadBytes))
         self.dictationSpans = dictationSpans ?? { await MeetingPostProcessor.dictationSpans(from: $0) }
         self.transcribeLater = transcribeLater
+        self.echoCanceller = echoCanceller ?? (diarizer == nil
+            ? Self.localVQE(modelDownload: downloads?.part("echo", bytes: MeetingEchoModel.files.downloadBytes)) : nil)
     }
 
     /// Nemotron 3 from FluidAudio, loaded from gob.lin's pinned copy; downloads and checks it on first use.
@@ -140,21 +165,7 @@ public struct MeetingPostProcessOptions: Sendable {
         return { samples, log in
             let config = MeetingSpeakerModel.config(preset: preset)
             let loadStart = Date()
-            if !files.isDownloaded {
-                log("downloading the speaker model (\(files.downloadBytes / 1_000_000) MB), once")
-                modelDownload?(0)
-                do {
-                    _ = try await files.ensureAvailable { update in
-                        if update.phase == .downloading, let fraction = update.fractionCompleted { modelDownload?(fraction) }
-                    }
-                    modelDownload?(nil)
-                } catch {
-                    modelDownload?(nil)
-                    throw error
-                }
-            } else {
-                _ = try await files.ensureAvailable()
-            }
+            try await acquire(files, named: "the speaker model", modelDownload: modelDownload, log: log)
             log("loading Nemotron 3 (\(preset))")
             let models = try await Nemotron3Models.load(config: config, directory: files.directory)
             let loadSeconds = Date().timeIntervalSince(loadStart)
@@ -169,12 +180,15 @@ public struct MeetingPostProcessOptions: Sendable {
     }
 }
 
-/// After Stop: split the system track by speaker, drop microphone words that are the call echoing
-/// back, lines said while muted or dictated elsewhere, and write the transcript.
+/// After Stop: split the system track by speaker, take the call's sound out of the microphone and transcribe it again,
+/// drop microphone words that are still the call echoing back, lines said while muted or dictated elsewhere, and write
+/// the transcript.
 ///
-/// Files: diarization.json (spans), attributed.json (turns under their diarized label), then
-/// `render` applies speakers.json names and writes transcript.json, transcript.md and postprocess.json.
-/// Renaming a speaker only re-renders; it never re-runs diarization.
+/// Files: microphone-echo-cancelled.jsonl (a call's microphone lines after echo cancellation), diarization.json (spans),
+/// attributed.json (turns under their diarized label), then `render` applies speakers.json names and writes
+/// transcript.json, transcript.md and postprocess.json. The recording's own files are never changed here, except that
+/// speech the live transcript deferred is added to segments.jsonl. Renaming a speaker only re-renders; it never re-runs
+/// diarization.
 public enum MeetingPostProcessor {
     /// The microphone's label; speakers.json can rename it like any other.
     public static let microphoneLabel = "You"
@@ -201,13 +215,29 @@ public enum MeetingPostProcessor {
             return FileManager.default.fileExists(atPath: url.path) ? try WAVFile.readSamples(url) : []
         }
         let systemSamples = try samples(.system)
-        let diarizedSamples = inPerson ? try samples(.microphone) : systemSamples
+        let microphoneSamples = inPerson || options.cancelsEcho ? try samples(.microphone) : nil
+        let diarizedSamples = inPerson ? microphoneSamples ?? [] : systemSamples
+        // Both slow and independent: the microphone's echo is taken out while the system track's voices are told apart.
+        async let echoPass = echoCancelledMicrophone(directory: directory, microphone: microphoneSamples ?? [], system: systemSamples,
+                                                     session: session, options: options, log: log)
         var diarization = DiarizationResult(spans: [])
         if diarizedSamples.count > Int(MeetingAudio.sampleRate) {
             diarization = try await options.diarizer(diarizedSamples, log)
             diarization.spans.sort { $0.start < $1.start }
         }
         let spans = diarization.spans
+        let echo = try await echoPass
+        var liveMicrophoneWords: Int?, cleanedMicrophoneWords: Int?
+        if case .transcribed(let cleaned, let cancelSeconds, let transcribeSeconds) = echo {
+            // The cleaned audio's lines stand in for the live microphone's; the system track's stay as they are.
+            let live = wordCount(segments.filter { $0.track == .microphone }), heard = wordCount(cleaned)
+            liveMicrophoneWords = live
+            cleanedMicrophoneWords = heard
+            segments = (segments.filter { $0.track != .microphone } + cleaned).sorted { $0.start < $1.start }
+            let timing = cancelSeconds.map { String(format: "; cancelled in %.1f s, transcribed in %.1f s", $0, transcribeSeconds ?? 0) }
+                ?? " (from an earlier run; the audio is gone)"
+            log("echo cancellation: \(live) live microphone words, \(heard) after cancelling\(timing)")
+        }
         try JSONEncoder.pretty.encode(spans).write(to: directory.appendingPathComponent(MeetingStorage.diarizationFile), options: .atomic)
 
         // Nothing after the call ended belongs to it, including the end of a line that runs past it.
@@ -295,8 +325,8 @@ public enum MeetingPostProcessor {
             do {
                 var audio: [MeetingTrack: [Float]] = [:]
                 if !inPerson { audio[.system] = systemSamples }
-                // In person the mic is what was diarized, already read.
-                audio[.microphone] = inPerson ? diarizedSamples : try samples(.microphone)
+                // Read already when it was diarized (in person) or had its echo cancelled.
+                audio[.microphone] = try microphoneSamples ?? samples(.microphone)
                 try await recognizeVoices(directory, turns: turns, audio: audio, inPerson: inPerson, spans: spans,
                                           microphoneExcluded: muted + dictations, participants: participants, session: session,
                                           options: voices, log: log)
@@ -305,11 +335,21 @@ public enum MeetingPostProcessor {
                 log("voices: \(error.localizedDescription)")
             }
         }
-        let report = PostProcessReport(preset: options.preset, systemSeconds: Double(systemSamples.count) / MeetingAudio.sampleRate,
+        var report = PostProcessReport(preset: options.preset, systemSeconds: Double(systemSamples.count) / MeetingAudio.sampleRate,
                                        diarizeSeconds: diarization.diarizeSeconds, modelLoadSeconds: diarization.modelLoadSeconds,
                                        speakers: [:], echoSegmentsDropped: echoDropped, dictationSegmentsDropped: dictationDropped,
                                        mutedSegmentsDropped: mutedDropped, turns: 0,
                                        afterCallSegmentsDropped: afterCallDropped, namesCleared: namesCleared.isEmpty ? nil : namesCleared)
+        switch echo {
+        case .notRun: break
+        case .failed: report.echoCancelled = false
+        case .transcribed(_, let cancelSeconds, let transcribeSeconds):
+            report.echoCancelled = true
+            report.echoCancelSeconds = cancelSeconds
+            report.echoTranscribeSeconds = transcribeSeconds
+            report.liveMicrophoneWords = liveMicrophoneWords
+            report.echoCancelledMicrophoneWords = cleanedMicrophoneWords
+        }
         try JSONEncoder.pretty.encode(report).write(to: directory.appendingPathComponent(MeetingStorage.reportFile), options: .atomic)
         let rendered = try render(directory: directory)
         log("wrote \(rendered.count) turns; \(Set(rendered.map(\.speaker)).count) speakers; dropped \(echoDropped) echo words, "

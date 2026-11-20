@@ -7,6 +7,13 @@ public struct TranscriptProcessingResult: Sendable {
     public let polished: Bool
     public let warning: DiagnosticFailure?
     public let timings: DictationTimings
+    /// The take ended a finished sentence whose full stop isn't in `finalText`: the tone removed it here, or cleanup,
+    /// told to write that tone, left it out.
+    public let removedFullStop: Bool
+    /// `finalText` starts the sentence after gob.lin's previous take, which lost its full stop to the tone and still ends
+    /// the field: insertion types that full stop back first. It is never part of `finalText`, so History, the last
+    /// transcript and the edit watch keep what was dictated.
+    public let restoresFullStop: Bool
 
     /// A successful cleanup can remove every hesitation sound without producing
     /// an insertion. Keep this distinct from missing ASR output or a failed rewrite.
@@ -16,9 +23,11 @@ public struct TranscriptProcessingResult: Sendable {
     }
 
     public init(rawText: String, finalText: String, tone: DictationTone, polished: Bool,
-                warning: DiagnosticFailure? = nil, timings: DictationTimings = DictationTimings()) {
+                warning: DiagnosticFailure? = nil, timings: DictationTimings = DictationTimings(),
+                removedFullStop: Bool = false, restoresFullStop: Bool = false) {
         self.rawText = rawText; self.finalText = finalText; self.tone = tone
         self.polished = polished; self.warning = warning; self.timings = timings
+        self.removedFullStop = removedFullStop; self.restoresFullStop = restoresFullStop
     }
 }
 
@@ -86,7 +95,9 @@ public actor TranscriptPostprocessor {
         catch { return result(rawText, final: rawText, tone: tone, polished: false, warning: .dictionaryUnavailable, start: start) }
         let corrected = DictionaryCorrector.correct(rawText, entries: entries, allowFuzzy: false).text
         let preferred = entries.map(\.spelling)
-        let continues = context?.continuesSentence ?? false
+        // After gob.lin's own finished take a dictation starts a sentence, unless it opens with a joining word.
+        func continues(_ text: String) -> Bool { context.map { $0.continuesSentence || $0.joinsPreviousTake(text) } ?? false }
+        func restores(_ text: String) -> Bool { context.map { $0.restoresFullStop && !$0.joinsPreviousTake(text) } ?? false }
         if rewriteSettings.enabled && rewriteSettings.cleanup != .none {
             // Callers pass the active terms most important first; the prompt gets the same limit as recognition.
             let rewritten = await rewriteClient.rewrite(corrected, settings: rewriteSettings, apiKey: apiKey, tone: tone,
@@ -95,17 +106,24 @@ public actor TranscriptPostprocessor {
                 // A failed rewrite must recover the original ASR output, before dictionary or tone edits.
                 return result(rawText, final: rawText, tone: tone, polished: false, warning: .rewrite(failure), start: start)
             }
-            return result(rawText, final: ToneFormatter.format(rewritten.outputText, tone: tone, protectedTerms: preferred, continuesSentence: continues),
-                          tone: tone, polished: rewritten.wasRewritten, warning: nil, start: start)
+            // Cleanup may lower a first word to fit the previous take; outside `continues` this pass gives it its capital back.
+            let output = rewritten.outputText
+            let formatted = ToneFormatter.formatted(output, tone: tone, protectedTerms: preferred, continuesSentence: continues(output))
+            // Cleanup is told the tone too, so it usually leaves a casual take's full stop out itself.
+            let finished = formatted.removedFullStop || ToneFormatter.leftOutFullStop(said: corrected, typed: formatted.text, tone: tone)
+            return result(rawText, final: formatted.text, tone: tone, polished: rewritten.wasRewritten, warning: nil, start: start,
+                          removedFullStop: finished, restoresFullStop: restores(output))
         }
-        return result(rawText, final: ToneFormatter.format(corrected, tone: tone, protectedTerms: preferred, continuesSentence: continues),
-                      tone: tone, polished: false, warning: nil, start: start)
+        let formatted = ToneFormatter.formatted(corrected, tone: tone, protectedTerms: preferred, continuesSentence: continues(corrected))
+        return result(rawText, final: formatted.text, tone: tone, polished: false, warning: nil, start: start,
+                      removedFullStop: formatted.removedFullStop, restoresFullStop: restores(corrected))
     }
 
-    private func result(_ raw: String, final: String, tone: DictationTone, polished: Bool,
-                        warning: DiagnosticFailure?, start: ContinuousClock.Instant) -> TranscriptProcessingResult {
+    private func result(_ raw: String, final: String, tone: DictationTone, polished: Bool, warning: DiagnosticFailure?,
+                        start: ContinuousClock.Instant, removedFullStop: Bool = false, restoresFullStop: Bool = false) -> TranscriptProcessingResult {
         let elapsed = start.duration(to: .now).components
         return TranscriptProcessingResult(rawText: raw, finalText: final, tone: tone, polished: polished, warning: warning,
-            timings: DictationTimings(rewriteMilliseconds: Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15))
+            timings: DictationTimings(rewriteMilliseconds: Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15),
+            removedFullStop: removedFullStop, restoresFullStop: restoresFullStop)
     }
 }

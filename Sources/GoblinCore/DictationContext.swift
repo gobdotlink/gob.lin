@@ -19,6 +19,10 @@ public struct DictationContext: Equatable, Sendable {
     public let textAfter: String
     /// Text outside the field that comes before it in reading order, nearest kept.
     public let nearbyText: String
+    /// gob.lin's own latest insertion, when it went to the app this field is in; see `following(_:in:)`.
+    public private(set) var previousTake: PreviousTake?
+    /// `textBefore` starts at the start of the field rather than at `beforeLimit`.
+    private let textBeforeIsWhole: Bool
 
     /// `selection` is the field's selected range in `fieldText`; without both, only the app and window are kept.
     public init(application: String?, windowTitle: String?, fieldText: String? = nil, selection: NSRange? = nil, nearbyText: String? = nil) {
@@ -31,7 +35,7 @@ public struct DictationContext: Equatable, Sendable {
         self.nearbyText = String((nearbyText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).suffix(Self.nearbyLimit))
         let text = (fieldText ?? "") as NSString
         guard let selection, selection.location != NSNotFound, NSMaxRange(selection) <= text.length else {
-            textBefore = ""; selectedText = ""; textAfter = ""
+            textBefore = ""; selectedText = ""; textAfter = ""; textBeforeIsWhole = true
             return
         }
         // Whole characters only: a UTF-16 cut can split an emoji or accented letter.
@@ -40,16 +44,64 @@ public struct DictationContext: Equatable, Sendable {
             return text.substring(with: text.rangeOfComposedCharacterSequences(for: NSRange(location: start, length: end - start)))
         }
         textBefore = slice(max(0, selection.location - Self.beforeLimit), selection.location)
+        textBeforeIsWhole = (textBefore as NSString).length == selection.location
         selectedText = slice(selection.location, min(NSMaxRange(selection), selection.location + Self.selectionLimit))
         textAfter = slice(NSMaxRange(selection), min(text.length, NSMaxRange(selection) + Self.afterLimit))
     }
 
     /// The cursor follows unfinished text on its line, so the dictation carries on a sentence.
     public var continuesSentence: Bool {
+        // A take whose full stop the tone removed looks unfinished, but it ended a sentence.
+        guard !followsFinishedTake else { return false }
         // Any line break: Windows "\r\n", old Mac "\r" and paragraph separators as well as "\n".
         let line = textBefore.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).last ?? ""
         guard let last = line.last(where: { !$0.isWhitespace && !#""')]}”’»"#.contains($0) }) else { return false }
         return !".!?…".contains(last)
+    }
+
+    /// This context after `take`, when `take` went to `application`, the process this field is in.
+    public func following(_ take: PreviousTake?, in application: Int32?) -> DictationContext {
+        var context = self
+        context.previousTake = take.flatMap { application != nil && $0.application == application ? $0 : nil }
+        return context
+    }
+
+    /// The text before the cursor still ends with gob.lin's previous take, give or take spaces on its line, and that take
+    /// was a finished sentence whose full stop the tone removed, so this dictation starts the next sentence. Anything typed
+    /// after it, a line break, another field's text, a selection or more text after the cursor on its line leaves the
+    /// dictation to fit that text instead.
+    public var followsFinishedTake: Bool {
+        guard let previousTake, previousTake.removedFullStop else { return false }
+        func trimmed(_ text: String) -> Substring {
+            var text = Substring(text)
+            while let last = text.last, last.isWhitespace, !last.isNewline { text.removeLast() }
+            return text
+        }
+        // With a selection, or text after the cursor on its line, the dictation goes into the middle of something:
+        // it fits that text as it always has, and no full stop is typed in front of it.
+        let restOfLine = textAfter.prefix { !$0.isNewline }
+        guard selectedText.isEmpty, restOfLine.allSatisfy(\.isWhitespace) else { return false }
+        let before = trimmed(textBefore), take = trimmed(previousTake.text)
+        guard !before.isEmpty, !take.isEmpty else { return false }
+        // Only the end of a take longer than `beforeLimit` is in view.
+        return before.hasSuffix(take) || (!textBeforeIsWhole && take.hasSuffix(before))
+    }
+
+    /// Nothing follows that take, not even its trailing space, so its full stop can be typed back before this dictation
+    /// without changing text already in the field. After a space, the dictation only starts with a capital.
+    public var restoresFullStop: Bool {
+        followsFinishedTake && textBefore.last?.isWhitespace == false
+    }
+
+    /// Words that open a take carrying on the one before it. The recogniser ends nearly every take with a full stop,
+    /// finished or not, so "check the logs" then "and the meetings too" is still one sentence said in two takes.
+    static let joiningWords: Set<String> = ["and", "but", "or", "because", "which"]
+
+    /// Whether `text`, about to be typed here, joins the sentence before it rather than starting one after gob.lin's
+    /// previous take: that take looked finished, but `text` opens with a joining word.
+    public func joinsPreviousTake(_ text: String) -> Bool {
+        guard followsFinishedTake, let first = text.split(whereSeparator: \.isWhitespace).first else { return false }
+        return Self.joiningWords.contains(first.lowercased().filter(\.isLetter))
     }
 
     /// The payload's `screen_context` object. Empty parts are left out.
@@ -90,5 +142,18 @@ public struct DictationContext: Equatable, Sendable {
             node = up
         }
         return (pieces.reversed().joined(separator: "\n"), visited)
+    }
+}
+
+/// What gob.lin last typed into a field, without any full stop restored before it.
+public struct PreviousTake: Equatable, Sendable {
+    /// The process it was typed into.
+    public let application: Int32
+    public let text: String
+    /// Tone formatting removed its final full stop; see `ToneFormatter.formatted`.
+    public let removedFullStop: Bool
+
+    public init(application: Int32, text: String, removedFullStop: Bool) {
+        self.application = application; self.text = text; self.removedFullStop = removedFullStop
     }
 }

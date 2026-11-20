@@ -32,6 +32,13 @@ import Testing
 
 @Test func evaluateReportsDeletedAnchorLostAndTooLong() {
     #expect(EditObservation.evaluate(prefix: "a ", inserted: "gone", suffix: " b", current: "a  b") == .deleted)
+    // A full stop restored in the same insertion goes with the dictation when it's undone: that is a deletion, not a
+    // lost anchor. Left in place, with the dictation there or edited, it is only the text before the span.
+    #expect(EditObservation.evaluate(prefix: "Make that change. ", inserted: "Also check", suffix: "", current: "Make that change", restored: ". ") == .deleted)
+    #expect(EditObservation.evaluate(prefix: "Make that change. ", inserted: "Also check", suffix: "", current: "Make that change. Also check", restored: ". ")
+            == .region(text: "Also check", distance: 0))
+    #expect(EditObservation.evaluate(prefix: "Make that change. ", inserted: "Also check", suffix: "", current: "Make that change. ", restored: ". ") == .deleted)
+    #expect(EditObservation.evaluate(prefix: "Make that change. ", inserted: "Also check", suffix: "", current: "Something else", restored: ". ") == .anchorLost)
     #expect(EditObservation.evaluate(prefix: "a ", inserted: "gone", suffix: " b", current: "x gone b") == .anchorLost)
     #expect(EditObservation.evaluate(prefix: "a ", inserted: "gone", suffix: " b", current: "a gone x") == .anchorLost)
     let huge = String(repeating: "x", count: EditObservation.maximumFieldCharacters + 1)

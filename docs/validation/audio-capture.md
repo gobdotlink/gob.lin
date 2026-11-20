@@ -1,6 +1,6 @@
 # Audio capture validation
 
-The capture service produces ordered 16 kHz mono Float32 frames and writes them to a private WAV before delivery. The settings level preview and dictation share one microphone input. Explicit warm mode keeps up to 500 ms of pre-roll in memory and keeps the system microphone indicator on. Cold starts remain arming until actual converted samples arrive; speech before the microphone opens cannot be recovered.
+The capture service produces ordered 16 kHz mono Float32 frames and writes them to a private WAV before delivery. The settings level preview and dictation share one microphone input. Explicit warm mode keeps up to 500 ms of pre-roll in memory and keeps the system microphone indicator on. Without it, the microphone opens at key-down into the same pre-roll and closes again if the press doesn't become a take. A Bluetooth microphone opens only for the take; its start remains arming until actual converted samples arrive, and speech before the microphone opens cannot be recovered.
 
 ## Executed checks
 

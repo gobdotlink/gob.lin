@@ -31,7 +31,7 @@ Meetings asks for two more permissions, both when you turn it on from its setup 
 - **System Audio Recording** (`NSAudioCaptureUsageDescription`) lets a Core Audio process tap hear the call app's side of the call. macOS shows its prompt only once a tap starts, so Allow runs a silent tap for up to 20 seconds while you answer, then opens System Settings → Privacy & Security → Screen & System Audio Recording if access still isn't granted. Turn On waits for it: without it only your side of a call would record. When the status can't be read, nothing is blocked.
 - **Notifications** carry the offer to record a call, and say when a recording is ready or stopped while you were away. Without them the offer still appears in the corner of the screen.
 
-Meetings also uses the existing grants. Microphone records your side. Accessibility reads call apps' window titles to name a meeting, and while a call records it reads the call window for mute state, screen sharing and participant names; see [privacy](../PRIVACY.md#meetings) for what is kept.
+Meetings also uses the existing grants. Microphone records your side. Accessibility reads call apps' window titles to name a meeting, and while a call records it reads the call window for mute state, screen sharing and participant names; see [privacy](../PRIVACY.md#meetings) for what is kept. While a call is offered, both tracks and the call window are already captured, into memory only, so a yes keeps the call's start; that happens only when Microphone and System Audio Recording are both granted already, so an offer never raises a prompt.
 
 ## API contract
 

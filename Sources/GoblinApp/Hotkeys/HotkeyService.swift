@@ -178,7 +178,7 @@ final class HotkeyService: ObservableObject {
         case .press:
             releaseTask?.cancel()
             releasePending = false
-            state.press(at: now)
+            let accepted = state.press(at: now)
             holdTimer?.invalidate()
             holdTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
                 Task { @MainActor in
@@ -186,6 +186,8 @@ final class HotkeyService: ObservableObject {
                     self.apply(self.state.tick(at: ProcessInfo.processInfo.systemUptime))
                 }
             }
+            // After the threshold timer is set, so preparing can't delay it.
+            if !accepted.isEmpty { apply(accepted) }
         case .release:
             releasePending = true
             holdTimer?.invalidate()

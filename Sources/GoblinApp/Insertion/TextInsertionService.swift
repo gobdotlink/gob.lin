@@ -21,6 +21,11 @@ final class TextInsertionService: ObservableObject {
     }
     /// Where the last verified insertion landed, for the post-paste edit watcher.
     private(set) var lastAnchor: InsertionAnchor?
+    /// The take a dictation last typed in and the app it went to, so the next take there can tell it ended a sentence.
+    /// Any other insertion clears it.
+    private(set) var lastTake: PreviousTake?
+    /// The app and text of the insertion under way.
+    private var inserting: (pid: pid_t, text: String)?
     @Published private(set) var status = "Ready to insert your dictation"
     @Published private(set) var busy = false
     @Published private(set) var hasRecoveryClipboard = false
@@ -69,21 +74,34 @@ final class TextInsertionService: ObservableObject {
     }
 
     func insert(_ transcript: String, onPasteSent: (() -> Void)? = nil) async {
-        await insert(transcript, originalTarget: nil, automatic: false, onPasteSent: onPasteSent)
+        lastTake = nil
+        await insert(transcript, originalTarget: nil, automatic: false, after: nil, onPasteSent: onPasteSent)
     }
 
-    func insert(_ transcript: String, into originalTarget: FocusedText?, onPasteSent: (() -> Void)? = nil) async {
-        await insert(transcript, originalTarget: originalTarget, automatic: true, onPasteSent: onPasteSent)
+    /// `removedFullStop` and `restoresFullStop` come from the take's `TranscriptProcessingResult`.
+    func insert(_ transcript: String, into originalTarget: FocusedText?, removedFullStop: Bool = false, restoresFullStop: Bool = false,
+                onPasteSent: (() -> Void)? = nil) async {
+        let previous = restoresFullStop ? lastTake : nil
+        lastTake = nil
+        await insert(transcript, originalTarget: originalTarget, automatic: true, after: previous, onPasteSent: onPasteSent)
+        // An unverified paste usually landed; the next take checks the field still ends with it before relying on it.
+        if outcome == .success || outcome == .unverified, let inserting {
+            lastTake = PreviousTake(application: inserting.pid, text: inserting.text, removedFullStop: removedFullStop)
+        }
     }
 
-    private func insert(_ transcript: String, originalTarget: FocusedText?, automatic: Bool, onPasteSent: (() -> Void)?) async {
+    /// `previous`: the take this one starts the next sentence after, whose full stop goes back in when nothing follows it.
+    private func insert(_ transcript: String, originalTarget: FocusedText?, automatic: Bool, after previous: PreviousTake?,
+                        onPasteSent: (() -> Void)?) async {
         guard !busy else { setStatus("A paste is still awaiting confirmation", outcome: .failure(.insertionNotAcknowledged)); return }
         guard !transcript.isEmpty else { setStatus("No transcript to paste", outcome: .failure(.noTranscriptAvailable)); return }
         guard AXIsProcessTrusted() else { setStatus("Allow Accessibility before inserting text", outcome: .failure(.insertionPermissionMissing)); return }
         busy = true
         lastAnchor = nil
+        inserting = nil
         defer { busy = false }
-        let text = InsertionPolicy.text(transcript, trailingSpace: trailingSpace)
+        let dictated = InsertionPolicy.text(transcript, trailingSpace: trailingSpace)
+        var text = dictated
         if !automatic, NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
             guard let previousApplication, !previousApplication.isTerminated else {
                 setStatus("Focus the app you want to paste into first", outcome: .failure(.insertionTargetChanged)); return
@@ -147,6 +165,17 @@ final class TextInsertionService: ObservableObject {
                   isSafe(refreshed, background: background, quirks: quirks) else { readyToPaste(); return }
             target = refreshed
         }
+        // Checked against the field as it is now: if anything was typed after that take, or the cursor moved, nothing
+        // goes before this one, and text already in the field is never changed.
+        var lead = 0
+        if previous != nil, !valueInsertion, !target.applicationFallback,
+           DictationContext(application: nil, windowTitle: nil, fieldText: target.value, selection: target.selection)
+               .following(previous, in: target.pid).restoresFullStop {
+            let fullStop = InsertionPolicy.restoredFullStop(before: transcript, trailingSpace: trailingSpace)
+            text = fullStop + dictated
+            lead = (fullStop as NSString).length
+        }
+        inserting = (target.pid, dictated)
         let expected = valueInsertion ? text : target.value.flatMap { before in
             target.selection.flatMap { InsertionPolicy.expectedValue(before: before, selectedRange: $0, inserted: text,
                                                                      replacesEmptyLineBreak: quirks.emptyEditorLineBreak) }
@@ -167,7 +196,7 @@ final class TextInsertionService: ObservableObject {
                   isSafe(target, background: background, quirks: quirks) else {
                 setStatus("The target changed while confirming the matching text; clipboard preserved", outcome: .failure(.insertionTargetChanged)); return
             }
-            lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
+            lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, lead: lead, quirks: quirks)
             let caretConfirmed = observed.selection == NSRange(location: caret.location, length: 0)
             setStatus(caretConfirmed
                 ? "Text already matched the dictation · clipboard preserved; caret at replacement end"
@@ -202,7 +231,7 @@ final class TextInsertionService: ObservableObject {
                             }
                         }
                         if let selection = target.selection {
-                            lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
+                            lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, lead: lead, quirks: quirks)
                         }
                         let caretStatus = caretConfirmed ? "" : " · caret placement was not confirmed"
                         setStatus("Text landed in \(NSRunningApplication(processIdentifier: target.pid)?.localizedName ?? "the original app") · clipboard preserved\(caretStatus)", outcome: .success)
@@ -252,7 +281,7 @@ final class TextInsertionService: ObservableObject {
         onPasteSent?()
         guard expected != nil, !quirks.remoteDesktop else {
             if expected == nil, !quirks.remoteDesktop, target.role == "AXWebArea",
-               await confirmForwardedPaste(text, from: target, provider: provider, ownedCount: ownedCount, snapshot: snapshot, quirks: quirks) {
+               await confirmForwardedPaste(text, lead: lead, from: target, provider: provider, ownedCount: ownedCount, snapshot: snapshot, quirks: quirks) {
                 return
             }
             setStatus("Paste sent; this app does not expose edit verification. Transcript remains on clipboard; your previous clipboard is recoverable", outcome: .unverified)
@@ -274,11 +303,11 @@ final class TextInsertionService: ObservableObject {
                                                     before: target.value, expected: expected, observed: observed.value, inserted: text,
                                                     ownedChangeCount: ownedCount, currentChangeCount: pasteboard.changeCount) {
                 if let expected, let selection = target.selection, observed.value == expected {
-                    lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, quirks: quirks)
+                    lastAnchor = anchor(target: target, expected: expected, selection: selection, text: text, lead: lead, quirks: quirks)
                 } else if let before = target.value, let value = observed.value,
                           let range = InsertionPolicy.pastedRange(before: before, observed: value, inserted: text) {
                     lastAnchor = anchor(target: target, expected: value, selection: NSRange(location: range.location, length: 0),
-                                        text: text, quirks: quirks)
+                                        text: text, lead: lead, quirks: quirks)
                 }
                 finishVerifiedPaste(restoring: snapshot, ownedCount: ownedCount)
                 return
@@ -291,7 +320,7 @@ final class TextInsertionService: ObservableObject {
 
     /// A page with focus, as after selecting text in a T3 Code reply, can move a paste into one of its fields. Confirms
     /// the paste there when the app read it and the field it focused holds the only copy.
-    private func confirmForwardedPaste(_ text: String, from page: FocusedText, provider: TranscriptDataProvider, ownedCount: Int,
+    private func confirmForwardedPaste(_ text: String, lead: Int, from page: FocusedText, provider: TranscriptDataProvider, ownedCount: Int,
                                        snapshot: ClipboardSnapshot, quirks: AppInsertionQuirks) async -> Bool {
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while ProcessInfo.processInfo.systemUptime < deadline, !Task.isCancelled, pasteboard.changeCount == ownedCount,
@@ -300,7 +329,7 @@ final class TextInsertionService: ObservableObject {
                !CFEqual(field.element, page.element), let value = field.value,
                let range = InsertionPolicy.forwardedRange(of: text, in: value) {
                 lastAnchor = anchor(target: field, expected: value, selection: NSRange(location: range.location, length: 0),
-                                    text: text, quirks: quirks)
+                                    text: text, lead: lead, quirks: quirks)
                 // The field held nothing else, so it was empty; emptied again, it reads as a line break.
                 if range.length == (value as NSString).length { lastAnchor?.normalizesEmptyLineBreak = quirks.emptyEditorLineBreak }
                 finishVerifiedPaste(restoring: snapshot, ownedCount: ownedCount)
@@ -385,16 +414,16 @@ final class TextInsertionService: ObservableObject {
 
     /// The watcher anchor for a verified insertion: the target element plus the
     /// expected value split around the inserted span (UTF-16, like the AX ranges).
-    private func anchor(target: FocusedText, expected: String, selection: NSRange, text: String,
+    /// A restored full stop `lead` units long at the start of `text` counts with the text before the span.
+    private func anchor(target: FocusedText, expected: String, selection: NSRange, text: String, lead: Int,
                         quirks: AppInsertionQuirks) -> InsertionAnchor? {
-        guard watchEdits, !quirks.credentialManager, !quirks.remoteDesktop else { return nil }
-        let value = expected as NSString
-        let end = selection.location + (text as NSString).length
-        guard selection.location >= 0, end >= selection.location, end <= value.length else { return nil }
+        guard watchEdits, !quirks.credentialManager, !quirks.remoteDesktop,
+              let span = InsertionPolicy.span(of: text, at: selection.location, lead: lead, in: expected) else { return nil }
         return InsertionAnchor(pid: target.pid, element: target.element,
-                               prefix: value.substring(with: NSRange(location: 0, length: selection.location)),
-                               inserted: text,
-                               suffix: value.substring(with: NSRange(location: end, length: value.length - end)),
+                               prefix: span.prefix,
+                               inserted: span.dictated,
+                               suffix: span.suffix,
+                               restored: (text as NSString).substring(to: min(lead, (text as NSString).length)),
                                normalizesEmptyLineBreak: quirks.emptyEditorLineBreak && target.value == "\n"
                                    && selection == NSRange(location: 0, length: 0))
     }

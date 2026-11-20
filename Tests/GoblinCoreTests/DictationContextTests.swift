@@ -36,6 +36,117 @@ struct DictationContextTests {
         for lineBreak in ["\r\n", "\r", "\u{2028}", "\u{2029}"] { #expect(!continues("Hi Maya," + lineBreak)) }
     }
 
+    private static let app: Int32 = 501
+
+    private func after(_ take: String?, removedFullStop: Bool = true, field: String, in application: Int32? = app) -> DictationContext {
+        DictationContext(application: "Notes", windowTitle: nil, fieldText: field, selection: NSRange(location: (field as NSString).length, length: 0))
+            .following(take.map { PreviousTake(application: Self.app, text: $0, removedFullStop: removedFullStop) }, in: application)
+    }
+
+    @Test func aTakeAfterAFinishedTakeStartsTheNextSentence() {
+        // Nothing follows the take, so its full stop can go back.
+        let bare = after("Please make that change", field: "Hi. Please make that change")
+        #expect(bare.followsFinishedTake && bare.restoresFullStop && !bare.continuesSentence)
+        // Its trailing space is already in the field: only a capital.
+        let spaced = after("Please make that change ", field: "Hi. Please make that change ")
+        #expect(spaced.followsFinishedTake && !spaced.restoresFullStop && !spaced.continuesSentence)
+        let typedSpace = after("Please make that change", field: "Please make that change  ")
+        #expect(typedSpace.followsFinishedTake && !typedSpace.restoresFullStop)
+        // Or deleted since, as some editors trim it.
+        #expect(after("Please make that change ", field: "Please make that change").restoresFullStop)
+        // A take that trailed off is carried on, as is one that ended in a question.
+        let unfinished = after("and I think ", removedFullStop: false, field: "So and I think ")
+        #expect(!unfinished.followsFinishedTake && unfinished.continuesSentence)
+        #expect(!after("Is it done?", removedFullStop: false, field: "Is it done?").continuesSentence)
+    }
+
+    @Test func aFinishedTakeCountsOnlyWhileTheFieldStillEndsWithIt() {
+        for context in [after("make that change ", field: "make that change and "), // typed after it
+                        after("make that change ", field: "make that"),                // edited
+                        after("make that change ", field: "make that change ", in: 502), // another app
+                        after("make that change ", field: "make that change ", in: nil),
+                        after(nil, field: "make that change ")] {
+            #expect(!context.followsFinishedTake && !context.restoresFullStop)
+        }
+        #expect(after("make that change ", field: "make that change and ").continuesSentence)
+        // A line break already ends the sentence's line.
+        let lineBreak = after("make that change", field: "make that change\n")
+        #expect(!lineBreak.followsFinishedTake && !lineBreak.continuesSentence)
+        // An unreadable field.
+        let unreadable = DictationContext(application: "Notes", windowTitle: nil)
+            .following(PreviousTake(application: Self.app, text: "make that change", removedFullStop: true), in: Self.app)
+        #expect(!unreadable.followsFinishedTake && !unreadable.restoresFullStop && !unreadable.continuesSentence)
+        // The cursor moved back into the take.
+        let field = "make that change"
+        let moved = DictationContext(application: nil, windowTitle: nil, fieldText: field, selection: NSRange(location: 4, length: 0))
+            .following(PreviousTake(application: Self.app, text: field, removedFullStop: true), in: Self.app)
+        #expect(!moved.followsFinishedTake && moved.continuesSentence)
+        // The cursor sits right after the take, but more text follows it on the line, or text is selected there: the
+        // dictation goes into the middle of that text and fits it as before, with no full stop typed first.
+        func at(_ location: Int, selecting length: Int = 0, in text: String) -> DictationContext {
+            DictationContext(application: nil, windowTitle: nil, fieldText: text, selection: NSRange(location: location, length: length))
+                .following(PreviousTake(application: Self.app, text: field, removedFullStop: true), in: Self.app)
+        }
+        let midLine = at(16, in: field + " and then ship it")
+        #expect(!midLine.followsFinishedTake && !midLine.restoresFullStop && midLine.continuesSentence)
+        let selected = at(16, selecting: 4, in: field + " now")
+        #expect(!selected.followsFinishedTake && !selected.restoresFullStop && selected.continuesSentence)
+        // Only spaces after it, or text on later lines, still leaves the take at the end of its line.
+        #expect(at(16, in: field + "  ").restoresFullStop)
+        #expect(at(16, in: field + "\nA later paragraph").restoresFullStop)
+    }
+
+    @Test func aLongTakeIsComparedByTheEndInView() {
+        let take = String(repeating: "and then the next part ", count: 40) + "ends here"
+        #expect((take as NSString).length > DictationContext.beforeLimit)
+        let long = after(take, field: "Earlier text. " + take)
+        #expect((long.textBefore as NSString).length == DictationContext.beforeLimit && long.followsFinishedTake && long.restoresFullStop)
+        // A field shorter than the take holds only part of it.
+        #expect(!after("check the logs", field: "the logs").followsFinishedTake)
+        // A short take within a long field.
+        #expect(after("check the logs", field: String(repeating: "x", count: 900) + " check the logs").restoresFullStop)
+    }
+
+    @Test func theRestoredFullStopIsNotPartOfTheTakesText() async {
+        let processor = TranscriptPostprocessor()
+        func process(_ raw: String, _ tone: DictationTone, _ context: DictationContext?) async -> TranscriptProcessingResult {
+            await processor.process(raw, dictionaryEntries: [], tone: tone, rewriteSettings: RewriteSettings(), context: context)
+        }
+        let first = await process("please make that change.", .casual, nil)
+        #expect(first.finalText == "Please make that change" && first.removedFullStop && !first.restoresFullStop)
+        let field = "Hi. " + first.finalText
+        let next = await process("also I want you to check the logs.", .casual, after(first.finalText, field: field))
+        // History, the last transcript and the edit watch get only what was dictated.
+        #expect(next.finalText == "Also I want you to check the logs" && next.restoresFullStop && next.removedFullStop)
+        // After its trailing space, only the capital.
+        let spaced = await process("also I want you to check the logs.", .casual, after(first.finalText + " ", field: field + " "))
+        #expect(spaced.finalText == "Also I want you to check the logs" && !spaced.restoresFullStop)
+        // Very casual keeps its own sentence starts.
+        let relaxed = await process("Also I want you to check the logs.", .veryCasual, after(first.finalText, field: field))
+        #expect(relaxed.finalText == "also I want you to check the logs" && relaxed.restoresFullStop)
+        // A take that opens with a joining word carries the finished-looking one on: no capital, no full stop, with
+        // or without its trailing space.
+        for context in [after(first.finalText, field: field), after(first.finalText + " ", field: field + " ")] {
+            let joined = await process("And the meetings too.", .casual, context)
+            #expect(joined.finalText == "and the meetings too" && !joined.restoresFullStop && context.joinsPreviousTake("And, also"))
+            #expect(!context.joinsPreviousTake("Android builds") && !context.joinsPreviousTake(""))
+        }
+        // With no finished take before it, a joining word decides nothing.
+        #expect(!after(nil, field: field).joinsPreviousTake("and the meetings"))
+        // A take that trailed off is carried on, as today.
+        let trailing = await process("and I think", .casual, nil)
+        #expect(!trailing.removedFullStop)
+        let carried = await process("Also the logs.", .casual,
+                                    after(trailing.finalText, removedFullStop: trailing.removedFullStop, field: trailing.finalText))
+        #expect(carried.finalText == "also the logs" && !carried.restoresFullStop)
+        // Formal keeps every full stop, so nothing changes.
+        let formal = await process("please make that change", .formal, nil)
+        #expect(formal.finalText == "Please make that change." && !formal.removedFullStop)
+        let afterFormal = await process("also the logs", .formal,
+                                        after(formal.finalText, removedFullStop: formal.removedFullStop, field: formal.finalText))
+        #expect(afterFormal.finalText == "Also the logs." && !afterFormal.restoresFullStop)
+    }
+
     @Test func promptCarriesContextAsDataOnlyWhenThereIsSome() throws {
         let plain = try RewritePrompt.messages(transcript: "ship it", cleanup: .light, tone: .formal, preferredSpellings: [])
         let empty = try RewritePrompt.messages(transcript: "ship it", cleanup: .light, tone: .formal, preferredSpellings: [],

@@ -32,7 +32,8 @@ struct RewriteProviderTests {
         MessagesStub.requests = []
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MessagesStub.self]
-        let result = await RewriteClient(session: URLSession(configuration: config)).rewrite(raw, settings: settings, apiKey: "fixture-key")
+        // A minute's deadline: beside every other test on a small machine, the wait for a turn can pass the app's four seconds.
+        let result = await RewriteClient(session: URLSession(configuration: config), hardTimeout: 60).rewrite(raw, settings: settings, apiKey: "fixture-key")
         return (result, try MessagesStub.requests.map { try JSONSerialization.jsonObject(with: $0.httpBody!) as! [String: Any] })
     }
 

@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
     private var shuttingDown = false
     private var appliedConfiguration: Configuration?
     private var warmTask: Task<Void, Never>?
+    /// When the talk key went down for a take that hasn't begun yet; the take's audio can start from here.
+    private var keyDownAt: Date?
     /// The microphone the last take opened, kept across launches so the next take can say when it changes.
     private var lastMicrophoneUID: String? {
         get { defaults.string(forKey: "audio.lastMicrophoneUID") }
@@ -425,7 +427,45 @@ final class AppModel: ObservableObject {
             if let active = activeCapture {
                 if hotkeys.isSuspending { suspendDictation(active) }
                 else { cancelDictation(active) }
+            } else {
+                // A take refused at the threshold never started: the microphone its key-down opened closes.
+                keyDownAt = nil
+                endPreparation()
             }
+        case .prepareRecording:
+            keyDownAt = Date()
+            prepareDictation()
+        case .abandonPreparation:
+            keyDownAt = nil
+            endPreparation()
+        }
+    }
+
+    /// Key-down, before tap or hold is known. Both end in a take, so the cleanup provider's connection and the
+    /// microphone open now; the overlay, sounds, media and the session itself still wait for `beginRecording`.
+    private func prepareDictation() {
+        guard servicesEnabled, activeCapture == nil else { return }
+        let cleanup = RewriteSettingsStore.load(defaults: defaults)
+        Task { [processor] in await processor.prewarm(cleanup) }
+        // Without the grants the take is refused, and opening would only blink the microphone indicator. The same while
+        // Secure Input is on, when the take is usually refused at a password field: it opens the microphone itself if not.
+        guard permissions.snapshot.microphone == .authorized, permissions.snapshot.accessibility, !hotkeys.secureInput else { return }
+        let ranking = microphones.ranking
+        // In order with warm-mode changes on the capture thread: opening a device can block. An input warm mode or a
+        // preview holds is left alone, and a take that begins first opens the microphone itself, as it always has.
+        warmTask = Task { [previous = warmTask, capture] in
+            await previous?.value
+            // A microphone that won't open is the take's to report, when it tries.
+            try? await capture.prepareForTake(ranking: ranking)
+        }
+    }
+
+    /// The key-down ended without a take. Warm mode and the settings preview keep the input they own.
+    private func endPreparation() {
+        guard servicesEnabled else { return }
+        warmTask = Task { [previous = warmTask, capture] in
+            await previous?.value
+            await capture.endPreparation()
         }
     }
 
@@ -449,6 +489,7 @@ final class AppModel: ObservableObject {
         let treeRequested = quirks?.requestsAccessibilityTree == true && frontmost.map { FocusedText.requestAccessibilityTree(pid: $0.processIdentifier) } == true
         let session = DictationSession(target: frontmost, destination: insertion.destination)
         let cleanup = RewriteSettingsStore.load(defaults: defaults)
+        // Normally opened at key-down already; one opened in the last 10 s is skipped.
         if servicesEnabled { Task { [processor] in await processor.prewarm(cleanup) } }
         if let target = session.target, quirks?.credentialManager == false, cleanup.enabled, cleanup.cleanup != .none, cleanup.usesScreenContext {
             let pid = target.processIdentifier
@@ -466,8 +507,10 @@ final class AppModel: ObservableObject {
         let lease: SpeechModelLease
         do { lease = try speechModels.beginSession(vocabulary: dictionary.entries.vocabulary(in: DictionaryScope(application: session.dictionaryScope))) }
         catch { hotkeys.cancelRecording(); showFailure(.modelUnavailable); return }
-        // From here until the text is inserted, no meeting chunk starts on the speech model.
-        meetings.dictationBegan(session.id)
+        // From here until the text is inserted, no meeting chunk starts on the speech model. The take's audio can
+        // start at key-down, from the microphone opened then, so that's where its span in a meeting starts.
+        meetings.dictationBegan(session.id, at: keyDownAt ?? Date())
+        keyDownAt = nil
         let readiness = Task<any PCMSpeechEngine, Error> { [speechModels] in
             try await speechModels.readyEngine(for: lease)
         }
@@ -948,7 +991,8 @@ final class AppModel: ObservableObject {
             if match.keeps(result) {
                 // History keeps the final transcript, not the draft's spelling of the same words.
                 drafted = TranscriptProcessingResult(rawText: raw, finalText: result.finalText, tone: result.tone, polished: result.polished,
-                                                     warning: result.warning, timings: result.timings)
+                                                     warning: result.warning, timings: result.timings, removedFullStop: result.removedFullStop,
+                                                     restoresFullStop: result.restoresFullStop)
                 break
             }
             if let fallback = match.providerFallback(result, final: raw) { drafted = fallback; break }
@@ -1004,7 +1048,9 @@ final class AppModel: ObservableObject {
                 }
             }
             session.contextInsertions = insertions
-            let context = await session.currentContext()
+            // Read with the field, so a take that pastes in between makes both stale together.
+            let previous = insertion.lastTake
+            let context = await session.currentContext()?.following(previous, in: session.contextField?.pid)
             var read = DevelopmentDetails()
             read.succeeded = context != nil
             read.fieldCharacters = context.map { ($0.textBefore + $0.selectedText + $0.textAfter).count }
@@ -1071,7 +1117,8 @@ final class AppModel: ObservableObject {
                     // Pastes report as soon as they're sent; direct Accessibility writes once verified.
                     finishEditObservation()
                     pendingEditObservationID = session.id
-                    await insertion.insert(result.finalText, into: insertionTarget, onPasteSent: { [weak self] in
+                    await insertion.insert(result.finalText, into: insertionTarget, removedFullStop: result.removedFullStop,
+                                           restoresFullStop: result.restoresFullStop, onPasteSent: { [weak self] in
                         self?.diagnostics.developmentLog.record(.pasteSent, area: .insertion, operation: session.id)
                         showChip()
                     })

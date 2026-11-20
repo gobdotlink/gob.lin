@@ -110,6 +110,9 @@ final class MeetingsController: ObservableObject {
         case finished(meetingID: String)
         case failed(String)
 
+        /// The call being offered, if any.
+        var offeredID: String? { if case .offered(let candidate) = self { candidate.id } else { nil } }
+
         /// For the log: the phase without titles or text.
         var name: String {
             switch self {
@@ -148,6 +151,8 @@ final class MeetingsController: ObservableObject {
         didSet {
             // Levels and live lines change the recording many times a second; only a change of kind is logged.
             if phase.name != oldValue.name { logger.notice("phase: \(oldValue.name, privacy: .public) → \(self.phase.name, privacy: .public)") }
+            // The offer for that call ended, however it ended: what was heard goes with it.
+            if let listening, phase.offeredID != listening.id { discardListening() }
             if MeetingOfferGate.blockerCleared(from: Self.offerBlocker(oldValue, starting: starting), to: offerBlocker) {
                 scheduleOfferCheck()
             }
@@ -231,6 +236,15 @@ final class MeetingsController: ObservableObject {
     /// deleting can't take away what the new learning writes.
     private var voiceCleanup: Task<Void, Never>?
     private var engine: MeetingSpeechEngine?
+    /// The call heard since it was offered, in memory only. Held only while that call's offer is up: any change of
+    /// `phase` away from it discards it, and a yes hands it to the recording (`start`). Nothing else holds it.
+    private var listening: (id: String, buffer: OfferBuffer)?
+    /// The offer's buffer while its recording starts, so a dictation ending meanwhile still reaches it.
+    private var accepting: OfferBuffer?
+    /// Live lines transcribed while the recording was starting, shown once it has.
+    private var earlySegments: [TranscriptSegment] = []
+    /// The speech model already said in this recording's events.log, so the offer's announcement isn't said twice.
+    private var notedSpeechSource: String?
     private var session: MeetingSession?
     private var probe: AccessibilityProbe?
     private var timer: Timer?
@@ -417,6 +431,8 @@ final class MeetingsController: ObservableObject {
         observe(center, center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.interruptionDelivery?.cancel()
+                // An offer stays up through sleep, but stops listening: a yes after wake records from then.
+                self?.discardListening()
                 self?.stop(reason: "sleep")
             }
         })
@@ -441,6 +457,7 @@ final class MeetingsController: ObservableObject {
 
     private func deactivate() async {
         startGeneration += 1
+        discardListening()
         // Nothing reads meetings while Meetings is off: learning stops, still pending, and carries on when it's back on.
         voiceLearning?.cancel()
         voiceLearning = nil
@@ -466,13 +483,16 @@ final class MeetingsController: ObservableObject {
     func start(_ candidate: MeetingCandidate, title: String? = nil) {
         guard canStart else { return }
         starting = true
+        // What this call said since its offer goes into the recording; another call's offer is dropped.
+        let heard = takeListening(for: candidate)
+        accepting = heard
         if case .offered(let offered) = phase { notifications.withdraw(bundleID: offered.id) }
         // A call recorded and then stopped by hand isn't offered again until its app lets go of the mic. Only this
         // call: another app on the mic is asked about once the recording ends.
         offerGate.hold(candidate)
         logger.notice("starting: \(candidate.id, privacy: .public)")
         let generation = startGeneration
-        startTask = Task { await begin(.call(candidate), title: title, generation: generation) }
+        startTask = Task { await begin(.call(candidate), title: title, generation: generation, heard: heard) }
     }
 
     /// Records the room from the mic alone: people talking around the laptop, with no call. No detection, no
@@ -480,10 +500,11 @@ final class MeetingsController: ObservableObject {
     func startConversation() {
         guard canStart else { return }
         starting = true
+        discardListening()
         if case .offered(let offered) = phase { notifications.withdraw(bundleID: offered.id) }
         logger.notice("starting: in person")
         let generation = startGeneration
-        startTask = Task { await begin(.inPerson, title: nil, generation: generation) }
+        startTask = Task { await begin(.inPerson, title: nil, generation: generation, heard: nil) }
     }
 
     func stop() { stop(reason: "stopped") }
@@ -849,12 +870,12 @@ final class MeetingsController: ObservableObject {
 
     // MARK: Dictation
 
-    /// A dictation take started: key-down. Meeting chunks wait until it ends. `recordsSpan` false is for work that
-    /// isn't someone speaking, such as re-transcribing a History entry: chunks wait, but nothing is left out.
-    func dictationBegan(_ id: UUID, recordsSpan: Bool = true) {
+    /// A dictation take started; `began` is its key-down. Meeting chunks wait until it ends. `recordsSpan` false is for
+    /// work that isn't someone speaking, such as re-transcribing a History entry: chunks wait, but nothing is left out.
+    func dictationBegan(_ id: UUID, at began: Date = Date(), recordsSpan: Bool = true) {
         gate.beginForeground(id)
         guard recordsSpan else { return }
-        takes[id] = (Date(), nil)
+        takes[id] = (began, nil)
         setDictating()
     }
 
@@ -874,6 +895,9 @@ final class MeetingsController: ObservableObject {
             let end = take.captureEnded ?? Date()
             session.recordDictation(start: take.began, end: end)
             if let span = Self.span(take.began, end, from: session.startedAt) { dictatedSpans.append(span) }
+        } else if session == nil, let heard = listening?.buffer ?? accepting {
+            // During an offer: kept with what was heard, and left out of the recording too if it's a yes.
+            heard.noteDictation(start: take.began, end: take.captureEnded ?? Date())
         }
         setDictating()
     }
@@ -927,8 +951,16 @@ final class MeetingsController: ObservableObject {
         case call(MeetingCandidate), inPerson
     }
 
-    private func begin(_ source: Source, title override: String?, generation: Int) async {
-        defer { starting = false }
+    /// `heard` is the call's offer buffer, when it was listening: its audio, mute changes and dictations open the
+    /// recording. On every way out it's discarded, which after a hand-off leaves alone what the session now owns.
+    private func begin(_ source: Source, title override: String?, generation: Int, heard: OfferBuffer?) async {
+        let acceptedAt = Date()
+        defer {
+            starting = false
+            heard?.discard()
+            if accepting === heard { accepting = nil }
+            earlySegments = []
+        }
         guard generation == startGeneration else { return }
         let target: SystemAudioTarget
         let title: String, appName: String
@@ -936,11 +968,9 @@ final class MeetingsController: ObservableObject {
         switch source {
         case .call(let call):
             candidate = call
-            let app = call.app
-            let bundles = Set(app.processes.compactMap(\.bundleID) + [app.bundleID]).filter { !$0.hasPrefix("pid:") }
-            target = .app(bundleIDs: Array(bundles), processes: app.processes.map(\.objectID))
-            title = override ?? call.meetingTitle.map(MeetingDetector.cleanTitle) ?? app.name
-            appName = app.name
+            target = Self.target(for: call)
+            title = override ?? call.meetingTitle.map(MeetingDetector.cleanTitle) ?? call.app.name
+            appName = call.app.name
         case .inPerson:
             target = .none
             title = override ?? "Conversation"
@@ -961,7 +991,7 @@ final class MeetingsController: ObservableObject {
             return
         }
         do {
-            try await session.start()
+            try await session.start(handingOver: heard)
         } catch {
             _ = await session.stop()
             await engine.unload()
@@ -985,6 +1015,12 @@ final class MeetingsController: ObservableObject {
         // A take that ran through the last meeting's Stop is left out of this one too, when it ends.
         takesRecorded = []
         dictatedSpans = []
+        // Takes that ended while the offer was up, on the recording's clock now that it starts where the offer did.
+        for take in heard?.dictations ?? [] {
+            session.recordDictation(start: take.start, end: take.end)
+            if let span = Self.span(take.start, take.end, from: session.startedAt) { dictatedSpans.append(span) }
+        }
+        notedSpeechSource = nil
         let store = library.store, folder = session.directory.lastPathComponent
         Task { await store.setRecording(folder, true) }
         reportAtStart = gate.snapshot
@@ -999,10 +1035,16 @@ final class MeetingsController: ObservableObject {
         markedAt = nil
         lidWasClosed = AudioInputDevices.lidClosed()
         if let candidate, let pid = candidate.app.pid, let call = candidate.app.callApp {
-            let probe = AccessibilityProbe(pid: pid, app: call, directory: session.directory, sessionStart: session.startedAt,
-                                           rawLog: debugLogging)
-            probe.start()
-            self.probe = probe
+            if let heardProbe = heard?.claimProbe(pid: pid) {
+                // Reading since the offer: its mute changes move onto the recording's clock.
+                heardProbe.attach(directory: session.directory, sessionStart: session.startedAt, rawLog: debugLogging)
+                self.probe = heardProbe
+            } else {
+                let probe = AccessibilityProbe(pid: pid, app: call, directory: session.directory, sessionStart: session.startedAt,
+                                               rawLog: debugLogging)
+                probe.start()
+                self.probe = probe
+            }
         }
         unrecordedCall = nil
         sidekickVisible = showSidekick
@@ -1013,11 +1055,19 @@ final class MeetingsController: ObservableObject {
         if candidate?.app.callApp?.kind == .browser { recording.releaseTimeout = Self.browserReleaseTimeout }
         if let candidate {
             let askedAt = offered.flatMap { $0.id == candidate.id && $0.since == candidate.since ? $0.at : nil }
-            session.note(Self.startNote(candidate, offeredAt: askedAt, startedAt: session.startedAt))
+            session.note(Self.startNote(candidate, offeredAt: askedAt, acceptedAt: acceptedAt, startedAt: session.startedAt))
         }
         offered = nil
         recording.dictating = speaking
         phase = .recording(recording)
+        // The offer may have loaded the model before this recording existed, with nowhere to say so.
+        Task { [weak self] in
+            if let source = await engine.announced { self?.noteSpeechSource(source, in: session) }
+        }
+        // The heard stretch can be transcribed before the phase changes.
+        let early = earlySegments
+        earlySegments = []
+        for segment in early { append(segment) }
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -1029,10 +1079,7 @@ final class MeetingsController: ObservableObject {
         let engine = MeetingSpeechEngine(gate: gate, dictationEngine: { [speechModels] in
             try await speechModels.backgroundEngine()
         }, onSource: { [weak self] source in
-            Task { @MainActor in
-                self?.session?.annotate { $0.speechModel = source }
-                self?.session?.note("speech model: \(source)")
-            }
+            Task { @MainActor in if let self, let session = self.session { self.noteSpeechSource(source, in: session) } }
         }, onDownload: { [weak self] fraction in
             Task { @MainActor in if self?.speechModelDownload != fraction { self?.speechModelDownload = fraction } }
         })
@@ -1040,8 +1087,60 @@ final class MeetingsController: ObservableObject {
         return engine
     }
 
+    /// Which speech model the live transcript uses, in session.json and once in events.log.
+    private func noteSpeechSource(_ source: String, in session: MeetingSession) {
+        guard session === self.session, source != notedSpeechSource else { return }
+        notedSpeechSource = source
+        session.annotate { $0.speechModel = source }
+        session.note("speech model: \(source)")
+    }
+
+    /// The system audio a call records: its app and helpers, followed across restarts by bundle ID.
+    private static func target(for call: MeetingCandidate) -> SystemAudioTarget {
+        let app = call.app
+        let bundles = Set(app.processes.compactMap(\.bundleID) + [app.bundleID]).filter { !$0.hasPrefix("pid:") }
+        return .app(bundleIDs: Array(bundles), processes: app.processes.map(\.objectID))
+    }
+
+    /// From the moment a call is offered, hear it into memory, so a yes keeps how the call began; only with both
+    /// permissions granted already, since an offer must never raise a prompt. The mute state is read and the speech
+    /// model loaded from then too. Nothing of it reaches disk unless the offer is accepted.
+    private func listen(to candidate: MeetingCandidate) {
+        discardListening()
+        guard OfferBuffer.permitted else { return }
+        let probe = candidate.app.pid.flatMap { pid in
+            candidate.app.callApp.map { AccessibilityProbe(pid: pid, app: $0, directory: nil, sessionStart: Date()) }
+        }
+        let buffer = OfferBuffer(microphone: MicrophoneCapture(), system: SystemAudioTap(target: Self.target(for: candidate)),
+                                 probe: probe, engine: speechEngine())
+        listening = (candidate.id, buffer)
+        buffer.start()
+    }
+
+    /// Takes the offer's buffer for a recording of `candidate`; a buffer for any other call is discarded.
+    private func takeListening(for candidate: MeetingCandidate) -> OfferBuffer? {
+        guard let listening else { return nil }
+        self.listening = nil
+        if listening.id == candidate.id { return listening.buffer }
+        listening.buffer.discard()
+        return nil
+    }
+
+    /// Stops listening to an offered call and drops all of it. With nothing recording or starting, the meeting's own
+    /// speech model goes too, as after a recording; dictation's is never unloaded from here.
+    private func discardListening() {
+        guard let listening else { return }
+        self.listening = nil
+        listening.buffer.discard()
+        if session == nil, !starting, stopping == nil, let engine { Task { await engine.unload() } }
+    }
+
     private func append(_ segment: TranscriptSegment) {
-        guard case .recording(var recording) = phase, let session else { return }
+        guard case .recording(var recording) = phase, let session else {
+            // A starting recording's first lines, from what was heard before the yes: shown once it's recording.
+            if starting { earlySegments.append(segment) }
+            return
+        }
         // While the call app shows you muted, the mic was never heard on the call: keep it out of the live lines as
         // the transcript will. The audio stays as recorded.
         if probe?.muteTimeline.silences(segment) == true { return }
@@ -1181,6 +1280,7 @@ final class MeetingsController: ObservableObject {
             phase = .offered(candidate)
             offered = (candidate.id, candidate.since, Date())
             unrecordedCall = candidate
+            listen(to: candidate)
             // The overlay asks; a notification asks instead while the screen is locked and the overlay can't show.
             if Self.screenLocked {
                 notifications.offer(appName: candidate.app.name, bundleID: candidate.id,
@@ -1371,13 +1471,15 @@ final class MeetingsController: ObservableObject {
         }
     }
 
-    /// The first line of a call's events.log: when its app took the mic, when I asked, and how long until recording
-    /// began, so a transcript that starts late says whether the person joined late or answered late.
-    nonisolated static func startNote(_ candidate: MeetingCandidate, offeredAt: Date?, startedAt: Date) -> String {
+    /// The first line of a call's events.log: when its app took the mic, when I asked, when the person answered, and
+    /// where the recording's timeline begins, so a transcript that starts late says whether the person joined late or
+    /// answered late. Heard from the offer, the recording begins about when I asked, however late the answer.
+    nonisolated static func startNote(_ candidate: MeetingCandidate, offeredAt: Date?, acceptedAt: Date, startedAt: Date) -> String {
         let clock = ISO8601DateFormatter()
         var parts = ["\(candidate.id) took the mic at \(clock.string(from: candidate.since))"]
         if let offeredAt, offeredAt >= candidate.since {
             parts.append(String(format: "asked %.0f s later", offeredAt.timeIntervalSince(candidate.since)))
+            parts.append(String(format: "answered %.0f s after asking", acceptedAt.timeIntervalSince(offeredAt)))
             parts.append(String(format: "recording began %.0f s after asking", startedAt.timeIntervalSince(offeredAt)))
         } else {
             parts.append(String(format: "recording began %.0f s later without asking", startedAt.timeIntervalSince(candidate.since)))
@@ -1454,6 +1556,7 @@ final class MeetingsController: ObservableObject {
     func shutdown() async {
         shuttingDown = true
         startGeneration += 1
+        discardListening()
         processingWork?.cancel()
         leftovers?.cancel()
         detector?.stop()
@@ -1541,8 +1644,8 @@ extension MeetingCopy {
     static func processing(download: Double?, speechModel: Double? = nil) -> String {
         if let speechModel { return "\(speechModelDownload(speechModel)) Then I'll finish the transcript." }
         guard let download else { return "Sorting out who said what…" }
-        let size = MeetingSpeakerModel.files(preset: "offline").downloadBytes.formatted(.byteCount(style: .file))
-        return "Downloading what I need to tell voices apart, just this once (\(Int(download * 100))% of \(size))…"
+        // The speaker model, the echo canceller or the voice model, alone or together: no one size is right for all.
+        return "Downloading what I need to sort out who said what, just this once (\(Int(download * 100))%)…"
     }
 
     /// "Downloading the speech model for meetings, just this once (40% of 480 MB)."
