@@ -410,7 +410,9 @@ final class SidekickController: NSObject, NSWindowDelegate {
         pillSettle?.cancel()
         pillSettle = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
-            guard let self, !Task.isCancelled, NSEvent.pressedMouseButtons == 0 else { return }
+            // Held still mid-drag: settle once it's let go.
+            while NSEvent.pressedMouseButtons != 0, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(100)) }
+            guard let self, !Task.isCancelled else { return }
             let frame = self.pill.frame
             let onRight = frame.midX > Self.visible(for: frame).midX
             guard onRight != self.model.onRight else { return }

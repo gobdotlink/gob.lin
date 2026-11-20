@@ -430,6 +430,8 @@ struct SettingsCapture {
             }
             let size = name.hasPrefix("expanded") ? SidekickController.expandedSize : SidekickController.compactSize
             let window = SidekickCaptureWindow(contentRect: NSRect(origin: .zero, size: size))
+            // The real window is kept out of screen captures; this one has to be captured.
+            window.sharingType = .readOnly
             window.contentView = NSHostingView(rootView: SidekickView(meetings: meetings, model: sidekick).allowsHitTesting(false))
             window.park()
             window.orderBack(nil)

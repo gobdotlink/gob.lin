@@ -851,9 +851,10 @@ final class MeetingsController: ObservableObject {
         }
     }
 
-    /// Saves now what a pending save would have, so Stop and Quit leave the latest notes in the folder.
+    /// Saves the current notes now, pending or not, so Stop and Quit leave the latest in the folder even when an
+    /// earlier autosave failed.
     private func flushTypedNotes() {
-        guard typedNotesSave != nil else { return }
+        guard session != nil else { return }
         saveTypedNotes()
     }
 
