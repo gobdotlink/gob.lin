@@ -35,3 +35,27 @@ public enum MeetingMarks {
         try Data(lines.map { $0 + "\n" }.joined().utf8).write(to: url(in: directory), options: .atomic)
     }
 }
+
+/// `typed-notes.md` in a meeting folder: the person's own notes, typed in the expanded Sidekick during the call.
+/// Each save rewrites it whole and atomically; nothing typed means no file.
+public enum MeetingTypedNotes {
+    public static func url(in directory: URL) -> URL { directory.appendingPathComponent(MeetingStorage.typedNotesFile) }
+
+    /// The notes as typed, or nil when there are none (no file, or only whitespace).
+    public static func read(from directory: URL) -> String? {
+        guard let data = try? Data(contentsOf: url(in: directory)) else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
+    /// Writes the notes as typed; empty or whitespace-only text removes the file.
+    public static func write(_ text: String, to directory: URL) throws {
+        let url = url(in: directory)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            do { try FileManager.default.removeItem(at: url) }
+            catch CocoaError.fileNoSuchFile {}
+            return
+        }
+        try Data(text.utf8).write(to: url, options: .atomic)
+    }
+}

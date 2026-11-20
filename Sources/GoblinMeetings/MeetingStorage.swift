@@ -73,6 +73,8 @@ public enum MeetingStorage {
     /// Moments marked during the call, one per line: `{"t": <seconds from session start>, "label": "<optional>"}`.
     /// Written by the app while recording (see `MeetingMarks`), read by the meeting's review.
     public static let marksFile = "marks.jsonl"
+    /// What the person typed in the expanded Sidekick during the call (see `MeetingTypedNotes`); absent when nothing was.
+    public static let typedNotesFile = "typed-notes.md"
     /// Speech the live transcript didn't get to (it fell behind, or the speech model couldn't run), one chunk per
     /// line: `{"track": "system", "startSample": 0, "sampleCount": 16000}`. Processing transcribes them from the audio.
     public static let deferredFile = "deferred.jsonl"

@@ -12,11 +12,16 @@ struct MeetingNotesSection: View {
     let stale: Bool
     /// speakers.json, so a renamed voice reads with its new name.
     let names: [String: String]
+    /// typed-notes.md, for Copy Notes.
+    var typedNotes: String? = nil
     @ObservedObject var model: MeetingNotesModel
     @ObservedObject var player: MeetingPlayer
     let onChanged: () -> Void
 
     @State private var editFailure: String?
+    /// Fixes being applied, turned down or put back, by what was heard, as they were when clicked. Each stays until
+    /// the reloaded notes show it changed, since respelling the transcript can take several seconds.
+    @State private var settling: [String: MeetingNotes.SpellingFix] = [:]
 
     private var writing: Bool { model.writing.contains(meeting.id) }
 
@@ -63,6 +68,10 @@ struct MeetingNotesSection: View {
             }
         }
         .task { if model.tools.isEmpty { model.refresh() } }
+        .onChange(of: notes?.fixes ?? []) { _, fixes in
+            settling = settling.filter { heard, clicked in fixes.contains { $0.heard == heard && $0 == clicked } }
+        }
+        .onChange(of: meeting.id) { settling = [:] }
     }
 
     private var writingLine: String {
@@ -211,9 +220,13 @@ struct MeetingNotesSection: View {
                 Image(systemName: "character.cursor.ibeam").foregroundStyle(GoblinBrand.mossText).accessibilityHidden(true)
                 Text(fixedLine(active)).font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
+                if active.contains(where: { settling[$0.heard] != nil }) {
+                    ProgressView().controlSize(.small).accessibilityLabel("Putting words back")
+                }
                 Menu("Undo") {
                     ForEach(active, id: \.heard) { fix in
-                        Button("Put Back “\(fix.heard)”") { change { try await model.dismissFix(meeting.id, heard: fix.heard) } }
+                        Button("Put Back “\(fix.heard)”") { settle(fix) { try await model.dismissFix(meeting.id, heard: fix.heard) } }
+                            .disabled(settling[fix.heard] != nil)
                     }
                 }
                 .menuStyle(.button).fixedSize().font(.status)
@@ -232,11 +245,27 @@ struct MeetingNotesSection: View {
                             Text("“\(fix.heard)” → \(fix.meant)").font(.row)
                             if fix.count > 1 { Text("\(fix.count) lines").font(.meta).foregroundStyle(.secondary) }
                             Spacer(minLength: 8)
-                            Button("Not Now") { change { try await model.dismissFix(meeting.id, heard: fix.heard) } }
-                            Button("Fix") { change { try await model.applyFix(meeting.id, heard: fix.heard) } }
+                            if settling[fix.heard] != nil {
+                                ProgressView().controlSize(.small).accessibilityLabel("Fixing “\(fix.heard)”")
+                            }
+                            Button("Not Now") { settle(fix) { try await model.dismissFix(meeting.id, heard: fix.heard) } }
+                            Button("Fix") { settle(fix) { try await model.applyFix(meeting.id, heard: fix.heard) } }
                         }
+                        .disabled(settling[fix.heard] != nil)
                     }
                 }
+            }
+        }
+    }
+
+    /// Fix, Not Now and Put Back show a spinner at once and can't be pressed again while the change lands.
+    private func settle(_ fix: MeetingNotes.SpellingFix, _ edit: @escaping () async throws -> Void) {
+        guard settling[fix.heard] == nil else { return }
+        settling[fix.heard] = fix
+        change {
+            do { try await edit() } catch {
+                settling[fix.heard] = nil
+                throw error
             }
         }
     }
@@ -293,7 +322,7 @@ struct MeetingNotesSection: View {
     private func copy() {
         guard let notes else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(MeetingNotesFile.markdown(notes, title: meeting.title, names: shown), forType: .string)
+        NSPasteboard.general.setString(MeetingNotesFile.markdown(notes, title: meeting.title, names: shown, typedNotes: typedNotes), forType: .string)
     }
 
     private func change(_ edit: @escaping () async throws -> Void) {

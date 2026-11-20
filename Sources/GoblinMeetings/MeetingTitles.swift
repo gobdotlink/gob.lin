@@ -266,13 +266,14 @@ public enum MeetingNotesFile {
         let title = MeetingTitles.display(typed: MeetingMetadata.read(directory).title,
                                           recorded: session?.title ?? MeetingStorage.title(fromFolderName: directory.lastPathComponent),
                                           generated: notes.title)
-        try markdown(notes, title: title, names: names(for: notes, directory: directory))
+        try markdown(notes, title: title, names: names(for: notes, directory: directory),
+                     typedNotes: MeetingTypedNotes.read(from: directory))
             .write(to: directory.appendingPathComponent(markdownFile), atomically: true, encoding: .utf8)
     }
 
-    /// The notes as Markdown: summary, decisions, action items as checkboxes, the template's sections, then marks.
-    /// Times are `[hh:mm:ss]`, as in transcript.md.
-    public static func markdown(_ notes: MeetingNotes, title: String?, names: [String: String]) -> String {
+    /// The notes as Markdown: summary, decisions, action items as checkboxes, the template's sections, marks, then
+    /// what the person typed during the call as they typed it. Times are `[hh:mm:ss]`, as in transcript.md.
+    public static func markdown(_ notes: MeetingNotes, title: String?, names: [String: String], typedNotes: String? = nil) -> String {
         func time(_ at: Double?) -> String { at.map { " [\(WordAssembly.timestamp($0))]" } ?? "" }
         func say(_ text: String) -> String { notes.resolve(text, names: names) }
         var lines: [String] = []
@@ -306,6 +307,9 @@ public enum MeetingNotesFile {
                 "- [\(WordAssembly.timestamp(mark.t))] " + (mark.label.map { "\($0): " } ?? "") + say(mark.note)
             }
             lines.append("")
+        }
+        if let typed = typedNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty {
+            lines += ["## Your notes", typed, ""]
         }
         let model = [notes.written.tool.title, notes.written.model, notes.written.effort].compactMap { $0 }.joined(separator: " · ")
         lines.append("_Notes by \(model), \(notes.written.template.name) template._")

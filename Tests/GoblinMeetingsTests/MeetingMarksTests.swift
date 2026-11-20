@@ -33,3 +33,21 @@ import Testing
     #expect(!AccessibilityProbe.sharingState(["6 AXButton: Share Screen", "6 AXButton: Mute my audio"]))
     #expect(!AccessibilityProbe.sharingState(["9 AXButton: Present now", "7 AXStaticText: Alex Kim is presenting"]))
 }
+
+@Test func typedNotesRoundTripAsTypedAndEmptyRemovesTheFile() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("typed-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent(MeetingStorage.typedNotesFile)
+    #expect(MeetingTypedNotes.read(from: directory) == nil)
+    try MeetingTypedNotes.write("pricing → keep free tier\n- Sam: release notes thu\n", to: directory)
+    #expect(MeetingTypedNotes.read(from: directory) == "pricing → keep free tier\n- Sam: release notes thu\n")
+    // Deleting everything typed leaves no file behind, and clearing twice is fine.
+    try MeetingTypedNotes.write(" \n\t", to: directory)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    #expect(MeetingTypedNotes.read(from: directory) == nil)
+    try MeetingTypedNotes.write("", to: directory)
+    // A file holding only whitespace reads as no notes.
+    try Data("\n\n".utf8).write(to: file)
+    #expect(MeetingTypedNotes.read(from: directory) == nil)
+}

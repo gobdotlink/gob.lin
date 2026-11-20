@@ -197,7 +197,8 @@ enum MeetingsCommand {
                 try encoder.encode(notes).write(to: URL(fileURLWithPath: out), options: .atomic)
                 let markdownURL = URL(fileURLWithPath: out).deletingPathExtension().appendingPathExtension("md")
                 try MeetingNotesFile.markdown(notes, title: MeetingTitles.display(directory: directory, generated: notes.title),
-                                              names: MeetingNotesFile.names(for: notes, directory: directory))
+                                              names: MeetingNotesFile.names(for: notes, directory: directory),
+                                              typedNotes: MeetingTypedNotes.read(from: directory))
                     .write(to: markdownURL, atomically: true, encoding: .utf8)
                 try write(DraftWritten(path: out, markdown: markdownURL.path, seconds: notes.written.seconds))
             } else {

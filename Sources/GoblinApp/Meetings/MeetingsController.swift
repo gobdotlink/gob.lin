@@ -295,6 +295,9 @@ final class MeetingsController: ObservableObject {
     private var pendingInterruption: Interruption?
     private var interruptionDelivery: Task<Void, Never>?
     private var pendingMarkWrite: Task<Void, Never>?
+    /// Waits a second after the last keystroke in the Sidekick's notes, then saves them.
+    private var typedNotesSave: Task<Void, Never>?
+    private var pendingTypedNotesWrite: Task<Void, Never>?
     private var notificationWatch: Task<Void, Never>?
     private static let screenUnlocked = Notification.Name("com.apple.screenIsUnlocked")
     /// In-person: ask whether to stop after this much silence on the mic.
@@ -830,6 +833,44 @@ final class MeetingsController: ObservableObject {
         }
     }
 
+    // MARK: Your notes
+
+    /// What the person typed in the expanded Sidekick during this recording.
+    @Published private(set) var typedNotes = ""
+
+    /// The expanded Sidekick's notes field, on every edit.
+    func setTypedNotes(_ text: String) {
+        guard text != typedNotes else { return }
+        typedNotes = text
+        guard case .recording = phase, session != nil else { return }
+        typedNotesSave?.cancel()
+        typedNotesSave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.saveTypedNotes()
+        }
+    }
+
+    /// Saves the current notes now, pending or not, so Stop and Quit leave the latest in the folder even when an
+    /// earlier autosave failed.
+    private func flushTypedNotes() {
+        guard session != nil else { return }
+        saveTypedNotes()
+    }
+
+    /// Rewrites `typed-notes.md` off the main thread, in order, like `saveMarks`. The text itself is never logged.
+    private func saveTypedNotes() {
+        typedNotesSave?.cancel()
+        typedNotesSave = nil
+        guard let directory = session?.directory else { return }
+        let text = typedNotes, previous = pendingTypedNotesWrite, logger = logger
+        pendingTypedNotesWrite = Task.detached(priority: .utility) {
+            await previous?.value
+            do { try MeetingTypedNotes.write(text, to: directory) }
+            catch { logger.error("couldn't save typed notes: \(error.localizedDescription, privacy: .private)") }
+        }
+    }
+
     // MARK: Copy
 
     /// Copy All, or Copy New: the lines since the last copy. Returns how many lines went to the clipboard.
@@ -1048,6 +1089,9 @@ final class MeetingsController: ObservableObject {
         }
         unrecordedCall = nil
         sidekickVisible = showSidekick
+        typedNotesSave?.cancel()
+        typedNotesSave = nil
+        typedNotes = ""
         if target != .none { refreshSystemAudioPermission() }
         var recording = Recording(title: title, app: appName, bundleID: candidate?.app.bundleID, startedAt: session.startedAt)
         recording.meetingID = folder
@@ -1369,10 +1413,12 @@ final class MeetingsController: ObservableObject {
             // A lid closed on an external display doesn't sleep the Mac; say it shortly, unless sleep comes first.
             if reason == "lid closed" { scheduleInterruption(after: 3) }
         }
-        let marks = pendingMarkWrite
+        flushTypedNotes()
+        let marks = pendingMarkWrite, typedNotesWrite = pendingTypedNotesWrite
         stopping = Task {
             _ = await session.stop()
             await marks?.value
+            await typedNotesWrite?.value
             await self.engine?.unload()
             self.session = nil
             self.stopping = nil
@@ -1567,6 +1613,7 @@ final class MeetingsController: ObservableObject {
         interruptionDelivery?.cancel()
         // Dictation is ending too; let the meeting's last chunks through.
         gate.endAllForeground()
+        flushTypedNotes()
         if let session, stopping == nil {
             annotateDictation(session, reason: "quit")
             recordRunningTakes(session)
@@ -1578,6 +1625,7 @@ final class MeetingsController: ObservableObject {
             if await !Self.finishes(stopping, within: .seconds(2)) { session.leaveQueuedForLater() }
         }
         await pendingMarkWrite?.value
+        await pendingTypedNotesWrite?.value
         if let stopping { _ = await Self.finishes(stopping, within: .seconds(1)) }
         // A start still waiting on capture closes and removes its session.
         if starting, let startTask { _ = await Self.finishes(startTask, within: .seconds(1)) }

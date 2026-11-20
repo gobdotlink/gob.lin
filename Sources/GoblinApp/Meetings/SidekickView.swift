@@ -1,48 +1,65 @@
 import GoblinMeetings
 import SwiftUI
 
-/// The live captions beside a call, in the overlay's dark glass: the goblin at 64 pt, who's talking, marks, the mute
-/// state and Stop. Collapsed, it's a pill with the time and a level, the goblin beside it like the overlay's.
+/// The Sidekick's window, in the overlay's dark glass: the goblin at 64 pt, who's talking, marks, the mute state and
+/// Stop. Expanded, your notes take a column on the left and all of that sits in a 340 pt column on the right.
 struct SidekickView: View {
-    static let pillWidth: CGFloat = 196
+    /// The traffic lights' strip: the window's own buttons share it.
+    static let titlebarHeight: CGFloat = 32
+    static let columnWidth: CGFloat = 340
+    /// Narrower than this mid-animation, the notes wait for the room.
+    private static let notesMinimumWidth: CGFloat = 560
 
     @ObservedObject var meetings: MeetingsController
     @ObservedObject var model: SidekickModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
+        GeometryReader { proxy in
             if let recording = meetings.recording {
-                if model.collapsed { pill(recording) } else { panel(recording) }
+                let notes = model.expanded && proxy.size.width >= Self.notesMinimumWidth
+                VStack(spacing: 0) {
+                    titleRow
+                    HStack(spacing: 0) {
+                        if notes {
+                            SidekickNotes(notes: meetings.typedNotes, save: meetings.setTypedNotes)
+                            Rectangle().fill(.white.opacity(0.08)).frame(width: 0.5)
+                        }
+                        column(recording).frame(width: notes ? Self.columnWidth : proxy.size.width)
+                    }
+                }
             }
         }
-        .padding(SidekickController.margin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity,
-               alignment: model.edge == .right ? .topTrailing : .topLeading)
+        .background { SidekickWindowGlass() }
+        .ignoresSafeArea()
+        // Drags from anywhere that isn't a control or a text field, captions and title strip included, even on the
+        // click that would otherwise only bring the window forward. Buttons, the scroller and the editors win.
+        .gesture(WindowDragGesture())
+        .allowsWindowActivationEvents(true)
+        .foregroundStyle(.white.opacity(0.94))
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: Goblin
-
-    /// Looks toward the middle of the screen; writes a mark down with the quill for a moment.
-    private func goblin(_ recording: MeetingsController.Recording) -> some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { context in
-            let marking = meetings.markedAt.map { context.date.timeIntervalSince($0) < 1.5 } ?? false
-            // Writing a mark down; dozing through a quiet room; otherwise watching the middle of the screen.
-            let sprite: Sprite = marking ? .look : meetings.quietQuestion != nil ? .closed : model.edge == .right ? .eyesW : .eyesE
-            PixelSprite(sprite: sprite, scale: 1, mirrored: false)
-                .overlay(alignment: .bottomLeading) {
-                    if marking { PixelSprite(sprite: .quill, scale: 1).offset(x: -2, y: 3) }
-                }
-                .transaction { $0.animation = nil }
+    /// Beside the traffic lights: Notes, Keep on Top and ⋯.
+    private var titleRow: some View {
+        HStack(spacing: 6) {
+            Spacer(minLength: 0)
+            Button { model.setExpanded(!model.expanded) } label: { Image(systemName: "note.text").font(.system(size: 11, weight: .semibold)) }
+                .buttonStyle(OverlayIconButtonStyle())
+                .accessibilityLabel(model.expanded ? "Hide Notes" : "Show Notes").help(model.expanded ? "Hide Notes" : "Show Notes")
+            Button { model.setKeepOnTop(!model.keepOnTop) } label: {
+                Image(systemName: model.keepOnTop ? "pin.fill" : "pin").font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(OverlayIconButtonStyle())
+            .accessibilityLabel("Keep on Top").accessibilityValue(model.keepOnTop ? "On" : "Off")
+            .help(model.keepOnTop ? "Kept on top of other windows" : "Keep on Top")
+            Button { model.showMenu(nil) } label: { Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)) }
+                .buttonStyle(OverlayIconButtonStyle()).accessibilityLabel("More")
         }
-        .frame(width: 64, height: 64)
-        .accessibilityHidden(true)
+        .padding(.trailing, 10)
+        .frame(height: Self.titlebarHeight)
     }
 
-    // MARK: Panel
-
-    private func panel(_ recording: MeetingsController.Recording) -> some View {
+    private func column(_ recording: MeetingsController.Recording) -> some View {
         VStack(spacing: 0) {
             header(recording)
             levels(recording).padding(.horizontal, 14).padding(.bottom, 10)
@@ -52,16 +69,13 @@ struct SidekickView: View {
             Rectangle().fill(.white.opacity(0.1)).frame(height: 0.5)
             footer(recording)
         }
-        .frame(width: SidekickController.expandedSize.width, height: SidekickController.expandedSize.height)
-        .background { SidekickGlass(shape: RoundedRectangle(cornerRadius: Radius.bubble, style: .continuous)) }
-        .foregroundStyle(.white.opacity(0.94))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("gob.lin Sidekick")
     }
 
     private func header(_ recording: MeetingsController.Recording) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            goblin(recording)
+            SidekickGoblin(markedAt: meetings.markedAt, dozing: meetings.quietQuestion != nil, looksLeft: model.onRight)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
                     RecordingReel()
@@ -73,16 +87,8 @@ struct SidekickView: View {
                     .font(.meta).foregroundStyle(.white.opacity(0.4)).lineLimit(1).truncationMode(.tail)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-            .gesture(dragGesture)
-            Button { model.showMenu(nil) } label: { Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)) }
-                .buttonStyle(OverlayIconButtonStyle()).accessibilityLabel("More")
-            Button { model.setCollapsed(true) } label: {
-                Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 10, weight: .bold))
-            }
-            .buttonStyle(OverlayIconButtonStyle()).accessibilityLabel("Collapse to pill")
         }
-        .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 12)
+        .padding(.horizontal, 12).padding(.top, 2).padding(.bottom, 12)
     }
 
     private func levels(_ recording: MeetingsController.Recording) -> some View {
@@ -181,17 +187,41 @@ struct SidekickView: View {
             HStack(spacing: 6) { actions() }.padding(.leading, 22)
         }
     }
+}
 
-    // MARK: Pill
+// MARK: - Pill
+
+/// Collapsed: a capsule with the time, a level, Mark This and Expand, the goblin beside it on the side nearer the
+/// screen's edge, like the overlay's. It drags from anywhere.
+struct SidekickPill: View {
+    static let width: CGFloat = 196
+    static let goblinWidth: CGFloat = 64
+    static let spacing: CGFloat = 8
+    static let contentSize = CGSize(width: width + spacing + goblinWidth, height: 64)
+    /// Room around the content for the glass's shadow.
+    static let margin: CGFloat = 24
+    static let windowSize = CGSize(width: contentSize.width + 2 * margin, height: contentSize.height + 2 * margin)
+
+    @ObservedObject var meetings: MeetingsController
+    @ObservedObject var model: SidekickModel
+
+    var body: some View {
+        Group {
+            if let recording = meetings.recording { pill(recording) }
+        }
+        .frame(width: Self.contentSize.width, height: Self.contentSize.height)
+        .padding(Self.margin)
+        .environment(\.colorScheme, .dark)
+    }
 
     private func pill(_ recording: MeetingsController.Recording) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            if model.edge == .left { goblin(recording) }
+        let levels = zip(model.microphoneLevels, model.systemLevels).map { max($0, $1) }
+        return HStack(alignment: .bottom, spacing: Self.spacing) {
+            if !model.onRight { goblin }
             HStack(spacing: 8) {
                 RecordingReel()
                 Elapsed(start: recording.startedAt).font(.status.weight(.medium)).foregroundStyle(.white.opacity(0.62))
-                Meter(levels: zip(model.microphoneLevels, model.systemLevels).map { max($0, $1) },
-                      idle: (zip(model.microphoneLevels, model.systemLevels).map { max($0, $1) }).allSatisfy { $0 < 0.02 })
+                Meter(levels: levels, idle: levels.allSatisfy { $0 < 0.02 })
                 Spacer(minLength: 0)
                 Button { meetings.mark() } label: { Image(systemName: "flag.fill").font(.system(size: 11)).foregroundStyle(GoblinBrand.candle) }
                     .buttonStyle(OverlayIconButtonStyle()).accessibilityLabel("Mark This").help("Mark This (\(MeetingMarkHotkey.title))")
@@ -201,21 +231,82 @@ struct SidekickView: View {
                 .buttonStyle(OverlayIconButtonStyle()).accessibilityLabel("Open the Sidekick")
             }
             .padding(.leading, 14).padding(.trailing, 8)
-            .frame(width: Self.pillWidth, height: 40)
+            .frame(width: Self.width, height: 40)
             .background { SidekickGlass(shape: Capsule()) }
             .contentShape(Capsule())
-            .gesture(dragGesture)
-            if model.edge == .right { goblin(recording) }
+            if model.onRight { goblin }
         }
         .foregroundStyle(.white.opacity(0.94))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("gob.lin Sidekick, collapsed")
     }
 
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .global)
-            .onChanged { model.dragChanged($0.location) }
-            .onEnded { _ in model.dragEnded() }
+    private var goblin: some View {
+        SidekickGoblin(markedAt: meetings.markedAt, dozing: meetings.quietQuestion != nil, looksLeft: model.onRight)
+    }
+}
+
+// MARK: - Goblin
+
+/// Looks toward the middle of the screen; writes a mark down with the quill for a moment; dozes through a quiet room.
+private struct SidekickGoblin: View {
+    let markedAt: Date?
+    let dozing: Bool
+    let looksLeft: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            let marking = markedAt.map { context.date.timeIntervalSince($0) < 1.5 } ?? false
+            let sprite: Sprite = marking ? .look : dozing ? .closed : looksLeft ? .eyesW : .eyesE
+            PixelSprite(sprite: sprite, scale: 1, mirrored: false)
+                .overlay(alignment: .bottomLeading) {
+                    if marking { PixelSprite(sprite: .quill, scale: 1).offset(x: -2, y: 3) }
+                }
+                .transaction { $0.animation = nil }
+        }
+        .frame(width: 64, height: 64)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Notes
+
+/// Your notes, typed during the call: a plain editor on the glass, folded into the meeting's notes afterwards. It
+/// keeps its own draft, so the controller's updates never move the cursor.
+private struct SidekickNotes: View {
+    let notes: String
+    let save: (String) -> Void
+    @State private var draft = ""
+
+    private static let font = Font.system(size: 15)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("YOUR NOTES").font(.capsLabel).tracking(0.85).foregroundStyle(.white.opacity(0.45))
+                .padding(.leading, 5)
+            TextEditor(text: $draft)
+                .font(Self.font).lineSpacing(4)
+                .foregroundStyle(.white.opacity(0.92))
+                .scrollContentBackground(.hidden)
+                .overlay(alignment: .topLeading) {
+                    if draft.isEmpty {
+                        Text("Jot anything down. I'll fold it into the notes after the call.")
+                            .font(Self.font).foregroundStyle(.white.opacity(0.32))
+                            .padding(.leading, 5).allowsHitTesting(false)
+                    }
+                }
+                .accessibilityLabel("Your notes")
+            if !draft.isEmpty {
+                Text("I'll fold these into the notes after the call.").font(.status).foregroundStyle(.white.opacity(0.4))
+                    .padding(.leading, 5)
+            }
+        }
+        .padding(.leading, 15).padding(.trailing, 16).padding(.top, 2).padding(.bottom, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { draft = notes }
+        .onChange(of: draft) { _, now in save(now) }
+        // A new recording, or notes set elsewhere; the person's own typing already matches.
+        .onChange(of: notes) { _, now in if now != draft { draft = now } }
     }
 }
 
@@ -395,10 +486,11 @@ private struct SidekickMarkRow: View {
             if model.editingMark == mark.id {
                 TextField("Label it now or later", text: $text)
                     .textFieldStyle(.plain).foregroundStyle(.white).focused($focused)
-                    .onSubmit(commit)
-                    .onExitCommand { model.endLabel() }
+                    .onSubmit { commit(handBack: true) }
+                    .onExitCommand { model.endLabel(true) }
                     .onAppear { text = mark.label; DispatchQueue.main.async { focused = true } }
-                    .onChange(of: focused) { _, now in if !now, model.editingMark == mark.id { commit() } }
+                    // Clicked away, maybe into the notes: the keyboard stays where it went.
+                    .onChange(of: focused) { _, now in if !now, model.editingMark == mark.id { commit(handBack: false) } }
                     .onChange(of: text, initial: true) { _, now in model.labelDraft = now }
             } else if mark.label.isEmpty {
                 Text("Marked").foregroundStyle(.white.opacity(0.75))
@@ -420,9 +512,9 @@ private struct SidekickMarkRow: View {
         .accessibilityLabel("Mark at \(MeetingsController.elapsed(mark.t))")
     }
 
-    private func commit() {
+    private func commit(handBack: Bool) {
         meetings.label(mark.id, text)
-        model.endLabel()
+        model.endLabel(handBack)
     }
 }
 
@@ -503,7 +595,14 @@ private struct SidekickScroller: View {
 
 // MARK: - Pieces
 
-/// The overlay's bubble, for the Sidekick: blur, 92% bubble, a hairline and a soft shadow.
+/// The window's background: the overlay's blur and 92% bubble. The window draws its own edge, corners and shadow.
+private struct SidekickWindowGlass: View {
+    var body: some View {
+        Rectangle().fill(.ultraThinMaterial).overlay(Rectangle().fill(GoblinBrand.bubble)).ignoresSafeArea()
+    }
+}
+
+/// The overlay's bubble, for the Sidekick's pill and capsules: blur, 92% bubble, a hairline and a soft shadow.
 private struct SidekickGlass<S: InsettableShape>: View {
     let shape: S
 
