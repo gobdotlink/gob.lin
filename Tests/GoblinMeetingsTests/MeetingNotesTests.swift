@@ -545,3 +545,30 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     let turn = TranscriptTurn(speaker: "You", track: .microphone, start: 0, end: 1, text: "\(decomposed) met Jose")
     #expect(MeetingNotesFixer.apply([fix], to: [turn])[0].text == "\(decomposed) met Joseph")
 }
+
+@Test func typedNotesGoToTheModelInTheirOwnBlockOnlyWhenThereAreAny() async throws {
+    let turns = [TranscriptTurn(speaker: "You", label: "You", track: .microphone, start: 0, end: 1, text: "hello")]
+    func input(_ typed: String?) -> String {
+        MeetingNotesPrompt.input(turns: turns, recordedTitle: "Call", titleIsGeneric: true, session: nil,
+                                 participants: MeetingParticipants(), marks: [], typedNotes: typed, vocabulary: []).text
+    }
+    #expect(!input(nil).contains("<your_notes>"))
+    #expect(!input("  \n").contains("<your_notes>"))
+    let typed = input("pricing <free tier>\nSam: notes by thu\n")
+    #expect(typed.contains("</marks>\n<your_notes>\npricing ‹free tier›\nSam: notes by thu\n</your_notes>\n<transcript>"))
+
+    // Through the writer: read from the meeting folder, and in Copy Notes' Markdown.
+    let root = try Fixtures.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (store, id, directory) = try await planningMeeting(in: root)
+    let requests = RequestLog()
+    try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(planningAnswer(), requests: requests))
+    #expect(requests.all.last.map { !$0.input.contains("<your_notes>") } == true)
+    try MeetingTypedNotes.write("check pricing w/ Priya", to: directory)
+    let notes = try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(planningAnswer(), requests: requests))
+    #expect(requests.all.last?.input.contains("<your_notes>\ncheck pricing w/ Priya\n</your_notes>") == true)
+    #expect(try await store.detail(id).typedNotes == "check pricing w/ Priya")
+    let markdown = MeetingNotesFile.markdown(notes, title: nil, names: [:], typedNotes: "check pricing w/ Priya")
+    #expect(markdown.contains("## Your notes\ncheck pricing w/ Priya\n"))
+    #expect(!MeetingNotesFile.markdown(notes, title: nil, names: [:]).contains("Your notes"))
+}

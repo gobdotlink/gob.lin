@@ -161,7 +161,7 @@ public enum MeetingNotesWriter {
         let title = typed ?? recorded
         let input = MeetingNotesPrompt.input(turns: turns, recordedTitle: title, titleIsGeneric: typed == nil && MeetingTitles.isGeneric(recorded),
                                              session: session, participants: participants, marks: MeetingMark.read(directory),
-                                             vocabulary: vocabulary)
+                                             typedNotes: MeetingTypedNotes.read(from: directory), vocabulary: vocabulary)
         guard input.characters >= MeetingNotesPrompt.minimumCharacters else { throw MeetingNotesError.tooShort }
         let known = MeetingNotesPrompt.knownNames(vocabulary: vocabulary, participants: participants,
                                                   speakers: turns.map(\.speaker).filter { !MeetingTimeline.isUnnamed($0) }, title: title)

@@ -53,6 +53,8 @@ public struct MeetingDetail: Codable, Sendable {
     public var speakerNames: [String: String]
     /// marks.jsonl, oldest first.
     public var marks: [MeetingMark] = []
+    /// typed-notes.md: what the person typed in the Sidekick during the call, or nil when nothing.
+    public var typedNotes: String? = nil
     /// Shown names that Remember voices filled in from People, rather than a person.
     public var namedFromVoice: Set<String> = []
     /// Shown name of an unnamed voice → who it sounds like, closest first: someone in People, or another voice of this
@@ -178,7 +180,7 @@ public actor MeetingStore {
         let people = options.voices?.people.people() ?? []
         return MeetingDetail(summary: summary, turns: turns, participants: MeetingParticipants.read(directory),
                              microphoneAudio: audio(.microphone), systemAudio: audio(.system), report: report,
-                             speakerNames: names, marks: MeetingMark.read(directory),
+                             speakerNames: names, marks: MeetingMark.read(directory), typedNotes: MeetingTypedNotes.read(from: directory),
                              namedFromVoice: voices.map { VoiceSuggestions.namedFromVoice($0, names: names) } ?? [],
                              voiceSuggestions: voices.map { VoiceSuggestions.suggestions($0, names: names, people: people) } ?? [:])
     }

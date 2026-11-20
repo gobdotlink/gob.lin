@@ -60,6 +60,7 @@ struct MeetingDetailView: View {
                 }
                 transcript.padding(.top, 20)
                 notes.padding(.top, 20)
+                if let typed = detail?.typedNotes { yourNotes(typed).padding(.top, 20) }
             }
             .padding(28)
         }
@@ -283,9 +284,21 @@ struct MeetingDetailView: View {
 
     private var notes: some View {
         MeetingNotesSection(meeting: meeting, notes: savedNotes, stale: notesStale, names: detail?.speakerNames ?? [:],
-                            model: notesModel, player: player) {
+                            typedNotes: detail?.typedNotes, model: notesModel, player: player) {
             reloads += 1
             onEdited()
+        }
+    }
+
+    /// What the person typed in the Sidekick during the call, as typed.
+    private func yourNotes(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CapsHeader("Your notes").padding(.leading, 6)
+            Plate {
+                Text(text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.row).lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
         }
     }
 

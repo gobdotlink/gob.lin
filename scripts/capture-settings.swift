@@ -251,7 +251,7 @@ struct SettingsCapture {
                     }
                 }
                 if wanted("meetings") {
-                    try await captureMeetings(model) { name, view, size, dark in try await shoot(name, view, size: size, dark: dark) }
+                    try await captureMeetings(model, to: destination) { name, view, size, dark in try await shoot(name, view, size: size, dark: dark) }
                 }
                 if wanted("overlay") {
                     for (name, overlay) in overlayPhases() {
@@ -332,7 +332,7 @@ struct SettingsCapture {
     }
 
     /// The in-call surfaces from synthetic meetings: the popover module, the Sidekick, the pill and the menu-bar mark.
-    @MainActor private static func captureMeetings(_ model: AppModel,
+    @MainActor private static func captureMeetings(_ model: AppModel, to destination: URL,
                                                    shoot: @MainActor (String, AnyView, NSSize, Bool) async throws -> Void) async throws {
         let meetings = model.meetings
         let start = Date().addingTimeInterval(-(12 * 60 + 48))
@@ -388,35 +388,58 @@ struct SettingsCapture {
             }
         }
 
-        let sidekicks: [(String, Bool, SidekickModel.Edge, () -> Void)] = [
-            ("call", false, .right, { meetings.preview(.recording(call)) }),
-            ("scrolled-back", false, .right, { meetings.preview(.recording(call)) }),
-            ("marking", false, .right, { meetings.preview(.recording(call), markedAt: Date().addingTimeInterval(600)) }),
-            ("muted", false, .right, { meetings.preview(.recording(muted)) }),
-            ("ending", false, .right, { meetings.preview(.recording(ending)) }),
-            ("system-audio-off", false, .right, { meetings.preview(.recording(call), systemAudio: .denied) }),
-            ("in-person", false, .right, { meetings.preview(.recording(room)) }),
-            ("in-person-quiet", false, .right, { meetings.preview(.recording(quietRoom), quiet: true) }),
-            ("pill", true, .right, { meetings.preview(.recording(call)) }),
-            ("pill-left", true, .left, { meetings.preview(.recording(call)) }),
+        // The Sidekick in its own window, chrome and all: always dark, so one appearance.
+        let sidekicks: [(String, () -> Void)] = [
+            ("call", { meetings.preview(.recording(call)) }),
+            ("scrolled-back", { meetings.preview(.recording(call)) }),
+            ("marking", { meetings.preview(.recording(call), markedAt: Date().addingTimeInterval(600)) }),
+            ("muted", { meetings.preview(.recording(muted)) }),
+            ("ending", { meetings.preview(.recording(ending)) }),
+            ("system-audio-off", { meetings.preview(.recording(call), systemAudio: .denied) }),
+            ("in-person", { meetings.preview(.recording(room)) }),
+            ("in-person-quiet", { meetings.preview(.recording(quietRoom), quiet: true) }),
+            ("expanded", { meetings.preview(.recording(call)) }),
+            ("expanded-empty", { meetings.preview(.recording(call)) }),
+            ("pill", { meetings.preview(.recording(call)) }),
+            ("pill-left", { meetings.preview(.recording(call)) }),
         ]
-        for (name, collapsed, edge, setUp) in sidekicks {
+        for (name, setUp) in sidekicks {
             setUp()
-            let sidekick = SidekickModel(collapsed: collapsed)
-            sidekick.edge = edge
+            let pill = name.hasPrefix("pill")
+            let sidekick = SidekickModel(collapsed: pill, expanded: name.hasPrefix("expanded"))
+            sidekick.onRight = name != "pill-left"
             for (microphone, system) in [(-30, -14), (-18, -40), (-26, -12), (-14, -30), (-22, -18)] as [(Float, Float)] {
                 sidekick.push(microphone: name.contains("muted") || name.contains("ending") || name.contains("quiet") ? -100 : microphone,
                               system: name.contains("in-person") || name.contains("ending") ? -100 : system)
             }
-            if name == "call" { sidekick.showsConsent = false }
+            if name == "call" || name == "expanded" { sidekick.showsConsent = false }
             if name == "scrolled-back" { sidekick.previewScrolledBack = true }
-            let size = collapsed ? SidekickController.collapsedSize : SidekickController.expandedSize
-            let window = NSSize(width: size.width + 2 * SidekickController.margin, height: size.height + 2 * SidekickController.margin)
-            for dark in [false, true] {
-                let view = ZStack { AppBackdrop(); SidekickView(meetings: meetings, model: sidekick) }
-                try await shoot("sidekick-\(name)\(dark ? "-dark" : "")", AnyView(view), window, dark)
+            meetings.setTypedNotes(name == "expanded" ? """
+                Pricing: free tier stays at three tools a month. Revisit once lending is steady.
+
+                Offline edits still drop on a fast close. Sam wants a proper fix, not another patch.
+
+                After the call: start the launch-blocker list.
+                """ : "")
+            if pill {
+                for dark in [false, true] {
+                    let view = ZStack { AppBackdrop(); SidekickPill(meetings: meetings, model: sidekick) }
+                    try await shoot("sidekick-\(name)\(dark ? "-dark" : "")", AnyView(view), SidekickPill.windowSize, dark)
+                }
+                continue
             }
+            let size = name.hasPrefix("expanded") ? SidekickController.expandedSize : SidekickController.compactSize
+            let window = SidekickCaptureWindow(contentRect: NSRect(origin: .zero, size: size))
+            window.contentView = NSHostingView(rootView: SidekickView(meetings: meetings, model: sidekick).allowsHitTesting(false))
+            window.park()
+            window.orderBack(nil)
+            try await Task.sleep(for: .milliseconds(700))
+            window.park()
+            try snapshot(window, to: destination.appendingPathComponent("design-sidekick-\(name).png"))
+            window.orderOut(nil)
+            print("Captured sidekick-\(name)")
         }
+        meetings.setTypedNotes("")
         meetings.preview(.idle)
 
         // The menu-bar goblin at 4×: idle, recording a meeting, and dictating during one.
@@ -527,7 +550,14 @@ private final class CaptureWindow: NSWindow {
     // Drawn as the focused window, while the app in use keeps the real focus.
     override var isKeyWindow: Bool { true }
     override var isMainWindow: Bool { true }
+}
 
+/// The Sidekick's own window, parked like the others. It draws as it usually sits: not key, so the traffic lights rest.
+private final class SidekickCaptureWindow: SidekickWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
+private extension NSWindow {
     /// The system only draws a window that touches a display, so one point of a corner does. Corners are rounded,
     /// so that point is clear.
     func park() {
