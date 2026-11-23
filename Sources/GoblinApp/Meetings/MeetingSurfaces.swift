@@ -9,21 +9,20 @@ import GoblinMeetings
 final class MeetingSurfaces {
     private let meetings: MeetingsController
     private let overlay: OverlayController
-    private let sidekick: SidekickController?
-    private let hotkey: MeetingMarkHotkey?
+    private let sidekick: SidekickController
+    private let hotkey: MeetingMarkHotkey
     private let openMeeting: (String) -> Void
     private var subscriptions: Set<AnyCancellable> = []
     private var offered: String?
     private var recordingID: String?
 
-    init(meetings: MeetingsController, overlay: OverlayController, defaults: UserDefaults, servicesEnabled: Bool,
+    init(meetings: MeetingsController, overlay: OverlayController, defaults: UserDefaults,
          openMeeting: @escaping (String) -> Void) {
         self.meetings = meetings
         self.overlay = overlay
         self.openMeeting = openMeeting
-        sidekick = servicesEnabled ? SidekickController(meetings: meetings, defaults: defaults, overlayPosition: { [overlay] in overlay.position })
-                                   : nil
-        hotkey = servicesEnabled ? MeetingMarkHotkey { [weak meetings] in meetings?.mark() } : nil
+        sidekick = SidekickController(meetings: meetings, defaults: defaults, overlayPosition: { [overlay] in overlay.position })
+        hotkey = MeetingMarkHotkey { [weak meetings] in meetings?.mark() }
         meetings.$phase.removeDuplicates().sink { [weak self] phase in self?.phaseChanged(phase) }.store(in: &subscriptions)
         meetings.offerRecalled.sink { [weak self] call in self?.showOffer(call) }.store(in: &subscriptions)
         meetings.$readyNotice.compactMap { $0 }.sink { [weak self] notice in self?.announce(notice) }.store(in: &subscriptions)
@@ -53,13 +52,13 @@ final class MeetingSurfaces {
         if case .recording(let recording) = phase {
             guard recordingID != recording.meetingID else { return }
             recordingID = recording.meetingID
-            hotkey?.register()
-            sidekick?.recordingStarted()
+            hotkey.register()
+            sidekick.recordingStarted()
             // With the Sidekick off, one line says it started and how to stop it.
             if !meetings.sidekickVisible { overlay.showCompletion(.meetingRecording(title: recording.title), session: UUID()) }
         } else if recordingID != nil {
             recordingID = nil
-            hotkey?.unregister()
+            hotkey.unregister()
             overlay.withdraw { if case .meetingQuiet = $0 { true } else { false } }
         }
     }
@@ -114,8 +113,8 @@ final class MeetingSurfaces {
     }
 
     func shutdown() {
-        hotkey?.unregister()
-        sidekick?.shutdown()
+        hotkey.unregister()
+        sidekick.shutdown()
         subscriptions.removeAll()
     }
 }
