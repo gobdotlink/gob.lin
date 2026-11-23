@@ -20,8 +20,9 @@ enum MeetingsCommand {
       notes writes notes.json into the meeting, or only to --out when given; --print-prompt sends nothing.
            goblin meetings simulate --system <audio> [--mic <audio>] [--echo <gain>] [--title <text>]
              [--preset offline|fast32|fast128] [--no-echo-cancel] [--root <dir>] [--verbose]
-      simulate writes to a new temporary folder unless --root is given. --no-echo-cancel keeps a call's live microphone
-      lines rather than transcribing its microphone again with the call's sound taken out.
+      simulate writes to a new temporary folder unless --root is given. --no-echo-cancel keeps the call's sound in the
+      microphone the live transcript hears, and keeps a call's live microphone lines rather than transcribing its
+      microphone again with the call's sound taken out.
     """
 
     /// Whether these arguments need a speech model: `simulate` transcribes, and so does `process` for a folder whose
@@ -136,7 +137,8 @@ enum MeetingsCommand {
             let simulationRoot = rootOption ?? FileManager.default.temporaryDirectory
                 .appendingPathComponent("goblin-meetings-\(UUID().uuidString)", isDirectory: true)
             let directory = try await MeetingSimulator.run(system: URL(fileURLWithPath: system), microphone: microphone.map { URL(fileURLWithPath: $0) },
-                                                           echoGain: echo, engine: engine, recognition: recognition, title: title, root: simulationRoot, log: log)
+                                                           echoGain: echo, engine: engine, recognition: recognition, title: title, root: simulationRoot,
+                                                           cancelsEchoLive: cancelsEcho, log: log)
             let live = Date().timeIntervalSince(started)
             // Loaded again only for what's transcribed after the call, such as the echo-cancelled microphone.
             await engine.unload()

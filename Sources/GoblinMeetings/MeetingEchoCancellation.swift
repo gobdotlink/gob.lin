@@ -179,3 +179,176 @@ extension MeetingPostProcessor {
         segments.reduce(0) { $0 + ($1.words.isEmpty ? $1.text.split(whereSeparator: \.isWhitespace).count : $1.words.count) }
     }
 }
+
+/// An echo canceller that takes audio as it comes: equal lengths of microphone and the call's sound in, the cleaned
+/// microphone out, sample i out for sample i in once `flush` has drained what it holds.
+struct LiveEchoStream: Sendable {
+    let enhance: @Sendable (_ microphone: [Float], _ reference: [Float]) async throws -> [Float]
+    let flush: @Sendable () async throws -> [Float]
+}
+
+/// Takes the call's sound out of the microphone while a call records, so the live transcript doesn't give the person
+/// the other side's words when the call plays on loudspeakers. It pairs each microphone sample with the call's sound
+/// at the same moment (both tracks are on the session's timeline), runs the pair through the echo canceller, and cuts
+/// the cleaned microphone into chunks for the live transcript. The microphone's WAV stays as it was heard, for the
+/// pass after the call.
+///
+/// The microphone waits for the call's sound, but only while the call's track keeps arriving: once nothing has come from
+/// it for `stallSeconds` (the tap stopped, or the call app went quiet) the microphone goes on against silence. Waiting
+/// on arrival rather than on audio keeps a burst (the audio heard before a recording was accepted, a replay) paired.
+/// Without the model (not downloaded yet, or it fails), the microphone goes to the live transcript as heard.
+final class LiveEchoCanceller: @unchecked Sendable {
+    private enum Input: Sendable { case microphone([Float]), system([Float]) }
+    static let stallSeconds = 0.5
+    private let inputs: AsyncStream<Input>.Continuation
+    private let worker: Task<Void, Never>
+
+    init(load: @escaping @Sendable () async throws -> LiveEchoStream?, log: @escaping @Sendable (String) -> Void,
+         onChunk: @escaping @Sendable (SpeechChunk) -> Void) {
+        let (stream, inputs) = AsyncStream.makeStream(of: Input.self)
+        self.inputs = inputs
+        worker = Task {
+            var work = Work(log: log, onChunk: onChunk)
+            do {
+                work.stream = try await load()
+                log(work.stream == nil ? "live echo cancellation off: the echo canceller isn't downloaded yet" : "live echo cancellation on")
+            } catch {
+                log("live echo cancellation off: \(error.localizedDescription)")
+            }
+            let clock = ContinuousClock()
+            var systemArrived = clock.now
+            for await input in stream {
+                switch input {
+                case .microphone(let samples): work.pairing.addMicrophone(samples)
+                case .system(let samples):
+                    work.pairing.addReference(samples)
+                    systemArrived = clock.now
+                }
+                let stalled = clock.now - systemArrived > .seconds(Self.stallSeconds)
+                if let pair = work.pairing.take(all: stalled) { await work.cancel(pair.microphone, pair.reference) }
+            }
+            await work.finish()
+        }
+    }
+
+    deinit { inputs.finish() }
+
+    /// The microphone's samples, in order, on the session's timeline.
+    func microphone(_ samples: [Float]) { inputs.yield(.microphone(samples)) }
+
+    /// The call's sound, in order, on the same timeline.
+    func system(_ samples: [Float]) { inputs.yield(.system(samples)) }
+
+    /// After both tracks have finished: cleans what's left and hands over the last chunks.
+    func finish() async {
+        inputs.finish()
+        await worker.value
+    }
+
+    /// The worker's state, only ever touched by the worker.
+    private struct Work {
+        let log: @Sendable (String) -> Void
+        let onChunk: @Sendable (SpeechChunk) -> Void
+        var stream: LiveEchoStream?
+        var pairing = EchoPairing()
+        var chunker = SpeechChunker(track: .microphone)
+        /// Microphone samples given to the canceller and not back yet: what goes on as heard if it fails.
+        var held: [Float] = []
+
+        mutating func cancel(_ microphone: [Float], _ reference: [Float]) async {
+            guard let stream else { return emit(microphone) }
+            held += microphone
+            do {
+                let cleaned = try await stream.enhance(microphone, reference)
+                held.removeFirst(min(cleaned.count, held.count))
+                emit(cleaned)
+            } catch { giveUp(error) }
+        }
+
+        mutating func finish() async {
+            if let pair = pairing.take(all: true) { await cancel(pair.microphone, pair.reference) }
+            if let stream {
+                do {
+                    let tail = try await stream.flush()
+                    held.removeFirst(min(tail.count, held.count))
+                    emit(tail)
+                } catch { giveUp(error) }
+            }
+            for chunk in chunker.finish() { onChunk(chunk) }
+        }
+
+        /// The rest of the call goes to the live transcript as heard, from the first sample not yet handed on.
+        mutating func giveUp(_ error: any Error) {
+            log("live echo cancellation stopped: \(error.localizedDescription)")
+            stream = nil
+            emit(held)
+            held = []
+        }
+
+        /// Clamped as the recorder clamps what it writes: the speech model rejects samples past ±1.
+        mutating func emit(_ samples: [Float]) {
+            for chunk in chunker.feed(samples.map { $0.isFinite ? max(-1, min(1, $0)) : 0 }) { onChunk(chunk) }
+        }
+    }
+
+    /// LocalVQE from gob.lin's pinned copy, when the pass after a call has downloaded it; nil before then. A call never
+    /// waits on the download.
+    static let localVQE: @Sendable () async throws -> LiveEchoStream? = {
+        let files = MeetingEchoModel.files
+        guard files.isDownloaded else { return nil }
+        _ = try await files.ensureAvailable()
+        let manager = try LocalVqeManager(config: MeetingEchoModel.config, modelDirectory: files.directory)
+        let stream = try await manager.makeStream()
+        return LiveEchoStream(enhance: { try await stream.enhance(mic: $0, reference: $1) }, flush: { try await stream.flush() })
+    }
+}
+
+/// Lines up the microphone with the call's sound by sample, both counted from the session's start, and hands out
+/// stretches of microphone with the call's sound for the same samples. Where the call's track has nothing for a
+/// sample (it stalled), the pair gets silence there.
+struct EchoPairing {
+    /// The call's sound kept ahead of the microphone, such as while the mic is gone: a minute, trimmed 10 s at a time.
+    static let maximumReference = 960_000
+    static let trimStep = 160_000
+
+    /// The session sample the next microphone sample is.
+    private(set) var position = 0
+    private var microphone: [Float] = []
+    private var reference: [Float] = []
+    /// The session sample `reference[0]` is.
+    private var referenceStart = 0
+
+    mutating func addMicrophone(_ samples: [Float]) { microphone += samples }
+
+    mutating func addReference(_ samples: [Float]) {
+        reference += samples
+        trim()
+    }
+
+    /// The microphone heard so far that the call's sound has caught up with; with `all`, all of it. Nil when there's
+    /// nothing to hand out.
+    mutating func take(all: Bool) -> (microphone: [Float], reference: [Float])? {
+        let count = all ? microphone.count : min(microphone.count, referenceStart + reference.count - position)
+        guard count > 0 else { return nil }
+        let taken = Array(microphone.prefix(count))
+        microphone.removeFirst(count)
+        var paired = [Float](repeating: 0, count: count)
+        let from = max(position, referenceStart), to = min(position + count, referenceStart + reference.count)
+        if from < to {
+            paired.replaceSubrange(from - position..<to - position, with: reference[from - referenceStart..<to - referenceStart])
+        }
+        position += count
+        trim()
+        return (taken, paired)
+    }
+
+    /// Drops the call's sound the microphone has passed, and the oldest beyond `maximumReference`.
+    private mutating func trim() {
+        let passed = min(reference.count, max(0, position - referenceStart))
+        var drop = passed
+        if reference.count - passed > Self.maximumReference + Self.trimStep { drop = reference.count - Self.maximumReference }
+        guard drop > 0 else { return }
+        reference.removeFirst(drop)
+        referenceStart += drop
+    }
+}

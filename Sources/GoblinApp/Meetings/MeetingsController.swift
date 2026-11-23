@@ -1053,8 +1053,8 @@ final class MeetingsController: ObservableObject {
         // Dictation's language, as the meeting's Parakeet takes it; one it doesn't know falls back to detection.
         let recognition = SpeechModelCatalog.parakeet.capabilities.options(for: speechModels.preferredLanguage)
         do {
-            session = try MeetingSession(title: title, source: appName, target: target, engine: engine, recognition: recognition,
-                defaults: defaults, liveSpeakers: live,
+            session = try MeetingSession(title: title, source: appName, target: target, cancelsEchoLive: true, engine: engine,
+                recognition: recognition, defaults: defaults, liveSpeakers: live,
                 onSegment: { [weak self] segment in Task { @MainActor in self?.append(segment) } },
                 onEvent: { _ in },
                 onProblem: { [weak self] problem in Task { @MainActor in self?.sessionReported(problem) } })
