@@ -100,9 +100,28 @@ struct SidekickView: View {
                       idle: recording.muted == true || recording.dictating)
                 level(model.systemLevels, label: "Them", idle: meetings.systemAudioPermission == .denied)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            microphoneButton(recording)
         }
         .font(.meta).foregroundStyle(.white.opacity(0.5))
+    }
+
+    /// The mic being recorded; it opens the mic menu.
+    private func microphoneButton(_ recording: MeetingsController.Recording) -> some View {
+        Button { model.showMicrophoneMenu(nil) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: recording.microphoneSilence == nil ? "mic.fill" : "mic.slash.fill")
+                    .foregroundStyle(recording.microphoneSilence == nil ? .white.opacity(0.5) : Self.amber)
+                Text(recording.microphone?.device.name ?? "Microphone").lineLimit(1).truncationMode(.tail)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Choose the mic I record")
+        .accessibilityLabel("Microphone")
+        .accessibilityValue([recording.microphone?.device.name, recording.microphoneSilence == nil ? nil : "silent"].compactMap { $0 }
+            .joined(separator: ", "))
     }
 
     private func level(_ levels: [Double], label: String, idle: Bool) -> some View {
@@ -155,7 +174,13 @@ struct SidekickView: View {
                 Button("Open System Settings") { meetings.openSystemAudioSettings() }.buttonStyle(OverlayPillStyle(prominent: true))
             }
         } else if let lost = MeetingCopy.captureLost(recording) {
-            line(Text(lost), symbol: "exclamationmark.triangle.fill", tint: Self.amber)
+            if recording.microphoneSilence != nil, !recording.microphoneLost {
+                warning(Text(lost), symbol: "mic.slash.fill") {
+                    Button("Choose Microphone…") { model.showMicrophoneMenu(nil) }.buttonStyle(OverlayPillStyle())
+                }
+            } else {
+                line(Text(lost), symbol: "exclamationmark.triangle.fill", tint: Self.amber)
+            }
         } else if recording.dictating {
             line(Text("You're dictating, so I'm leaving that out of the \(recording.inPerson ? "recording" : "meeting")."), symbol: "mic.fill")
         } else if !recording.inPerson, recording.muted == true {

@@ -114,7 +114,8 @@ final class TrackRecorder: @unchecked Sendable {
         } else if let expectedHost {
             let gap = buffer.hostSeconds - expectedHost
             // The whole gap, however long, so the track stays on the session's clock; it's written a second at a time.
-            if gap > 0.25 {
+            // Short ones count only where the capture reopened; elsewhere they're clock jitter.
+            if gap > 0.25 || (buffer.resumes && gap > 0.001) {
                 stats.gaps.append(.init(atSeconds: Double(stats.samples) / MeetingAudio.sampleRate, seconds: gap))
                 onEvent("\(track.rawValue): \(String(format: "%.2f", gap)) s gap filled with silence")
                 writeSilence(seconds: gap)

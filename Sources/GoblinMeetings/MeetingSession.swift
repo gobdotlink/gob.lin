@@ -71,6 +71,8 @@ public final class MeetingSession: @unchecked Sendable {
 
     private let target: SystemAudioTarget
     private let recordMicrophone: Bool
+    /// Where the meeting mic preference and dictation's ranking are read.
+    private let defaults: UserDefaults
     private let engine: any PCMSpeechEngine
     private let recognition: RecognitionOptions
     private let lock = NSLock()
@@ -97,7 +99,7 @@ public final class MeetingSession: @unchecked Sendable {
     /// `onProblem` hears capture dropping out or coming back, and the live transcript falling behind.
     public init(title: String, source: String, target: SystemAudioTarget, recordMicrophone: Bool = true,
                 engine: any PCMSpeechEngine, recognition: RecognitionOptions = .init(language: "en"),
-                root: URL = MeetingStorage.root,
+                root: URL = MeetingStorage.root, defaults: UserDefaults = .standard,
                 onSegment: @escaping @Sendable (TranscriptSegment) -> Void,
                 onEvent: @escaping @Sendable (String) -> Void,
                 onProblem: @escaping @Sendable (MeetingSessionProblem) -> Void = { _ in }) throws {
@@ -105,6 +107,7 @@ public final class MeetingSession: @unchecked Sendable {
         directory = try MeetingStorage.newDirectory(title: title, date: now, in: root)
         self.target = target
         self.recordMicrophone = recordMicrophone
+        self.defaults = defaults
         self.engine = engine
         self.recognition = recognition
         self.onSegment = onSegment
@@ -126,6 +129,16 @@ public final class MeetingSession: @unchecked Sendable {
     }
 
     public var startedAt: Date { lock.withLock { info.startedAt } }
+
+    /// The mic being recorded, and why; nil before capture starts or while none is open.
+    public var microphoneInUse: MeetingMicrophone? { (lock.withLock { microphoneCapture } as? MicrophoneCapture)?.inUse }
+
+    /// What capture can't hear right now. Read afresh on every check rather than kept from `onProblem`, whose reports
+    /// during an offer's handover can land before the recording is there to show them.
+    public var captureTrouble: (microphoneLost: Bool, microphoneSilence: InputSilence?, systemAudioLost: Bool) {
+        let (microphone, tap) = lock.withLock { (self.microphoneCapture as? MicrophoneCapture, self.tap as? SystemAudioTap) }
+        return (microphone?.isLost ?? false, microphone?.silent, tap?.isLost ?? false)
+    }
 
     public var backlog: Int { lock.withLock { transcriber?.backlog ?? 0 } }
 
@@ -188,7 +201,7 @@ public final class MeetingSession: @unchecked Sendable {
         let system = inPerson ? nil : try TrackRecorder(track: .system, directory: directory, sessionStart: hostStart,
                                                         onChunk: { transcriber.submit($0) }, onEvent: event,
                                                         onWriteFailure: writeFailed)
-        let microphoneCapture: any MeetingAudioSource = heard?.microphone ?? MicrophoneCapture()
+        let microphoneCapture: any MeetingAudioSource = heard?.microphone ?? MicrophoneCapture(call: target, defaults: defaults)
         let tap: (any MeetingAudioSource)? = inPerson ? nil : heard?.system ?? SystemAudioTap(target: target)
         lock.withLock {
             info.startedAt = started

@@ -50,6 +50,10 @@ final class MeetingsController: ObservableObject {
         var inPerson = false
         /// The mic stopped and hasn't come back; it's tried again every few seconds.
         var microphoneLost = false
+        /// The mic being recorded, and why.
+        var microphone: MeetingMicrophone?
+        /// The mic is muted, at zero volume or sending only silence.
+        var microphoneSilence: InputSilence?
         /// The call's sound stopped arriving after the output device changed; the tap is tried again every few seconds.
         var systemAudioLost = false
         /// Nil while the live transcript keeps up.
@@ -1023,6 +1027,7 @@ final class MeetingsController: ObservableObject {
         let recognition = SpeechModelCatalog.parakeet.capabilities.options(for: speechModels.preferredLanguage)
         do {
             session = try MeetingSession(title: title, source: appName, target: target, engine: engine, recognition: recognition,
+                defaults: defaults,
                 onSegment: { [weak self] segment in Task { @MainActor in self?.append(segment) } },
                 onEvent: { _ in },
                 onProblem: { [weak self] problem in Task { @MainActor in self?.sessionReported(problem) } })
@@ -1118,6 +1123,12 @@ final class MeetingsController: ObservableObject {
         refreshList()
     }
 
+    /// Which mic meetings record, remembered; the Sidekick's mic menu sets it, and the recording follows within a second.
+    var meetingMicrophone: MeetingMicrophonePreference {
+        get { .load(defaults) }
+        set { newValue.save(defaults) }
+    }
+
     private func speechEngine() -> MeetingSpeechEngine {
         if let engine { return engine }
         let engine = MeetingSpeechEngine(gate: gate, dictationEngine: { [speechModels] in
@@ -1155,7 +1166,8 @@ final class MeetingsController: ObservableObject {
         let probe = candidate.app.pid.flatMap { pid in
             candidate.app.callApp.map { AccessibilityProbe(pid: pid, app: $0, directory: nil, sessionStart: Date()) }
         }
-        let buffer = OfferBuffer(microphone: MicrophoneCapture(), system: SystemAudioTap(target: Self.target(for: candidate)),
+        let buffer = OfferBuffer(microphone: MicrophoneCapture(call: Self.target(for: candidate), defaults: defaults),
+                                 system: SystemAudioTap(target: Self.target(for: candidate)),
                                  probe: probe, engine: speechEngine())
         listening = (candidate.id, buffer)
         buffer.start()
@@ -1213,6 +1225,7 @@ final class MeetingsController: ObservableObject {
         switch problem {
         case .capture(.microphoneLost): recording.microphoneLost = true
         case .capture(.microphoneRestored): recording.microphoneLost = false
+        case .capture(.microphoneSilence(let silence)): recording.microphoneSilence = silence
         case .capture(.systemAudioLost): recording.systemAudioLost = true
         case .capture(.systemAudioRestored): recording.systemAudioLost = false
         case .transcriptDeferred(.behind): if recording.captions == nil { recording.captions = .behind }
@@ -1236,6 +1249,11 @@ final class MeetingsController: ObservableObject {
         recording.microphoneLevel = levels.microphone
         recording.systemLevel = levels.system
         recording.backlog = session.backlog
+        recording.microphone = session.microphoneInUse
+        let trouble = session.captureTrouble
+        recording.microphoneLost = trouble.microphoneLost
+        recording.microphoneSilence = trouble.microphoneSilence
+        recording.systemAudioLost = trouble.systemAudioLost
         recording.muted = probe?.isMuted
         recording.sharing = probe?.isSharing ?? false
         if let timeline = probe?.muteTimeline, timeline != appliedMute {
@@ -1707,6 +1725,15 @@ extension MeetingCopy {
         if recording.microphoneLost {
             return recording.inPerson ? "I lost your mic, so I can't hear the room. I'll pick it up again when it's back."
                 : "I lost your mic, so I'm only recording \(recording.app). I'll pick it up again when it's back."
+        }
+        if let silence = recording.microphoneSilence {
+            let mic = recording.microphone?.device.name ?? "Your mic"
+            let whom = recording.inPerson ? "the room" : "you"
+            return switch silence {
+            case .muted: "\(mic) is muted, so I can't hear \(whom)."
+            case .volumeAtZero: "\(mic)'s input volume is at zero, so I can't hear \(whom)."
+            case .silent: "\(mic) is sending only silence, so I can't hear \(whom)."
+            }
         }
         if recording.systemAudioLost, !recording.inPerson {
             return "I lost \(recording.app)'s sound, so I'm only recording your mic. I'll keep trying."
