@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build --target GoblinCore >/dev/null
+[ -n "${GOBLIN_PREBUILT:-}" ] || swift build --target GoblinCore >/dev/null
 binary_directory=$(swift build --show-bin-path)
 # Swift Build (the default from Swift 6.4) puts each module and one merged object straight into the
 # products folder; the native build system keeps modules in Modules and an object per source file.

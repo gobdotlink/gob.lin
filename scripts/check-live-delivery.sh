@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build --product GoblinApp
+[ -n "${GOBLIN_PREBUILT:-}" ] || swift build --product GoblinApp
 check_directory=$(mktemp -d)
 trap 'rm -rf "$check_directory"' EXIT
 python3 - "$check_directory/objects" <<'PY'

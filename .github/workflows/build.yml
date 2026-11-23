@@ -1,27 +1,82 @@
 name: Build
 
+# Pull requests build on each push; main builds after each merge, and its runs create the caches
+# that pull requests restore.
 on:
   push:
+    branches: [main]
   pull_request:
 
+# A newer push to a pull request replaces its unfinished run. Each main push gets its own group, so
+# every merge is built. A job saves its cache only when no entry has that key yet.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
-  macos:
+  package:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      # Dependencies are pinned exactly, so their compiled output carries over between runs.
+      # A new Xcode starts clean, as modules from another compiler cannot be reused.
+      - id: xcode
+        run: echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: .build
+          key: spm-${{ steps.xcode.outputs.build }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ steps.xcode.outputs.build }}-
+      # Three checks link every object in GoblinCore's folder, so a restored object from a since-renamed
+      # source would be linked twice. GoblinCore recompiles every run anyway, as its build stamp changes.
+      - name: Drop restored GoblinCore objects
+        run: rm -f .build/*/debug/GoblinCore.build/*.o
       - name: Build and smoke-check package
         run: scripts/smoke.sh
       - name: Check dictionary and text-processing guardrails
         run: swift test
-      - name: Check provider credential preflight and prompt-free submissions
-        run: scripts/check-rewrite-credentials.sh
-      - name: Check updater protocol and installation recovery
-        run: scripts/check-updates.sh
-      - name: Check live delivery and finalization
-        run: scripts/check-live-delivery.sh && scripts/check-live-transcription.sh
-      - name: Check capture integrity and media ownership
-        run: scripts/check-audio-capture.sh && scripts/check-feedback-media.sh
+      - name: Check credentials, updater, live delivery, capture and media ownership
+        env:
+          GOBLIN_PREBUILT: '1'
+        run: |
+          # Every swift build restamps GoblinCore, so a build inside one check would rewrite
+          # objects another check is linking. One build here serves them all.
+          swift build
+          checks=(rewrite-credentials updates live-delivery live-transcription feedback-media)
+          pids=()
+          for check in "${checks[@]}"; do
+            scripts/check-$check.sh > "$RUNNER_TEMP/$check.log" 2>&1 &
+            pids+=($!)
+          done
+          failed=0
+          for i in "${!checks[@]}"; do
+            if wait "${pids[$i]}"; then
+              echo "::group::${checks[$i]} passed"
+              cat "$RUNNER_TEMP/${checks[$i]}.log"
+              echo "::endgroup::"
+            else
+              failed=1
+              echo "::error::scripts/check-${checks[$i]}.sh failed"
+              cat "$RUNNER_TEMP/${checks[$i]}.log"
+            fi
+          done
+          # The capture check's timing assertions expect an otherwise idle runner.
+          scripts/check-audio-capture.sh || { failed=1; echo "::error::scripts/check-audio-capture.sh failed"; }
+          exit "$failed"
+
+  xcode:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - id: xcode
+        run: echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: DerivedData
+          key: derived-data-${{ steps.xcode.outputs.build }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: derived-data-${{ steps.xcode.outputs.build }}-
+      # gob.lin runs on Apple silicon only, so an Intel slice would be built for nothing.
       - name: Build Xcode app without local signing credentials
-        run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project Goblin.xcodeproj -scheme Goblin -configuration Release -derivedDataPath DerivedData ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build
       - name: Build the shared libraries for iPhone
         run: xcodebuild -scheme GoblinEngines -destination generic/platform=iOS -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build

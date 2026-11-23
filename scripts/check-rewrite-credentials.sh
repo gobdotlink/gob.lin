@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build --target GoblinCore >/dev/null
+[ -n "${GOBLIN_PREBUILT:-}" ] || swift build --target GoblinCore >/dev/null
 binary_directory=$(swift build --show-bin-path)
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
