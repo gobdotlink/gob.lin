@@ -1232,7 +1232,7 @@ final class MeetingsController: ObservableObject {
             switch liveSnapshot.map({ LiveSpeakers.placement(of: segment, in: $0) }) ?? .waiting {
             case .voice(let voice):
                 lineVoices[segment.id] = voice
-                speaker = liveSnapshot?.names[voice] ?? speaker
+                speaker = liveSnapshot.flatMap { liveNames($0)[voice] } ?? speaker
             case .never: neverPlaced.insert(segment.id)
             case .waiting:
                 unplacedSegments[segment.id] = segment
@@ -1250,6 +1250,11 @@ final class MeetingsController: ObservableObject {
         phase = .recording(recording)
     }
 
+    /// A snapshot's names as they may be shown now: with Remember voices turned off since it was sent, only "Speaker N".
+    private func liveNames(_ snapshot: LiveSpeakers.Snapshot) -> [Int: String] {
+        library.voices.enabled() ? snapshot.names : snapshot.numbered
+    }
+
     /// The speaker model placed more of the call: lines it reached get their voice, and a voice named from People
     /// renames its earlier lines too.
     private func placeSpeakers(_ snapshot: LiveSpeakers.Snapshot, token: UUID) {
@@ -1263,10 +1268,10 @@ final class MeetingsController: ObservableObject {
             }
             unplacedSegments[id] = nil
         }
-        let lineVoices = lineVoices, neverPlaced = neverPlaced
+        let lineVoices = lineVoices, neverPlaced = neverPlaced, names = liveNames(snapshot)
         func named(_ line: MeetingLine) -> MeetingLine {
             var line = line
-            if let voice = lineVoices[line.id], let name = snapshot.names[voice] {
+            if let voice = lineVoices[line.id], let name = names[voice] {
                 line.speaker = name
                 line.placing = false
             } else if neverPlaced.contains(line.id) {

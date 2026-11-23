@@ -69,6 +69,9 @@ public final class LiveSpeakers: @unchecked Sendable {
         public var spans: [DiarizedSpan]
         /// Each voice's name, by the model's slot.
         public var names: [Int: String]
+        /// Each voice's "Speaker N", for showing while Remember voices is off: the switch can turn off after a snapshot
+        /// with names from People is sent, and whoever shows it checks the switch then.
+        public var numbered: [Int: String] = [:]
     }
 
     /// Where a line stands with the speaker model.
@@ -304,8 +307,9 @@ public final class LiveSpeakers: @unchecked Sendable {
                     }
                     let participants = folder.map(MeetingParticipants.read) ?? MeetingParticipants()
                     match = VoiceMatching.match([voice], people: people, participants: participants, inPerson: false)["\(slot)"]
+                    // Without the person's name: a log line outlives Turn Off and Forget.
                     log(String(format: "live voiceprint: voice %d, %.0f s of speech by %.0f s: %@", slot, seconds, heardBy,
-                               match.map { String(format: "%@ %.2f%@", $0.name, $0.similarity, $0.named ? "" : " (not named)") } ?? "nobody close"))
+                               match.map { String(format: "a person at %.2f%@", $0.similarity, $0.named ? "" : " (not named)") } ?? "nobody close"))
                 }
             } catch {
                 log("live voiceprint: \(error.localizedDescription)")
@@ -329,9 +333,13 @@ public final class LiveSpeakers: @unchecked Sendable {
         guard let builder else { return }
         // With Remember voices off, names from People aren't shown, including ones given before it was turned off.
         let fromPeople = voices?.enabled() == true ? named : [:]
-        var names: [Int: String] = [:]
-        for (index, slot) in builder.arrival.enumerated() { names[slot] = fromPeople[slot] ?? "Speaker \(index + 1)" }
-        onUpdate(Snapshot(placedFrom: builder.origin, placedUntil: builder.decidedUntil, spans: builder.spans, names: names))
+        var names: [Int: String] = [:], numbered: [Int: String] = [:]
+        for (index, slot) in builder.arrival.enumerated() {
+            numbered[slot] = "Speaker \(index + 1)"
+            names[slot] = fromPeople[slot] ?? numbered[slot]
+        }
+        onUpdate(Snapshot(placedFrom: builder.origin, placedUntil: builder.decidedUntil, spans: builder.spans, names: names,
+                          numbered: numbered))
     }
 
     /// Appends to a rolling buffer, letting the oldest go in steps so it isn't copied on every append.
