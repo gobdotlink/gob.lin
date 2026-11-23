@@ -228,6 +228,8 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
 
 public enum RewriteFailure: Error, Equatable, Sendable, LocalizedError {
     case configuration(String), timeout, transport, httpStatus(Int), invalidResponse
+    /// An HTTP error that came with the provider's own explanation, e.g. which parameter value the model refuses.
+    case rejected(status: Int, message: String)
 
     public var errorDescription: String? {
         switch self {
@@ -235,6 +237,7 @@ public enum RewriteFailure: Error, Equatable, Sendable, LocalizedError {
         case .timeout: "AI cleanup exceeded its four-second deadline."
         case .transport: "The cleanup provider could not be reached."
         case .httpStatus(let status): "The cleanup provider returned HTTP \(status)."
+        case .rejected(let status, let message): "HTTP \(status): \(message)"
         case .invalidResponse: "The cleanup provider returned no usable text."
         }
     }
@@ -435,8 +438,13 @@ public actor RewriteClient {
                     }
                     // A chosen speed is never quietly dropped: it costs more, so say which one was turned down.
                     if responses, let tier = body["service_tier"] as? String, response.statusCode == 400,
-                       let error = Self.providerError(data), error.param == "service_tier" || error.message.contains("service_tier") || error.message.contains("service tier") {
+                       let error = Self.providerError(data), error.param == "service_tier" || error.message.localizedCaseInsensitiveContains("service_tier")
+                        || error.message.localizedCaseInsensitiveContains("service tier") {
                         throw RewriteFailure.configuration("\(settings.provider.title) won't run \(settings.model) at \(tier.capitalized) speed for this key. Choose another speed.")
+                    }
+                    // Show the provider's own reason when it gives one: it names the refused value, so no per-model rules are needed.
+                    if let message = Self.providerError(data)?.message, !message.isEmpty {
+                        throw RewriteFailure.rejected(status: response.statusCode, message: String(message.prefix(400)))
                     }
                     throw RewriteFailure.httpStatus(response.statusCode)
                 }
@@ -496,11 +504,12 @@ public actor RewriteClient {
             var error: Detail
         }
         guard let error = try? JSONDecoder().decode(ErrorResponse.self, from: data).error else { return nil }
-        return (error.param, error.message?.lowercased() ?? "")
+        return (error.param, error.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
     }
 
     private func rejectsReasoningEffort(_ data: Data, anthropic: Bool) -> Bool {
-        guard let (param, message) = Self.providerError(data) else { return false }
+        guard let (param, original) = Self.providerError(data) else { return false }
+        let message = original.lowercased()
         // Anthropic names the rejected field, e.g. "thinking.type.disabled" or "output_config.effort".
         // The Responses API nests it: "reasoning.effort".
         return param == "reasoning_effort" || param == "reasoning.effort" || message.contains("reasoning_effort")

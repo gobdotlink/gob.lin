@@ -283,7 +283,7 @@ struct CleanupProviderSheet: View {
                 StatusRow(.problem, Text(listing.source.key.isEmpty ? "\(name) wants an API key before it lists models." : "\(name) didn't accept that key.")) { refresh }
             case .httpStatus(404):
                 StatusRow(.problem, Text("\(name) doesn't list models at this address.")) { refresh }
-            case .httpStatus(let status):
+            case .httpStatus(let status), .rejected(let status, _):
                 StatusRow(.problem, Text("\(name) answered HTTP \(String(status)) when I asked for its models.")) { tryAgain }
             case .timeout:
                 StatusRow(.waiting, Text("\(name) didn't send its models within 10 s.")) { tryAgain }
