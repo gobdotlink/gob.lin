@@ -111,6 +111,11 @@ struct RewriteProviderTests {
         #expect(retried.failure == nil && retryBodies.count == 2 && retryBodies[1]["service_tier"] as? String == "ultrafast")
         #expect((retryBodies[1]["reasoning"] as? [String: String])?["effort"] == "low" && retryBodies[1]["temperature"] == nil)
 
+        // An explicit Off the model refuses fails with OpenAI's own words, which name the values it takes.
+        settings.reasoning = .off
+        let (refusedOff, _) = try await rewrite("cleaned text", settings, replies: [(400, noNone)])
+        #expect(refusedOff.failure?.errorDescription == "HTTP 400: Unsupported value: 'none' is not supported with the 'gpt-6-astra' model.")
+
         // Standard sends no tier, and options saved for Chat Completions still mean the same thing.
         settings.serviceTier = nil
         settings.reasoning = .providerDefault

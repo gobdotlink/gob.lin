@@ -251,7 +251,9 @@ struct RewriteSafetyTests {
         explicit.reasoning = .off
         RewriteStubState.shared.prepare([StubReply(status: 400, body: reject)])
         let result = await client.rewrite("Dictation", settings: explicit, apiKey: "fixture-key")
-        #expect(result.failure == .httpStatus(400) && result.outputText == "Dictation")
+        // The provider's reason is kept for Try It; diagnostics see only the status.
+        #expect(result.failure == .rejected(status: 400, message: "Unsupported reasoning_effort") && result.outputText == "Dictation")
+        #expect(DiagnosticFailure.rewrite(result.failure!) == .rewriteHTTPStatus(400))
         #expect(RewriteStubState.shared.received().count == 1)
         let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
         #expect(body["reasoning_effort"] as? String == "none")

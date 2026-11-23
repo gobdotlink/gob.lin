@@ -74,7 +74,8 @@ public enum DiagnosticFailure: Equatable, Sendable {
         case .configuration: .rewriteConfiguration
         case .timeout: .rewriteTimeout
         case .transport: .rewriteTransport
-        case .httpStatus(let status): .rewriteHTTPStatus(status)
+        // Diagnostics keep only the status: a provider's message never reaches logs.
+        case .httpStatus(let status), .rejected(let status, _): .rewriteHTTPStatus(status)
         case .invalidResponse: .rewriteInvalidResponse
         }
     }
