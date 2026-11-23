@@ -29,6 +29,9 @@ private func choose(_ preference: MeetingMicrophonePreference = .sameAsCall, con
     #expect(choose(.device(entry), call: [airPods.id]) == MeetingMicrophone(device: usb, reason: .picked))
     // Unplugged: the call's mic instead.
     #expect(choose(.device(entry), connected: [airPods, builtIn], call: [airPods.id]) == MeetingMicrophone(device: airPods, reason: .call))
+    // Two identical mics on new ports can't be told apart, so neither is guessed.
+    let twin = AudioInputDevice(id: 11, uid: "usb-2", name: "Lav Receiver", model: "LavRX:1234", kind: .usb)
+    #expect(choose(.device(entry), connected: [usb, twin, airPods], call: [airPods.id]) == MeetingMicrophone(device: airPods, reason: .call))
 }
 
 @Test func lidSilencedMicIsNeverChosen() {

@@ -1250,6 +1250,10 @@ final class MeetingsController: ObservableObject {
         recording.systemLevel = levels.system
         recording.backlog = session.backlog
         recording.microphone = session.microphoneInUse
+        let trouble = session.captureTrouble
+        recording.microphoneLost = trouble.microphoneLost
+        recording.microphoneSilence = trouble.microphoneSilence
+        recording.systemAudioLost = trouble.systemAudioLost
         recording.muted = probe?.isMuted
         recording.sharing = probe?.isSharing ?? false
         if let timeline = probe?.muteTimeline, timeline != appliedMute {

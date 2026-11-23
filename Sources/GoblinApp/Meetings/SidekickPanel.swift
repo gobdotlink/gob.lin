@@ -520,6 +520,8 @@ final class SidekickController: NSObject, NSWindowDelegate {
     /// Same as the call app (remembered, the default), then every mic. In person, "the call" is dictation's ranking.
     private func showMicrophoneMenu(from view: NSView?) {
         let menu = NSMenu()
+        // The lid-silenced and unplugged rows stay disabled; AppKit would otherwise enable every row with a target.
+        menu.autoenablesItems = false
         let target = MenuTarget(controller: self)
         let preference = meetings.meetingMicrophone
         let recording = meetings.recording
@@ -533,6 +535,14 @@ final class SidekickController: NSObject, NSWindowDelegate {
         let picked: MicrophoneRanking.Entry? = if case .device(let entry) = preference { entry } else { nil }
         let devices = (try? AudioInputDevices.list()) ?? []
         let pickedDevice = picked.flatMap { entry in MeetingMicrophone.match(entry, in: devices) }
+        // A picked mic that's away is still the choice, and wins again when it's back.
+        if let picked, pickedDevice == nil {
+            let item = NSMenuItem(title: picked.name, action: nil, keyEquivalent: "")
+            item.state = .on
+            item.isEnabled = false
+            item.subtitle = "Not connected"
+            menu.addItem(item)
+        }
         for device in devices {
             let item = NSMenuItem(title: device.name, action: #selector(MenuTarget.pickMicrophone(_:)), keyEquivalent: "")
             item.target = target
@@ -550,7 +560,9 @@ final class SidekickController: NSObject, NSWindowDelegate {
 
     fileprivate func pickMicrophone(_ entry: MicrophoneRanking.Entry?) {
         meetings.meetingMicrophone = entry.map { .device($0) } ?? .sameAsCall
-        model.say(entry.map { "Recording \($0.name) from now on." } ?? "Recording the same mic as the call.")
+        let recording = meetings.recording
+        let same = recording?.inPerson == true ? "dictation's mic" : "the same mic as \(recording?.app ?? "the call")"
+        model.say("I'll use \(entry?.name ?? same) from now on.")
     }
 
     fileprivate func copy(onlyNew: Bool) {

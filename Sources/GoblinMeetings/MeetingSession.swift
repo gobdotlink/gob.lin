@@ -133,6 +133,13 @@ public final class MeetingSession: @unchecked Sendable {
     /// The mic being recorded, and why; nil before capture starts or while none is open.
     public var microphoneInUse: MeetingMicrophone? { (lock.withLock { microphoneCapture } as? MicrophoneCapture)?.inUse }
 
+    /// What capture can't hear right now. Read afresh on every check rather than kept from `onProblem`, whose reports
+    /// during an offer's handover can land before the recording is there to show them.
+    public var captureTrouble: (microphoneLost: Bool, microphoneSilence: InputSilence?, systemAudioLost: Bool) {
+        let (microphone, tap) = lock.withLock { (microphoneCapture as? MicrophoneCapture, tap as? SystemAudioTap) }
+        return (microphone?.isLost ?? false, microphone?.silent, tap?.isLost ?? false)
+    }
+
     public var backlog: Int { lock.withLock { transcriber?.backlog ?? 0 } }
 
     public var title: String { lock.withLock { info.title } }

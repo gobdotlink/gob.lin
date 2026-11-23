@@ -320,7 +320,7 @@ public final class AudioInputUnit: @unchecked Sendable {
 
     /// Closes, then hands over the batch the device was still filling, so a take moving to another input
     /// keeps the last tenth of a second before the change.
-    func closeDelivering() {
+    public func closeDelivering() {
         guard !closed else { return }
         close()
         if chunk.frameLength > 0, let processor { deliver(to: processor) }

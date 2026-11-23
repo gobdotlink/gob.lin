@@ -40,6 +40,9 @@ public struct CapturedBuffer: Sendable {
     public let samples: [Float]
     public let sampleRate: Double
     public let hostSeconds: Double
+    /// The first buffer after the capture reopened: the time before it passed with nothing recorded, however short,
+    /// so the track fills it rather than treating it as clock jitter.
+    public var resumes = false
 }
 
 public enum HostClock {
@@ -77,6 +80,8 @@ public final class SystemAudioTap: @unchecked Sendable {
     private let listenerQueue = DispatchQueue(label: "gob.lin.meetings.system-tap.listeners")
     /// When the IO callback last ran, in host ticks; written on `ioQueue`, read by the watchdog.
     private let heartbeat = Heartbeat()
+    /// `lost`, for the controller to read without waiting on `queue`.
+    private let lostFlag = Atomic<Bool>(false)
     // Everything below is touched only on `queue`, apart from `start` before the listener exists.
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -87,6 +92,8 @@ public final class SystemAudioTap: @unchecked Sendable {
     /// The output device's sample rate when the tap was built. A Bluetooth headset that starts a call changes it, and
     /// the tap built on the old one stops without an error.
     private var builtRate: Float64?
+    /// How many input streams the output device had then: the IO callback skips that many to reach the tap's.
+    private var builtInputStreams = 0
     private var builtAt: Double = 0
     private var watchdog: DispatchSourceTimer?
     /// Rebuilds in a row that brought no audio.
@@ -98,13 +105,16 @@ public final class SystemAudioTap: @unchecked Sendable {
     private var stopped = false
     /// Counts output device changes, so retries for an older change give up when a newer one begins.
     private var generation = 0
-    /// The tap couldn't be rebuilt and the controller was told.
-    private var lost = false
+    /// The tap couldn't be rebuilt, or brought no audio back, and the controller was told.
+    private var lost = false { didSet { lostFlag.store(lost, ordering: .relaxed) } }
     public private(set) var formatDescription = ""
 
     public init(target: SystemAudioTarget) {
         self.target = target
     }
+
+    /// The call's sound has stopped arriving and the tap hasn't brought it back yet.
+    public var isLost: Bool { lostFlag.load(ordering: .relaxed) }
 
     public func start(onEvent: @escaping @Sendable (String) -> Void,
                       onProblem: @escaping @Sendable (MeetingCaptureProblem) -> Void = { _ in },
@@ -214,7 +224,7 @@ public final class SystemAudioTap: @unchecked Sendable {
         watchFormat(of: outputDevice)
         // The output device is in the aggregate only as its clock. A USB interface or headset also has inputs, and
         // the aggregate lists those streams ahead of the tap's; they are skipped below, so "Them" is only the tap.
-        let deviceInputStreams = CoreAudioProperty.objects(outputDevice, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).count
+        let deviceInputStreams = builtInputStreams
         let tapUID = description.uuid.uuidString
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "gob.lin meeting capture",
@@ -257,12 +267,15 @@ public final class SystemAudioTap: @unchecked Sendable {
     }
 
     /// On `queue`: rebuilds when the output device's sample rate moves away from the one the tap was built on, as a
-    /// Bluetooth headset's does when a call opens its mic. Rate notifications that leave it where it was are ignored,
-    /// so building the tap can't set off another build.
+    /// Bluetooth headset's does when a call opens its mic, or its number of input streams changes, which moves the
+    /// tap's streams in the aggregate. Notifications that change neither are ignored, so building the tap can't set off
+    /// another build.
     private func watchFormat(of device: AudioObjectID) {
         builtRate = CoreAudioProperty.scalar(device, kAudioDevicePropertyNominalSampleRate, as: Float64.self)
+        builtInputStreams = Self.inputStreams(of: device)
         for (selector, scope) in [(kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal),
-                                  (kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput)] {
+                                  (kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput),
+                                  (kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput)] {
             var address = CoreAudioProperty.address(selector, scope: scope)
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 guard let self else { return }
@@ -274,12 +287,17 @@ public final class SystemAudioTap: @unchecked Sendable {
         }
     }
 
+    private static func inputStreams(of device: AudioObjectID) -> Int {
+        CoreAudioProperty.objects(device, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).count
+    }
+
     private func formatMayHaveChanged(_ device: AudioObjectID) {
         guard !stopped, formatListeners.contains(where: { $0.device == device }),
-              let rate = CoreAudioProperty.scalar(device, kAudioDevicePropertyNominalSampleRate, as: Float64.self),
-              rate != builtRate else { return }
+              let rate = CoreAudioProperty.scalar(device, kAudioDevicePropertyNominalSampleRate, as: Float64.self) else { return }
+        let inputs = Self.inputStreams(of: device)
+        guard rate != builtRate || inputs != builtInputStreams else { return }
         generation += 1
-        onEvent?("output device changed to \(Int(rate)) Hz; rebuilding the tap")
+        onEvent?("output device changed to \(Int(rate)) Hz, \(inputs) input streams; rebuilding the tap")
         // A headset settles over a few notifications; the last one's rebuild wins.
         let attempt = generation
         queue.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.rebuild(generation: attempt, failures: 0) }

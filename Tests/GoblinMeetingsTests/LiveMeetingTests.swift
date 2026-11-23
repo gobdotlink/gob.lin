@@ -221,6 +221,24 @@ private func candidate(_ bundleID: String, title: String?, likely: Bool = true) 
     #expect(stats.gaps.map(\.seconds) == [1_999])
 }
 
+@Test func aShortGapIsFilledOnlyWhereTheCaptureReopened() throws {
+    let directory = try Fixtures.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let recorder = try TrackRecorder(track: .microphone, directory: directory, sessionStart: 0, onChunk: { _ in }, onEvent: { _ in })
+    let second = [Float](repeating: 0, count: 16_000)
+    recorder.append(CapturedBuffer(samples: second, sampleRate: 16_000, hostSeconds: 0))
+    // A tenth of a second late without a reopen reads as clock jitter.
+    recorder.append(CapturedBuffer(samples: second, sampleRate: 16_000, hostSeconds: 1.1))
+    // The same after the mic reopened is time that passed unrecorded.
+    var reopened = CapturedBuffer(samples: second, sampleRate: 16_000, hostSeconds: 2.2)
+    reopened.resumes = true
+    recorder.append(reopened)
+    let stats = recorder.finish()
+    #expect(stats.gaps.count == 1)
+    #expect(abs((stats.gaps.first?.seconds ?? 0) - 0.1) < 0.001)
+    #expect(stats.samples == 3 * 16_000 + 1_600)
+}
+
 @Test func aLineThatFinishesDecodingLateStillReadsInTimeOrder() {
     var lines: [TranscriptSegment] = []
     for start in [1.0, 5.0, 3.0, 5.0, 0.5, 6.0] { lines.insert(segment(.system, start, start + 1), byStart: \.start) }

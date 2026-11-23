@@ -119,7 +119,9 @@ struct SidekickView: View {
         }
         .buttonStyle(.plain)
         .help("Choose the mic I record")
-        .accessibilityLabel("Microphone").accessibilityValue(recording.microphone?.device.name ?? "")
+        .accessibilityLabel("Microphone")
+        .accessibilityValue([recording.microphone?.device.name, recording.microphoneSilence == nil ? nil : "silent"].compactMap { $0 }
+            .joined(separator: ", "))
     }
 
     private func level(_ levels: [Double], label: String, idle: Bool) -> some View {
