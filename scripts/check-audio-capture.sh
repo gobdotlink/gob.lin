@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p .build/capture-check
-swift build --target GoblinCore
+[ -n "${GOBLIN_PREBUILT:-}" ] || swift build --target GoblinCore
 core=$(swift build --show-bin-path)
 # SwiftPM puts the module and objects in different places across toolchain versions.
 if [ -f "$core/GoblinCore.o" ]; then objects=("$core/GoblinCore.o"); else objects=("$core"/GoblinCore.build/*.o); fi
