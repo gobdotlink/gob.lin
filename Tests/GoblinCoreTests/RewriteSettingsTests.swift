@@ -43,12 +43,15 @@ struct RewriteSettingsTests {
         settings.selectProvider(.openAI)
         settings = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
         #expect(settings.serviceTier == .fast && settings.usesScreenContext)
-        // The current OpenAI profile is moved too; Standard spellings leave no speed behind.
-        var current = settings
-        current.serviceTier = nil
-        current.extraRequestJSON = #"{"service_tier":"default"}"#
-        current = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(current))
-        #expect(current.serviceTier == nil && current.extraRequestJSON.isEmpty)
+        // The current OpenAI profile is moved too; Standard spellings, null and tiers the picker lacks leave no speed
+        // behind and no key that would make saving fail.
+        for typed in [#""default""#, "null", #""flex""#] {
+            var current = settings
+            current.serviceTier = nil
+            current.extraRequestJSON = #"{"service_tier":\#(typed)}"#
+            current = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(current))
+            #expect(current.serviceTier == nil && current.extraRequestJSON.isEmpty, "\(typed)")
+        }
     }
 
     @Test func providerSwitchesRememberTuningAndPersistOmittedTemperature() throws {

@@ -53,7 +53,14 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
     /// Whether cleanup with the current provider and address gets the app, window title and text around the cursor.
     /// Never on device: Apple's small model followed instructions written in screen text and used none of its spellings.
     public var usesScreenContext: Bool {
-        get { !provider.runsOnDevice && screenContextEndpoint != nil && screenContextEndpoint == (try? endpoint().absoluteString) }
+        get {
+            guard !provider.runsOnDevice, let screenContextEndpoint else { return false }
+            // OpenAI cleanup moved from Chat Completions to the Responses API at the same address, which keeps nothing
+            // either (`store: false`), so consent given to the old endpoint still names the same recipient. Checked
+            // here rather than rewritten on load, so the open Cleanup page and the next dictation always agree.
+            if provider == .openAI, screenContextEndpoint == RewriteProvider.openAI.baseURL + "/chat/completions" { return true }
+            return screenContextEndpoint == (try? endpoint().absoluteString)
+        }
         set { screenContextEndpoint = newValue && !provider.runsOnDevice ? try? endpoint().absoluteString : nil }
     }
 
@@ -73,13 +80,6 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
                   serviceTier: try fields.decodeIfPresent(RewriteServiceTier.self, forKey: .serviceTier),
                   providerConfigurations: try fields.decodeIfPresent([String: RewriteProviderConfiguration].self, forKey: .providerConfigurations) ?? [:],
                   screenContextEndpoint: try fields.decodeIfPresent(String.self, forKey: .screenContextEndpoint))
-        // OpenAI cleanup moved from Chat Completions to the Responses API at the same address, which keeps
-        // nothing either (`store: false`), so consent given for the old endpoint still names the same recipient.
-        // Moved whichever named provider is selected now, so switching back to OpenAI finds it; only Local and
-        // Custom can still be using that exact address for Chat Completions.
-        if provider.hasFixedAddress, screenContextEndpoint == RewriteProvider.openAI.baseURL + "/chat/completions" {
-            screenContextEndpoint = RewriteProvider.openAI.baseURL + "/responses"
-        }
         if provider == .openAI { configuration.adoptTypedServiceTier() }
         providerConfigurations[RewriteProvider.openAI.rawValue]?.adoptTypedServiceTier()
     }

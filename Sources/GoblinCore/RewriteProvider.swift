@@ -220,13 +220,14 @@ public struct RewriteProviderConfiguration: Codable, Equatable, Sendable {
         self.temperature = temperature; self.extraRequestJSON = extraRequestJSON; self.serviceTier = serviceTier
     }
     /// A speed typed into Advanced options before the Speed picker existed moves to the picker, which is now the
-    /// only place OpenAI's speed comes from.
+    /// only place OpenAI's speed comes from. The typed key always goes, so saved options never fail validation.
     mutating func adoptTypedServiceTier() {
         guard var options = try? JSONSerialization.jsonObject(with: Data(extraRequestJSON.utf8)) as? [String: Any],
-              let typed = options["service_tier"] as? String, ["auto", "default", "priority", "fast", "ultrafast"].contains(typed) else { return }
-        options.removeValue(forKey: "service_tier")
-        // OpenAI treats priority as the old name for fast; auto and default are Standard.
-        if serviceTier == nil { serviceTier = typed == "priority" ? .fast : RewriteServiceTier(rawValue: typed) }
+              let typed = options.removeValue(forKey: "service_tier") else { return }
+        // OpenAI treats priority as the old name for fast. Anything else (auto, default, null, or a tier the picker
+        // doesn't offer, like flex) becomes Standard.
+        // ponytail: flex and scale aren't offered; add them to RewriteServiceTier if someone needs them.
+        if serviceTier == nil { serviceTier = typed as? String == "priority" ? .fast : (typed as? String).flatMap(RewriteServiceTier.init(rawValue:)) }
         extraRequestJSON = options.isEmpty ? "" : (try? JSONSerialization.data(withJSONObject: options, options: [.sortedKeys, .withoutEscapingSlashes]))
             .map { String(decoding: $0, as: UTF8.self) } ?? extraRequestJSON
     }
