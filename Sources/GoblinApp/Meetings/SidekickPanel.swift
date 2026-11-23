@@ -540,7 +540,8 @@ final class SidekickController: NSObject, NSWindowDelegate {
             let item = NSMenuItem(title: picked.name, action: nil, keyEquivalent: "")
             item.state = .on
             item.isEnabled = false
-            item.subtitle = "Not connected"
+            let lookalikes = devices.contains { picked.model != nil && $0.model == picked.model && $0.name == picked.name }
+            item.subtitle = lookalikes ? "More than one is connected. Pick one." : "Not connected"
             menu.addItem(item)
         }
         for device in devices {

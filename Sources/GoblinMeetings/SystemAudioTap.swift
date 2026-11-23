@@ -249,6 +249,8 @@ public final class SystemAudioTap: @unchecked Sendable {
         let sampleRate = format.mSampleRate
         let deliver = handler
         let heartbeat = heartbeat
+        // This build's first buffer follows time that passed unrecorded, however short; see `CapturedBuffer.resumes`.
+        let delivered = Flag()
         var proc: AudioDeviceIOProcID?
         status = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregateID, ioQueue) { _, input, inputTime, _, _ in
             heartbeat.ticks.store(mach_absolute_time(), ordering: .relaxed)
@@ -256,7 +258,9 @@ public final class SystemAudioTap: @unchecked Sendable {
             let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
             let host = inputTime.pointee.mFlags.contains(.hostTimeValid) ? HostClock.seconds(inputTime.pointee.mHostTime) : HostClock.now
             guard let mono = Self.mixTap(buffers, skipping: deviceInputStreams), !mono.isEmpty else { return }
-            deliver(CapturedBuffer(samples: mono, sampleRate: sampleRate, hostSeconds: host))
+            var buffer = CapturedBuffer(samples: mono, sampleRate: sampleRate, hostSeconds: host)
+            buffer.resumes = !delivered.value.exchange(true, ordering: .relaxed)
+            deliver(buffer)
         }
         guard status == noErr, let proc else { teardown(); throw MeetingCaptureError.coreAudio("create the IO callback", status) }
         procID = proc
@@ -380,4 +384,8 @@ public final class SystemAudioTap: @unchecked Sendable {
 /// The IO callback's last run, shared with the watchdog without a lock.
 private final class Heartbeat: Sendable {
     let ticks = Atomic<UInt64>(0)
+}
+
+private final class Flag: Sendable {
+    let value = Atomic<Bool>(false)
 }

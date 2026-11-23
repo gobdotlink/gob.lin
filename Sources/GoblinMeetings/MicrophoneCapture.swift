@@ -162,12 +162,13 @@ public final class MicrophoneCapture: @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.followInterval, repeating: Self.followInterval)
         timer.setEventHandler { [weak self] in self?.follow() }
+        // Started before anything can drop it: libdispatch traps when a timer that never started is released.
+        timer.resume()
         guard lock.withLock({ () -> Bool in
             guard !stopped else { return false }
             follower = timer
             return true
-        }) else { return }
-        timer.resume()
+        }) else { return timer.cancel() }
     }
 
     /// Closes the mic, keeping the batch it was filling, and returns once everything it heard has been handed over.
@@ -209,22 +210,20 @@ public final class MicrophoneCapture: @unchecked Sendable {
             unit.close()
             throw MeetingCaptureError.microphone("\(choice.device.name): \(error.localizedDescription)")
         }
-        let (kept, replaced) = lock.withLock { () -> (Bool, AudioInputUnit?) in
-            guard !stopped, generation == expected else { return (false, nil) }
-            defer { self.unit = unit; self.sink = sink; current = choice }
-            return (true, self.unit)
+        let (kept, replaced, wasSilent) = lock.withLock { () -> (Bool, AudioInputUnit?, Bool) in
+            guard !stopped, generation == expected else { return (false, nil, false) }
+            // The new mic and its cleared warning are published together: it hasn't been silent yet, and the next
+            // checks say so again if it is.
+            defer { self.unit = unit; self.sink = sink; current = choice; silence = nil }
+            return (true, self.unit, silence != nil)
         }
         replaced?.closeDelivering()
         guard kept else {
             unit.close()
             throw MeetingCaptureError.microphone("stopped while starting")
         }
-        let (event, problem, wasSilent) = lock.withLock { () -> ((@Sendable (String) -> Void)?, (@Sendable (MeetingCaptureProblem) -> Void)?, Bool) in
-            defer { silence = nil }
-            return (onEvent, onProblem, silence != nil)
-        }
+        let (event, problem) = lock.withLock { (onEvent, onProblem) }
         event?("microphone started: \(choice.device.name), \(choice.reason), \(Int(unit.format.sampleRate)) Hz, \(unit.format.channelCount) ch")
-        // A new mic hasn't been silent yet; the next checks say so again if it is.
         if wasSilent { problem?(.microphoneSilence(nil)) }
     }
 
@@ -289,12 +288,15 @@ public final class MicrophoneCapture: @unchecked Sendable {
     /// On `queue`: closes the mic, keeping the batch it was filling, and opens the one `choose` picks now: at once
     /// after a mic that delivered audio, else at the retry pace, for as long as the recording lasts.
     private func reopen() {
-        let (unit, attempt, tried) = lock.withLock { () -> (AudioInputUnit?, Int, Int) in
+        let (unit, attempt) = lock.withLock { () -> (AudioInputUnit?, Int) in
             defer { self.unit = nil; sink = nil }
             generation += 1
-            return (self.unit, generation, attempts)
+            return (self.unit, generation)
         }
         unit?.closeDelivering()
+        // That last batch may be the first audio this mic gave, which resets the count: let it land before reading it.
+        delivery.sync {}
+        let tried = lock.withLock { attempts }
         guard tried > 0 else { return retry(generation: attempt) }
         // It broke before delivering anything: as much a failed attempt as one that wouldn't open.
         noteFailure("the microphone keeps stopping before any audio arrives")
