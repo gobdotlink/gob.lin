@@ -1,6 +1,7 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
+import Synchronization
 
 public enum MeetingCaptureError: Error, LocalizedError {
     case coreAudio(String, OSStatus)
@@ -39,6 +40,9 @@ public struct CapturedBuffer: Sendable {
     public let samples: [Float]
     public let sampleRate: Double
     public let hostSeconds: Double
+    /// The first buffer after the capture reopened: the time before it passed with nothing recorded, however short,
+    /// so the track fills it rather than treating it as clock jitter.
+    public var resumes = false
 }
 
 public enum HostClock {
@@ -62,17 +66,38 @@ public final class SystemAudioTap: @unchecked Sendable {
     static let rebuildAttempts = 5
     /// Once those fail, how often the tap is tried again while the recording lasts.
     static let slowRebuildInterval: TimeInterval = 10
+    /// A running tap calls back every few milliseconds, silence included; this long without a callback, it's rebuilt.
+    static let stallTimeout: TimeInterval = 3
+    /// Rebuilds that brought no audio back before the controller is told the call's sound is lost.
+    static let stallsBeforeLost = 3
 
     private let target: SystemAudioTarget
     /// Starting, stopping and rebuilding; the device-change listener runs here too.
     private let queue = DispatchQueue(label: "gob.lin.meetings.system-tap", qos: .userInitiated)
     /// The IO callback, kept apart so a teardown on `queue` never waits behind it.
     private let ioQueue = DispatchQueue(label: "gob.lin.meetings.system-tap.io", qos: .userInteractive)
+    /// The output device's format listeners. Apart from `queue`, so removing them there never waits on `queue` itself.
+    private let listenerQueue = DispatchQueue(label: "gob.lin.meetings.system-tap.listeners")
+    /// When the IO callback last ran, in host ticks; written on `ioQueue`, read by the watchdog.
+    private let heartbeat = Heartbeat()
+    /// `lost`, for the controller to read without waiting on `queue`.
+    private let lostFlag = Atomic<Bool>(false)
     // Everything below is touched only on `queue`, apart from `start` before the listener exists.
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var outputListener: AudioObjectPropertyListenerBlock?
+    /// On the output device the aggregate wraps, for as long as this build lasts.
+    private var formatListeners: [(device: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
+    /// The output device's sample rate when the tap was built. A Bluetooth headset that starts a call changes it, and
+    /// the tap built on the old one stops without an error.
+    private var builtRate: Float64?
+    /// How many input streams the output device had then: the IO callback skips that many to reach the tap's.
+    private var builtInputStreams = 0
+    private var builtAt: Double = 0
+    private var watchdog: DispatchSourceTimer?
+    /// Rebuilds in a row that brought no audio.
+    private var stalls = 0
     private var handler: (@Sendable (CapturedBuffer) -> Void)?
     private var onEvent: (@Sendable (String) -> Void)?
     private var onProblem: (@Sendable (MeetingCaptureProblem) -> Void)?
@@ -80,13 +105,16 @@ public final class SystemAudioTap: @unchecked Sendable {
     private var stopped = false
     /// Counts output device changes, so retries for an older change give up when a newer one begins.
     private var generation = 0
-    /// The tap couldn't be rebuilt and the controller was told.
-    private var lost = false
+    /// The tap couldn't be rebuilt, or brought no audio back, and the controller was told.
+    private var lost = false { didSet { lostFlag.store(lost, ordering: .relaxed) } }
     public private(set) var formatDescription = ""
 
     public init(target: SystemAudioTarget) {
         self.target = target
     }
+
+    /// The call's sound has stopped arriving and the tap hasn't brought it back yet.
+    public var isLost: Bool { lostFlag.load(ordering: .relaxed) }
 
     public func start(onEvent: @escaping @Sendable (String) -> Void,
                       onProblem: @escaping @Sendable (MeetingCaptureProblem) -> Void = { _ in },
@@ -107,13 +135,22 @@ public final class SystemAudioTap: @unchecked Sendable {
         }
         var address = CoreAudioProperty.address(kAudioHardwarePropertyDefaultSystemOutputDevice)
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
-        queue.sync { outputListener = listener }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in self?.checkAudioArrives() }
+        queue.sync {
+            outputListener = listener
+            watchdog = timer
+        }
+        timer.resume()
     }
 
     public func stop() {
         let listener = queue.sync { () -> AudioObjectPropertyListenerBlock? in
             stopped = true
             generation += 1
+            watchdog?.cancel()
+            watchdog = nil
             defer { outputListener = nil }
             return outputListener
         }
@@ -135,11 +172,8 @@ public final class SystemAudioTap: @unchecked Sendable {
         guard !stopped, generation == attempt else { return }
         teardown()
         do {
+            // Said by the watchdog once audio arrives, not here: a tap can build and still deliver nothing.
             try build()
-            if lost {
-                lost = false
-                onProblem?(.systemAudioRestored)
-            }
         } catch {
             if failures + 1 == Self.rebuildAttempts {
                 onEvent?("tap rebuild failed: \(error.localizedDescription); trying every \(Int(Self.slowRebuildInterval)) s")
@@ -187,9 +221,10 @@ public final class SystemAudioTap: @unchecked Sendable {
             teardown()
             throw MeetingCaptureError.noOutputDevice
         }
+        watchFormat(of: outputDevice)
         // The output device is in the aggregate only as its clock. A USB interface or headset also has inputs, and
         // the aggregate lists those streams ahead of the tap's; they are skipped below, so "Them" is only the tap.
-        let deviceInputStreams = CoreAudioProperty.objects(outputDevice, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).count
+        let deviceInputStreams = builtInputStreams
         let tapUID = description.uuid.uuidString
         let aggregate: [String: Any] = [
             kAudioAggregateDeviceNameKey: "gob.lin meeting capture",
@@ -213,19 +248,89 @@ public final class SystemAudioTap: @unchecked Sendable {
         formatDescription = "\(Int(format.mSampleRate)) Hz, \(format.mChannelsPerFrame) ch, \(format.mBitsPerChannel) bit"
         let sampleRate = format.mSampleRate
         let deliver = handler
+        let heartbeat = heartbeat
+        // This build's first buffer follows time that passed unrecorded, however short; see `CapturedBuffer.resumes`.
+        let delivered = Flag()
         var proc: AudioDeviceIOProcID?
         status = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregateID, ioQueue) { _, input, inputTime, _, _ in
+            heartbeat.ticks.store(mach_absolute_time(), ordering: .relaxed)
             guard let deliver else { return }
             let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
             let host = inputTime.pointee.mFlags.contains(.hostTimeValid) ? HostClock.seconds(inputTime.pointee.mHostTime) : HostClock.now
             guard let mono = Self.mixTap(buffers, skipping: deviceInputStreams), !mono.isEmpty else { return }
-            deliver(CapturedBuffer(samples: mono, sampleRate: sampleRate, hostSeconds: host))
+            var buffer = CapturedBuffer(samples: mono, sampleRate: sampleRate, hostSeconds: host)
+            buffer.resumes = !delivered.value.exchange(true, ordering: .relaxed)
+            deliver(buffer)
         }
         guard status == noErr, let proc else { teardown(); throw MeetingCaptureError.coreAudio("create the IO callback", status) }
         procID = proc
         status = AudioDeviceStart(aggregateID, proc)
         guard status == noErr else { teardown(); throw MeetingCaptureError.coreAudio("start the aggregate device", status) }
+        builtAt = HostClock.now
         onEvent?("system tap started: \(target), \(formatDescription)")
+    }
+
+    /// On `queue`: rebuilds when the output device's sample rate moves away from the one the tap was built on, as a
+    /// Bluetooth headset's does when a call opens its mic, or its number of input streams changes, which moves the
+    /// tap's streams in the aggregate. Notifications that change neither are ignored, so building the tap can't set off
+    /// another build.
+    private func watchFormat(of device: AudioObjectID) {
+        builtRate = CoreAudioProperty.scalar(device, kAudioDevicePropertyNominalSampleRate, as: Float64.self)
+        builtInputStreams = Self.inputStreams(of: device)
+        for (selector, scope) in [(kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal),
+                                  (kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput),
+                                  (kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput)] {
+            var address = CoreAudioProperty.address(selector, scope: scope)
+            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                guard let self else { return }
+                queue.async { self.formatMayHaveChanged(device) }
+            }
+            if AudioObjectAddPropertyListenerBlock(device, &address, listenerQueue, block) == noErr {
+                formatListeners.append((device, address, block))
+            }
+        }
+    }
+
+    private static func inputStreams(of device: AudioObjectID) -> Int {
+        CoreAudioProperty.objects(device, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeInput).count
+    }
+
+    private func formatMayHaveChanged(_ device: AudioObjectID) {
+        guard !stopped, formatListeners.contains(where: { $0.device == device }),
+              let rate = CoreAudioProperty.scalar(device, kAudioDevicePropertyNominalSampleRate, as: Float64.self) else { return }
+        let inputs = Self.inputStreams(of: device)
+        guard rate != builtRate || inputs != builtInputStreams else { return }
+        generation += 1
+        onEvent?("output device changed to \(Int(rate)) Hz, \(inputs) input streams; rebuilding the tap")
+        // A headset settles over a few notifications; the last one's rebuild wins.
+        let attempt = generation
+        queue.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.rebuild(generation: attempt, failures: 0) }
+    }
+
+    /// On `queue`, every second: a tap that has delivered nothing for `stallTimeout` is rebuilt, and after
+    /// `stallsBeforeLost` such rebuilds the controller is told; once audio arrives again it's told that too. While a
+    /// build is failing, `rebuild`'s own retries own the tap.
+    private func checkAudioArrives() {
+        guard !stopped, aggregateID != kAudioObjectUnknown else { return }
+        let last = HostClock.seconds(heartbeat.ticks.load(ordering: .relaxed))
+        if last > builtAt {
+            stalls = 0
+            if lost {
+                lost = false
+                onEvent?("call audio arriving again")
+                onProblem?(.systemAudioRestored)
+            }
+        }
+        let quiet = HostClock.now - max(last, builtAt)
+        guard quiet >= (lost ? Self.slowRebuildInterval : Self.stallTimeout) else { return }
+        stalls += 1
+        onEvent?("no call audio for \(Int(quiet)) s; rebuilding the tap")
+        if stalls == Self.stallsBeforeLost, !lost {
+            lost = true
+            onProblem?(.systemAudioLost)
+        }
+        generation += 1
+        rebuild(generation: generation, failures: 0)
     }
 
     /// The tap's own streams, mixed to mono: the buffers after the output device's `skipping` input streams (the last
@@ -258,6 +363,12 @@ public final class SystemAudioTap: @unchecked Sendable {
     }
 
     private func teardown() {
+        for listener in formatListeners {
+            var address = listener.address
+            AudioObjectRemovePropertyListenerBlock(listener.device, &address, listenerQueue, listener.block)
+        }
+        formatListeners = []
+        builtRate = nil
         if aggregateID != kAudioObjectUnknown, let procID {
             AudioDeviceStop(aggregateID, procID)
             AudioDeviceDestroyIOProcID(aggregateID, procID)
@@ -268,4 +379,13 @@ public final class SystemAudioTap: @unchecked Sendable {
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         tapID = AudioObjectID(kAudioObjectUnknown)
     }
+}
+
+/// The IO callback's last run, shared with the watchdog without a lock.
+private final class Heartbeat: Sendable {
+    let ticks = Atomic<UInt64>(0)
+}
+
+private final class Flag: Sendable {
+    let value = Atomic<Bool>(false)
 }

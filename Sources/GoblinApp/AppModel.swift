@@ -220,9 +220,10 @@ final class AppModel: ObservableObject {
                 self.meetingSurfaces?.perform(action)
             }
         }
-        meetingSurfaces = MeetingSurfaces(meetings: meetings, overlay: overlay, defaults: defaults, servicesEnabled: servicesEnabled) { [weak self] id in
+        // Screenshots set meeting states by hand; with no surfaces, none of them reach the real overlay.
+        meetingSurfaces = servicesEnabled ? MeetingSurfaces(meetings: meetings, overlay: overlay, defaults: defaults) { [weak self] id in
             self?.openMeeting(id)
-        }
+        } : nil
         permissions.onboardingContent = { [weak self] in self.map { AnyView(OnboardingView(model: $0)) } ?? AnyView(EmptyView()) }
         hotkeys.onAction = { [weak self] action in self?.handleHotkey(action) }
         insertion.lastTranscript = { [weak self] in self?.lastTranscript }

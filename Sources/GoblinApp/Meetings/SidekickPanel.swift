@@ -1,5 +1,8 @@
 import AppKit
 import Combine
+import GoblinCore
+import GoblinEngines
+import GoblinMeetings
 import SwiftUI
 
 /// What the Sidekick shows besides the recording itself: window or pill, notes or not, the mark being labelled, a
@@ -33,6 +36,7 @@ final class SidekickModel: ObservableObject {
     /// already went somewhere else, like the notes.
     var endLabel: (_ handBack: Bool) -> Void = { _ in }
     var showMenu: (NSView?) -> Void = { _ in }
+    var showMicrophoneMenu: (NSView?) -> Void = { _ in }
     private var flashTask: Task<Void, Never>?
 
     init(collapsed: Bool = false, expanded: Bool = false, keepOnTop: Bool = true) {
@@ -191,6 +195,7 @@ final class SidekickController: NSObject, NSWindowDelegate {
         model.beginLabel = { [weak self] id in self?.beginLabel(id) }
         model.endLabel = { [weak self] handBack in self?.endLabel(handBack: handBack) }
         model.showMenu = { [weak self] view in self?.showMenu(from: view) }
+        model.showMicrophoneMenu = { [weak self] view in self?.showMicrophoneMenu(from: view) }
         meetings.willStop = { [weak self] in if self?.model.editingMark != nil { self?.commitLabel() } }
         meetings.$phase.combineLatest(meetings.$sidekickVisible).sink { [weak self] phase, visible in
             guard let self else { return }
@@ -512,6 +517,55 @@ final class SidekickController: NSObject, NSWindowDelegate {
         withExtendedLifetime(target) { _ = menu.popUp(positioning: nil, at: location, in: view) }
     }
 
+    /// Same as the call app (remembered, the default), then every mic. In person, "the call" is dictation's ranking.
+    private func showMicrophoneMenu(from view: NSView?) {
+        let menu = NSMenu()
+        // The lid-silenced and unplugged rows stay disabled; AppKit would otherwise enable every row with a target.
+        menu.autoenablesItems = false
+        let target = MenuTarget(controller: self)
+        let preference = meetings.meetingMicrophone
+        let recording = meetings.recording
+        let same = NSMenuItem(title: recording.map { $0.inPerson ? "Same as Dictation" : "Same as \($0.app)" } ?? "Same as the Call",
+                              action: #selector(MenuTarget.pickMicrophone(_:)), keyEquivalent: "")
+        same.target = target
+        same.state = preference == .sameAsCall ? .on : .off
+        if preference == .sameAsCall, let microphone = recording?.microphone { same.subtitle = microphone.device.name }
+        menu.addItem(same)
+        menu.addItem(.separator())
+        let picked: MicrophoneRanking.Entry? = if case .device(let entry) = preference { entry } else { nil }
+        let devices = (try? AudioInputDevices.list()) ?? []
+        let pickedDevice = picked.flatMap { entry in MeetingMicrophone.match(entry, in: devices) }
+        // A picked mic that's away is still the choice, and wins again when it's back.
+        if let picked, pickedDevice == nil {
+            let item = NSMenuItem(title: picked.name, action: nil, keyEquivalent: "")
+            item.state = .on
+            item.isEnabled = false
+            let lookalikes = devices.contains { picked.model != nil && $0.model == picked.model && $0.name == picked.name }
+            item.subtitle = lookalikes ? "More than one is connected. Pick one." : "Not connected"
+            menu.addItem(item)
+        }
+        for device in devices {
+            let item = NSMenuItem(title: device.name, action: #selector(MenuTarget.pickMicrophone(_:)), keyEquivalent: "")
+            item.target = target
+            item.representedObject = MicrophoneRanking.Entry(uid: device.uid, name: device.name, model: device.model, kind: device.kind)
+            item.state = pickedDevice?.uid == device.uid ? .on : .off
+            if device.silencedByLid {
+                item.isEnabled = false
+                item.subtitle = "Silenced by the closed lid"
+            }
+            menu.addItem(item)
+        }
+        let location = view.map { NSPoint(x: 0, y: $0.bounds.maxY + 4) } ?? NSEvent.mouseLocation
+        withExtendedLifetime(target) { _ = menu.popUp(positioning: nil, at: location, in: view) }
+    }
+
+    fileprivate func pickMicrophone(_ entry: MicrophoneRanking.Entry?) {
+        meetings.meetingMicrophone = entry.map { .device($0) } ?? .sameAsCall
+        let recording = meetings.recording
+        let same = recording?.inPerson == true ? "dictation's mic" : "the same mic as \(recording?.app ?? "the call")"
+        model.say("I'll use \(entry?.name ?? same) from now on.")
+    }
+
     fileprivate func copy(onlyNew: Bool) {
         let count = meetings.copyTranscript(onlyNew: onlyNew)
         model.say(count == 0 ? (onlyNew ? "Nothing new since your last copy." : "Nothing said yet.")
@@ -547,4 +601,5 @@ private final class MenuTarget: NSObject {
     @objc func collapse() { controller?.collapse() }
     @objc func hide() { controller?.hide() }
     @objc func stop() { controller?.stop() }
+    @objc func pickMicrophone(_ sender: NSMenuItem) { controller?.pickMicrophone(sender.representedObject as? MicrophoneRanking.Entry) }
 }
