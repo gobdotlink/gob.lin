@@ -71,8 +71,7 @@ final class SidekickModel: ObservableObject {
     }
 }
 
-/// The Sidekick's window: titled, resizable and in Mission Control, but a non-activating panel that takes the keyboard
-/// only for a text field (the notes, a mark's label). A click or a drag anywhere else leaves it with the call.
+/// The Sidekick's window: titled, resizable and in Mission Control. A click brings gob.lin forward, as any window does.
 class SidekickWindow: NSPanel {
     /// The yellow light collapses to the pill instead of the Dock.
     var onMiniaturize: () -> Void = {}
@@ -81,7 +80,7 @@ class SidekickWindow: NSPanel {
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
-                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                    backing: .buffered, defer: true)
         title = "Sidekick"
         titleVisibility = .hidden
@@ -96,9 +95,6 @@ class SidekickWindow: NSPanel {
         tabbingMode = .disallowed
         // In Mission Control and on every Space, over full-screen calls; never in ⌘` (the app stays an accessory).
         collectionBehavior = [.managed, .canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        // Never part of a screen share or recording. Newer capture APIs may ignore this, so the call app's own
-        // "you're sharing" state hides the window as well.
-        sharingType = .none
     }
 
     override var canBecomeKey: Bool { true }
@@ -132,7 +128,6 @@ final class SidekickPillWindow: NSPanel {
         hasShadow = false
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
-        sharingType = .none
     }
 
     override var canBecomeKey: Bool { false }
@@ -140,7 +135,7 @@ final class SidekickPillWindow: NSPanel {
 }
 
 /// Shows the Sidekick while a meeting records: a real window that starts at the top right, out of the overlay's
-/// corner, remembers a compact and an expanded frame, and collapses to the pill. Hidden from screen sharing.
+/// corner, remembers a compact and an expanded frame, and collapses to the pill.
 @MainActor
 final class SidekickController: NSObject, NSWindowDelegate {
     static let collapsedKey = "meetings.sidekick.collapsed"
@@ -201,7 +196,7 @@ final class SidekickController: NSObject, NSWindowDelegate {
             guard let self else { return }
             if case .recording(let recording) = phase {
                 self.model.push(microphone: recording.microphoneLevel, system: recording.systemLevel)
-                self.setShown(visible && !recording.sharing)
+                self.setShown(visible)
             } else {
                 self.setShown(false)
             }
@@ -231,7 +226,7 @@ final class SidekickController: NSObject, NSWindowDelegate {
                 showing.animator().alphaValue = 1
             }
         } else {
-            // Hiding (by hand, or for a screen share) keeps what was typed; only Escape throws a label away. This runs
+            // Hiding keeps what was typed; only Escape throws a label away. This runs
             // inside the update that hid the window, which would overwrite a mark changed now, so the label goes in
             // once that update has landed. Stop saves it earlier, through `willStop`.
             if let id = model.editingMark {

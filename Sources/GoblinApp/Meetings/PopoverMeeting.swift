@@ -114,9 +114,7 @@ private struct PopoverRecording: View {
                     Label { Text("Mark This") } icon: { Image(systemName: "flag.fill").foregroundStyle(GoblinBrand.candle) }
                 }
                 .help("Drop a bookmark here (\(MeetingMarkHotkey.title)). Label it in the Sidekick or later.")
-                if !recording.sharing {
-                    Button(meetings.sidekickVisible ? "Hide Sidekick" : "Show Sidekick") { meetings.setSidekickVisible(!meetings.sidekickVisible) }
-                }
+                Button(meetings.sidekickVisible ? "Hide Sidekick" : "Show Sidekick") { meetings.setSidekickVisible(!meetings.sidekickVisible) }
                 Spacer(minLength: 0)
                 if !recording.marks.isEmpty {
                     Text("\(recording.marks.count) \(recording.marks.count == 1 ? "mark" : "marks")")
@@ -147,8 +145,6 @@ private struct PopoverRecording: View {
             }
         } else if let lost = MeetingCopy.captureLost(recording) {
             line(lost, symbol: "exclamationmark.triangle") { EmptyView() }
-        } else if recording.sharing {
-            line("The Sidekick is hidden while you share your screen.", symbol: "eye.slash") { EmptyView() }
         } else if !recording.inPerson, recording.muted == true {
             line("You're muted in \(recording.app), so I'm leaving your mic out.", symbol: "mic.slash") { EmptyView() }
         } else if let download = meetings.speechModelDownload {
