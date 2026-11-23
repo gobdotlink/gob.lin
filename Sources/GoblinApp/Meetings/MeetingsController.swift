@@ -40,8 +40,6 @@ final class MeetingsController: ObservableObject {
         var meetingID = ""
         /// Moments marked so far, in time order.
         var marks: [LiveMark] = []
-        /// The call app shows that this person is sharing their screen, so the Sidekick hides.
-        var sharing = false
         /// A gob.lin dictation is running; its words stay out of the meeting.
         var dictating = false
         /// Keep Recording was chosen after the call app let go of the mic: no auto-stop until it takes it back.
@@ -1335,7 +1333,6 @@ final class MeetingsController: ObservableObject {
         recording.microphoneSilence = trouble.microphoneSilence
         recording.systemAudioLost = trouble.systemAudioLost
         recording.muted = probe?.isMuted
-        recording.sharing = probe?.isSharing ?? false
         if let timeline = probe?.muteTimeline, timeline != appliedMute {
             appliedMute = timeline
             dropMutedLines(from: &recording, timeline: timeline)

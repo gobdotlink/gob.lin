@@ -26,14 +26,6 @@ import Testing
     #expect(MeetingMarks.read(from: directory) == [MeetingMark(t: 4)])
 }
 
-@Test func onlyYourOwnScreenShareHidesTheSidekick() {
-    #expect(AccessibilityProbe.sharingState(["3 AXButton: Stop Share", "2 AXWindow: zoom share toolbar window"]))
-    #expect(AccessibilityProbe.sharingState(["4 AXStaticText: You are screen sharing"]))
-    #expect(AccessibilityProbe.sharingState(["7 AXStaticText: You are presenting", "8 AXButton: Stop presenting"]))
-    #expect(!AccessibilityProbe.sharingState(["6 AXButton: Share Screen", "6 AXButton: Mute my audio"]))
-    #expect(!AccessibilityProbe.sharingState(["9 AXButton: Present now", "7 AXStaticText: Alex Kim is presenting"]))
-}
-
 @Test func typedNotesRoundTripAsTypedAndEmptyRemovesTheFile() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("typed-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

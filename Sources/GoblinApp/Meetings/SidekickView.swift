@@ -527,11 +527,11 @@ private struct SidekickMarkRow: View {
             if model.editingMark == mark.id {
                 TextField("Label it now or later", text: $text)
                     .textFieldStyle(.plain).foregroundStyle(.white).focused($focused)
-                    .onSubmit { commit(handBack: true) }
+                    .onSubmit { commit(leaveField: true) }
                     .onExitCommand { model.endLabel(true) }
                     .onAppear { text = mark.label; DispatchQueue.main.async { focused = true } }
                     // Clicked away, maybe into the notes: the keyboard stays where it went.
-                    .onChange(of: focused) { _, now in if !now, model.editingMark == mark.id { commit(handBack: false) } }
+                    .onChange(of: focused) { _, now in if !now, model.editingMark == mark.id { commit(leaveField: false) } }
                     .onChange(of: text, initial: true) { _, now in model.labelDraft = now }
             } else if mark.label.isEmpty {
                 Text("Marked").foregroundStyle(.white.opacity(0.75))
@@ -553,9 +553,9 @@ private struct SidekickMarkRow: View {
         .accessibilityLabel("Mark at \(MeetingsController.elapsed(mark.t))")
     }
 
-    private func commit(handBack: Bool) {
+    private func commit(leaveField: Bool) {
         meetings.label(mark.id, text)
-        model.endLabel(handBack)
+        model.endLabel(leaveField)
     }
 }
 

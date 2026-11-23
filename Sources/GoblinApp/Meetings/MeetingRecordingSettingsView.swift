@@ -84,7 +84,7 @@ struct MeetingRecordingSettingsView: View {
             Toggle(isOn: Binding(get: { meetings.showSidekick }, set: { meetings.showSidekick = $0 })) {
                 Text("Show Sidekick")
                 Text("Live captions in a small panel while a call records.").rowDetail()
-                Text("It never takes focus, stays out of the overlay's corner, and hides while you share your screen.")
+                Text("It stays out of the overlay's corner.")
             }
         } header: { CapsHeader("When a call starts") } footer: {
             Text("Ask puts a question in the corner when the app picks up your mic. Always records without asking. Never stays quiet for that app.")

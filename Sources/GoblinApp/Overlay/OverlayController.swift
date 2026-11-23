@@ -53,7 +53,7 @@ enum OverlayPhase: Equatable {
         switch self { case .listening, .transcribing, .polishing: true; default: false }
     }
 
-    /// A meeting's question or notice: kept out of screen sharing, and waits for a take like the other questions.
+    /// A meeting's question or notice: waits for a take like the other questions.
     var isMeeting: Bool {
         switch self {
         case .meetingOffer, .meetingRecording, .meetingReady, .meetingInterrupted, .meetingQuiet: true
@@ -254,8 +254,6 @@ final class OverlayController {
         model.resetForSession()
         model.cancel = onCancel
         model.phase = .arming
-        // Dictation shows in a screen share as it always has; only meeting questions stay out of it.
-        panel.sharingType = .readOnly
         // Render the collapsed frame first so the entrance has somewhere to start from.
         if !panel.isVisible { model.presented = false }
         // Settle the cleared content first: resizing inside the animated update drops the animation.
@@ -281,8 +279,6 @@ final class OverlayController {
         }
         if model.phase != phase {
             withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeOut(duration: 0.14)) { model.phase = phase }
-            // The people on the call never see a meeting question in a screen share.
-            panel.sharingType = phase.isMeeting ? .none : .readOnly
         }
         if let committed, committed != model.committedText { model.committedText = committed }
         if let tentative, tentative != model.tentativeText { model.tentativeText = tentative }

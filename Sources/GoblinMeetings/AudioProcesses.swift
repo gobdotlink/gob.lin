@@ -86,7 +86,7 @@ public struct CallApp: Sendable, Hashable {
     public let scope: AccessibilityScope
     /// How long the app must hold the mic before it counts as a likely meeting, unless a call window shows sooner.
     public let minimumMicTime: TimeInterval
-    /// Whether gob.lin knows this app's mute and screen-sharing phrases. Without them mute stays unknown, so no mic
+    /// Whether gob.lin knows this app's mute phrases. Without them mute stays unknown, so no mic
     /// line is ever left out because some other text happened to match.
     public let readsCallState: Bool
 
@@ -103,7 +103,7 @@ public struct CallApp: Sendable, Hashable {
     /// Zoom's windows are all the call, so the whole app is read. Browsers have only their meeting pages read.
     /// Slack is read only in its huddle or mini window, never its main window, and waits 20 s so a clip or the
     /// settings mic test isn't offered. Teams, FaceTime, Webex and Discord aren't read at all: their main windows
-    /// hold chats or recent callers, and gob.lin knows none of their mute or sharing phrases yet, so reading them
+    /// hold chats or recent callers, and gob.lin knows none of their mute phrases yet, so reading them
     /// would expose that and gain nothing. Their window shapes are still logged at debug level.
     public static let known: [CallApp] = [
         CallApp(name: "Zoom", bundleIDs: ["us.zoom.xos"], kind: .native, scope: .wholeApp, readsCallState: true),

@@ -1,9 +1,8 @@
 import ApplicationServices
 import Foundation
 
-/// Reads the call app's Accessibility tree about once a second for its mute state, whether this person is
-/// sharing their screen, and who's in the call. Keeps mute.jsonl and participants.json; the window's raw text
-/// goes to accessibility.jsonl only with `MeetingStorage.debugLogging` on, for test captures.
+/// Reads the call app's Accessibility tree about once a second for its mute state and who's in the call. Keeps
+/// mute.jsonl and participants.json; the window's raw text goes to accessibility.jsonl only with `MeetingStorage.debugLogging` on, for test captures.
 /// The call app's `AccessibilityScope` says which windows and elements are walked.
 /// Made without a folder (while a call is offered) it keeps mute changes in memory and writes nothing, not even the
 /// raw log, until `attach` gives it the recording's folder.
@@ -39,7 +38,6 @@ public final class AccessibilityProbe: @unchecked Sendable {
     /// When a pass first saw no mute signal while the state was known; it goes unknown `staleAfter` later.
     private var signalLostAt: Date?
     private var timeline = MuteTimeline()
-    private var sharing = false
 
     public convenience init(pid: pid_t, isBrowser: Bool, directory: URL, sessionStart: Date,
                             rawLog: Bool = MeetingStorage.debugLogging) {
@@ -53,7 +51,7 @@ public final class AccessibilityProbe: @unchecked Sendable {
                   sessionStart: sessionStart, rawLog: rawLog)
     }
 
-    /// `readsCallState` false leaves mute unknown and sharing off whatever the windows say: the app's phrases aren't
+    /// `readsCallState` false leaves mute unknown whatever the windows say: the app's phrases aren't
     /// known, and a chat line that happened to read "Unmute my audio" mustn't take your mic lines out.
     /// A nil `directory` keeps everything in memory until `attach`.
     public init(pid: pid_t, scope: AccessibilityScope, readsCallState: Bool, directory: URL?, sessionStart: Date,
@@ -162,18 +160,6 @@ public final class AccessibilityProbe: @unchecked Sendable {
         }
     }
 
-    /// Whether this person is sharing their screen in the call. Zoom: the share toolbar's "Stop Share" and
-    /// "You are screen sharing"; Meet: the "You are presenting" banner and "Stop presenting". Someone else's share
-    /// ("Alex Kim is presenting", "Alex Kim's screen") doesn't count.
-    public static func sharingState<S: Sequence>(_ lines: S) -> Bool where S.Element == String {
-        let phrases = ["stop share", "you are screen sharing", "you're screen sharing", "you are sharing your screen",
-                       "you are presenting", "you're presenting", "stop presenting"]
-        return lines.contains { line in
-            guard let text = line.split(separator: ":", maxSplits: 1).last?.lowercased() else { return false }
-            return phrases.contains { text.contains($0) }
-        }
-    }
-
     /// Replays a recording's accessibility log into mute.jsonl, for logs taken before the rules changed. A recording
     /// without the raw log keeps its mute.jsonl as it is, and nil comes back.
     public static func rebuildMuteLog(directory: URL, sessionStart: Date) throws -> Int? {
@@ -223,9 +209,6 @@ public final class AccessibilityProbe: @unchecked Sendable {
     /// Every mute change so far, on the session's clock: what mute.jsonl holds.
     public var muteTimeline: MuteTimeline { lock.withLock { timeline } }
 
-    /// True while the call app shows that this person is sharing their screen.
-    public var isSharing: Bool { lock.withLock { sharing } }
-
     /// How long one Accessibility message to the call app may take; a pass that hits it stops early and tries again.
     static let messagingTimeout: Float = 0.5
 
@@ -260,7 +243,7 @@ public final class AccessibilityProbe: @unchecked Sendable {
 
     /// Ends the loop; the app's Accessibility switches are put back on the probe's queue once the last pass is done.
     public func stop() {
-        lock.withLock { running = false; sharing = false }
+        lock.withLock { running = false }
         queue.async { [self] in
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
@@ -296,11 +279,6 @@ public final class AccessibilityProbe: @unchecked Sendable {
             }
             let duration = Date().timeIntervalSince(started)
             if readsCallState { updateMute(Self.muteState(lines), at: started) }
-            let sharingNow = readsCallState && Self.sharingState(lines)
-            if sharingNow != lock.withLock({ sharing }) {
-                lock.withLock { sharing = sharingNow }
-                append(["t": started.timeIntervalSince1970, "kind": "sharing", "sharing": sharingNow])
-            }
             let current = Set(lines)
             let added = lines.filter { !previous.contains($0) }
             collector.add(added)

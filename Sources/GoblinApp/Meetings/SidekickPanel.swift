@@ -32,9 +32,9 @@ final class SidekickModel: ObservableObject {
     var setExpanded: (Bool) -> Void = { _ in }
     var setKeepOnTop: (Bool) -> Void = { _ in }
     var beginLabel: (UUID) -> Void = { _ in }
-    /// Ends the label being typed. `handBack` returns the keyboard to the app that had it; false when the keyboard
-    /// already went somewhere else, like the notes.
-    var endLabel: (_ handBack: Bool) -> Void = { _ in }
+    /// Ends the label being typed. `leaveField` takes the keyboard out of the field; false when it already went
+    /// somewhere else, like the notes.
+    var endLabel: (_ leaveField: Bool) -> Void = { _ in }
     var showMenu: (NSView?) -> Void = { _ in }
     var showMicrophoneMenu: (NSView?) -> Void = { _ in }
     private var flashTask: Task<Void, Never>?
@@ -71,24 +71,22 @@ final class SidekickModel: ObservableObject {
     }
 }
 
-/// The Sidekick's window: titled, resizable and in Mission Control, but a non-activating panel that takes the keyboard
-/// only for a text field (the notes, a mark's label). A click or a drag anywhere else leaves it with the call.
+/// The Sidekick's window: titled, resizable and in Mission Control. A click brings gob.lin forward, as any window does.
 class SidekickWindow: NSPanel {
     /// The yellow light collapses to the pill instead of the Dock.
     var onMiniaturize: () -> Void = {}
-    /// Escape, outside a label field: leave the notes and hand the keyboard back.
+    /// Escape, outside a label field: leave the notes.
     var onEscape: () -> Void = {}
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
-                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                   styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                    backing: .buffered, defer: true)
         title = "Sidekick"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         appearance = NSAppearance(named: .darkAqua)
         isMovableByWindowBackground = true
-        becomesKeyOnlyIfNeeded = true
         isOpaque = false
         backgroundColor = .clear
         hidesOnDeactivate = false
@@ -96,9 +94,6 @@ class SidekickWindow: NSPanel {
         tabbingMode = .disallowed
         // In Mission Control and on every Space, over full-screen calls; never in ⌘` (the app stays an accessory).
         collectionBehavior = [.managed, .canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        // Never part of a screen share or recording. Newer capture APIs may ignore this, so the call app's own
-        // "you're sharing" state hides the window as well.
-        sharingType = .none
     }
 
     override var canBecomeKey: Bool { true }
@@ -132,7 +127,6 @@ final class SidekickPillWindow: NSPanel {
         hasShadow = false
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
-        sharingType = .none
     }
 
     override var canBecomeKey: Bool { false }
@@ -140,7 +134,7 @@ final class SidekickPillWindow: NSPanel {
 }
 
 /// Shows the Sidekick while a meeting records: a real window that starts at the top right, out of the overlay's
-/// corner, remembers a compact and an expanded frame, and collapses to the pill. Hidden from screen sharing.
+/// corner, remembers a compact and an expanded frame, and collapses to the pill.
 @MainActor
 final class SidekickController: NSObject, NSWindowDelegate {
     static let collapsedKey = "meetings.sidekick.collapsed"
@@ -165,8 +159,6 @@ final class SidekickController: NSObject, NSWindowDelegate {
     private var shown = false
     /// Frames this controller sets aren't the person's, so they aren't remembered.
     private var settingFrame = false
-    /// The app that had the keyboard before the Sidekick took it, to hand it back.
-    private var previousApp: NSRunningApplication?
     private var fadeOut: Task<Void, Never>?
     private var pillSettle: Task<Void, Never>?
 
@@ -193,7 +185,7 @@ final class SidekickController: NSObject, NSWindowDelegate {
         model.setExpanded = { [weak self] expanded in self?.setExpanded(expanded) }
         model.setKeepOnTop = { [weak self] onTop in self?.setKeepOnTop(onTop) }
         model.beginLabel = { [weak self] id in self?.beginLabel(id) }
-        model.endLabel = { [weak self] handBack in self?.endLabel(handBack: handBack) }
+        model.endLabel = { [weak self] leave in self?.endLabel(leaveField: leave) }
         model.showMenu = { [weak self] view in self?.showMenu(from: view) }
         model.showMicrophoneMenu = { [weak self] view in self?.showMicrophoneMenu(from: view) }
         meetings.willStop = { [weak self] in if self?.model.editingMark != nil { self?.commitLabel() } }
@@ -201,7 +193,7 @@ final class SidekickController: NSObject, NSWindowDelegate {
             guard let self else { return }
             if case .recording(let recording) = phase {
                 self.model.push(microphone: recording.microphoneLevel, system: recording.systemLevel)
-                self.setShown(visible && !recording.sharing)
+                self.setShown(visible)
             } else {
                 self.setShown(false)
             }
@@ -221,7 +213,7 @@ final class SidekickController: NSObject, NSWindowDelegate {
         fadeOut?.cancel()
         if show {
             model.resetLevels()
-            if model.editingMark != nil { endLabel(handBack: false) }
+            if model.editingMark != nil { endLabel(leaveField: false) }
             if model.collapsed { placePill(from: windowFrame(expanded: model.expanded)) } else { setWindowFrame(windowFrame(expanded: model.expanded), animated: false) }
             let showing = current
             showing.orderFrontRegardless()
@@ -231,12 +223,12 @@ final class SidekickController: NSObject, NSWindowDelegate {
                 showing.animator().alphaValue = 1
             }
         } else {
-            // Hiding (by hand, or for a screen share) keeps what was typed; only Escape throws a label away. This runs
+            // Hiding keeps what was typed; only Escape throws a label away. This runs
             // inside the update that hid the window, which would overwrite a mark changed now, so the label goes in
             // once that update has landed. Stop saves it earlier, through `willStop`.
             if let id = model.editingMark {
                 let draft = model.labelDraft
-                endLabel(handBack: true)
+                endLabel(leaveField: true)
                 Task { @MainActor [meetings] in meetings.label(id, draft) }
             }
             let hiding = current
@@ -265,7 +257,6 @@ final class SidekickController: NSObject, NSWindowDelegate {
         defaults.set(collapsed, forKey: Self.collapsedKey)
         guard shown else { return }
         if collapsed {
-            if window.isKeyWindow { handBack() }
             placePill(from: from)
             pill.alphaValue = 1
             pill.orderFrontRegardless()
@@ -451,45 +442,28 @@ final class SidekickController: NSObject, NSWindowDelegate {
         return false
     }
 
-    func windowDidBecomeKey(_ notification: Notification) {
-        // Non-activating, so the call app is still in front and gets the keyboard back afterwards.
-        if previousApp == nil, let front = NSWorkspace.shared.frontmostApplication, front != .current { previousApp = front }
-    }
-
-    func windowDidResignKey(_ notification: Notification) { previousApp = nil }
-
     // MARK: Labels
 
-    /// Someone chose Add Label: the field takes the keyboard, and hands it back afterwards.
+    /// Someone chose Add Label: the field takes the keyboard.
     private func beginLabel(_ id: UUID) {
-        if previousApp == nil, let front = NSWorkspace.shared.frontmostApplication, front != .current { previousApp = front }
         if model.collapsed { setCollapsed(false) }
         model.editingMark = id
         window.makeKey()
     }
 
-    /// Saves the label being typed, then hands the keyboard back.
+    /// Saves the label being typed and leaves the field.
     private func commitLabel() {
         if let id = model.editingMark { meetings.label(id, model.labelDraft) }
-        endLabel(handBack: true)
+        endLabel(leaveField: true)
     }
 
-    private func endLabel(handBack: Bool) {
+    private func endLabel(leaveField: Bool) {
         model.editingMark = nil
-        if handBack, window.isKeyWindow { self.handBack() }
+        if leaveField { window.makeFirstResponder(nil) }
     }
 
     private func escape() {
-        if model.editingMark != nil { endLabel(handBack: true) } else if window.isKeyWindow { handBack() }
-    }
-
-    /// Gives the keyboard back to the app that had it.
-    private func handBack() {
-        let app = previousApp
-        window.makeFirstResponder(nil)
-        window.resignKey()
-        if let app, app != .current { app.activate() }
-        previousApp = nil
+        if model.editingMark != nil { endLabel(leaveField: true) } else { window.makeFirstResponder(nil) }
     }
 
     // MARK: Menu

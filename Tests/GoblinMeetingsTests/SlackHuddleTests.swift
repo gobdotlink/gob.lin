@@ -171,10 +171,9 @@ private let main = window("AXStandardWindow", "design-team - Acme - Slack")
 // MARK: Mute unknown
 
 @Test func withoutSlackPhrasesMuteStaysUnknownAndNothingIsDropped() {
-    // What a huddle window might show; none of it is a phrase gob.lin knows, so mute and sharing stay unknown.
+    // What a huddle window might show; none of it is a phrase gob.lin knows, so mute stays unknown.
     let lines = ["3 AXButton: Mute", "3 AXButton: Turn off camera", "4 AXButton: Share screen", "2 AXStaticText: Alex Kim"]
     #expect(AccessibilityProbe.muteState(lines) == nil)
-    #expect(!AccessibilityProbe.sharingState(lines))
     // No mute changes: no mic line is left out, live or in the final transcript.
     let timeline = MuteTimeline()
     #expect(!timeline.silences(TranscriptSegment(track: .microphone, start: 10, end: 14, text: "words", words: [],
