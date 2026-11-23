@@ -136,7 +136,7 @@ public final class MeetingSession: @unchecked Sendable {
     /// What capture can't hear right now. Read afresh on every check rather than kept from `onProblem`, whose reports
     /// during an offer's handover can land before the recording is there to show them.
     public var captureTrouble: (microphoneLost: Bool, microphoneSilence: InputSilence?, systemAudioLost: Bool) {
-        let (microphone, tap) = lock.withLock { (microphoneCapture as? MicrophoneCapture, tap as? SystemAudioTap) }
+        let (microphone, tap) = lock.withLock { (self.microphoneCapture as? MicrophoneCapture, self.tap as? SystemAudioTap) }
         return (microphone?.isLost ?? false, microphone?.silent, tap?.isLost ?? false)
     }
 
