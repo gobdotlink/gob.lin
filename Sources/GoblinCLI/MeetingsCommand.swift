@@ -12,6 +12,7 @@ enum MeetingsCommand {
            goblin meetings process <folder> [--preset offline|fast32|fast128] [--no-echo-cancel] [--verbose]
            goblin meetings export-fixture <id> <destination> [--root <dir>]
            goblin meetings voices <folder>
+           goblin meetings live-names <folder>
            goblin meetings learn-voices [--root <dir>]
            goblin meetings notes <id> [--tool codex|claude] [--notes-model <id>] [--thinking <level>] [--template <id>]
              [--style concise|detailed] [--out <file>] [--print-prompt] [--dictionary <file>] [--root <dir>] [--verbose]
@@ -105,6 +106,13 @@ enum MeetingsCommand {
             // Voiceprints of a processed meeting's voices, for checking how alike voices across meetings are.
             let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
             try write(try await VoiceStretches.voices(inMeeting: folder, embed: VoiceprintEmbedder.lazy()))
+        case "live-names":
+            // The live speakers' final attribution of a processed call's saved lines, next to the after-call names.
+            // Reads People and the call's participant list, and keeps nothing.
+            let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
+            let voices = MeetingVoiceOptions(enabled: { true }, embed: VoiceprintEmbedder.lazy(),
+                                             people: PeopleStore(meetingsRoot: folder.deletingLastPathComponent()))
+            try write(try await LiveSpeakers.replay(folder, voices: voices, log: log))
         case "export-fixture":
             let values = try options.finish(positional: 2)
             let destination = URL(fileURLWithPath: values[1], isDirectory: true).standardizedFileURL

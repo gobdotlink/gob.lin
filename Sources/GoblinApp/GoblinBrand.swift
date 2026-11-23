@@ -25,6 +25,12 @@ enum GoblinBrand {
         $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(hex: 0x34965F, alpha: 0.24) : NSColor(hex: 0x2B7D4F, alpha: 0.13)
     })
     static let wordmark = Color(nsColor: .dynamic(light: 0x2B7D4F, dark: 0x57E68F))
+    /// Your own lines in a transcript: a quiet moss tint under ordinary text.
+    static let yourBubble = Color(nsColor: NSColor(name: nil) {
+        $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(hex: 0x34965F, alpha: 0.36) : NSColor(hex: 0x2B7D4F, alpha: 0.16)
+    })
+    /// Everyone else's lines.
+    static let theirBubble = Color.primary.opacity(0.07)
 
     /// Inset for pages that cannot be grouped Forms, so every page shares Form margins.
     static let pagePadding: CGFloat = 20
@@ -137,6 +143,8 @@ extension Font {
     static let status = Font.system(size: 12)
     /// Body text, row titles and buttons.
     static let row = Font.system(size: 13)
+    /// What people said, in a transcript bubble: the Sidekick's captions and a finished meeting's transcript.
+    static let transcript = Font.system(size: 14)
     /// The title of a card, a sheet or a toolbar.
     static let cardTitle = Font.system(size: 15, weight: .semibold)
     /// Text to read at length: a dictation, the first-run prompt.
@@ -156,6 +164,8 @@ enum Radius {
     static let row: CGFloat = 8
     /// Plates, cards and large fields.
     static let plate: CGFloat = 12
+    /// A transcript bubble.
+    static let transcriptBubble: CGFloat = 13
     /// A popover module, inside the 22 pt panel.
     static let module: CGFloat = 14
     /// The overlay bubble.
@@ -262,5 +272,33 @@ struct GoblinTagline: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("sudo autism --unmuted")
+    }
+}
+
+/// Each voice's colour in one meeting, so a person reads the same on the chips, the timeline and the transcript: you
+/// in moss, a voice with no name yet in candle, and everyone else from the palette in the order they first spoke.
+struct VoiceColors {
+    /// Lavender, sky, rose and teal: clear of moss and candle, and at least 4.5:1 as text on the plate and the case.
+    static let palette = [(0x6A4FC4, 0xB4A5F2), (0x1F6AA5, 0x7CC4F2), (0xB03A72, 0xF29BC0), (0x0E7470, 0x5FD0C8)]
+        .map { Color(nsColor: .dynamic(light: UInt32($0.0), dark: UInt32($0.1))) }
+    /// Text on a filled voice colour: white on the deep light-mode colours, near black on the pale dark-mode ones.
+    static let onColor = Color(nsColor: .dynamic(light: 0xFFFFFF, dark: 0x16181A))
+
+    private var assigned: [String: Color] = [:]
+    private let you: Set<String>
+
+    /// `speakers` in the order they first spoke; repeats are fine.
+    init(_ speakers: [String], you: Set<String> = ["You"]) {
+        self.you = you
+        for speaker in speakers where !you.contains(speaker) && !MeetingsController.isUnnamedVoice(speaker) && assigned[speaker] == nil {
+            assigned[speaker] = Self.palette[assigned.count % Self.palette.count]
+        }
+    }
+
+    /// Nil for a voice it wasn't given, such as Them on a call without live names.
+    func callAsFunction(_ speaker: String) -> Color? {
+        if you.contains(speaker) { return GoblinBrand.mossText }
+        if MeetingsController.isUnnamedVoice(speaker) { return GoblinBrand.candle }
+        return assigned[speaker]
     }
 }

@@ -143,7 +143,8 @@ private func liveTranscript(in root: URL) async throws -> [String] {
     let live = try await liveTranscript(in: root)
     #expect(live == ["Them: hello there everyone", "You: yes please", "Them: shall we start", "You: shell we stark"])
 
-    for canceller: MeetingEchoCanceller in [{ _, _, _ in throw CancellerBroke() }, { microphone, _, _ in Array(microphone.dropLast()) }] {
+    for canceller: MeetingEchoCanceller in [{ @Sendable _, _, _ in throw CancellerBroke() },
+                                            { @Sendable microphone, _, _ in Array(microphone.dropLast()) }] {
         let meetings = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let directory = try loudspeakerCall(in: meetings)
         let lines = Mutex<[String]>([])

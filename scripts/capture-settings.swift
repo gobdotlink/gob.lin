@@ -343,15 +343,39 @@ struct SettingsCapture {
         call.microphoneLevel = -24
         call.systemLevel = -16
         call.microphone = MeetingMicrophone(device: AudioInputDevice(id: 0, uid: "preview-usb", name: "Lav Receiver", kind: .usb), reason: .call)
-        call.lines = [line(245, "You", "Then let's hold the next batch until Thursday."),
-                      line(370, "Them", "On pricing, I'd keep the free tier at three borrowed tools a month."),
-                      line(412, "You", "Three feels right. We can raise it once lending is steady."),
-                      line(580, "Them", "The offline mode still drops edits if you close the app too fast."),
+        // Cut the way the chunker cuts live speech: at short pauses, so mostly pieces of sentences.
+        call.lines = [line(245, "You", "Then let's hold the next batch"),
+                      line(248, "You", "until Thursday."),
+                      line(370, "Them", "On pricing, I'd keep the free tier"),
+                      line(373, "Them", "at three borrowed tools a month."),
+                      line(412, "You", "Three feels right."),
+                      line(414, "You", "We can raise it once lending is steady."),
+                      line(580, "Them", "The offline mode still drops edits"),
+                      line(583, "Them", "if you close the app too fast."),
                       line(615, "You", "Is that the same bug from the sync rewrite?"),
-                      line(648, "Them", "Same family. I'd rather fix it properly than patch it again."),
-                      line(722, "Them", "Can we write down which bugs block the launch and which don't?"),
-                      line(750, "You", "Yes. I'll start the list after this call.")]
+                      line(648, "Them", "Same family."),
+                      line(650, "Them", "I'd rather fix it properly"),
+                      line(653, "Them", "than patch it again."),
+                      line(672, "You", "Yeah."),
+                      line(690, "Them", "Can we write down which bugs block the launch"),
+                      line(694, "Them", "and which don't?"),
+                      line(750, "You", "Yes. I'll start the list"),
+                      line(753, "You", "after this call.")]
         call.marks = [.init(id: UUID(), t: 372, label: "Pricing: free tier stays at three"), .init(id: UUID(), t: 760, label: "")]
+        // With names live: voices I know by name, a new one as Speaker 3, and a last line whose voice isn't placed yet.
+        var named = call
+        named.namesLive = true
+        named.lines = [line(648, "Priya Shah", "Export first. Is it still on for this sprint?"),
+                       line(655, "You", "It's close. The CSV path works,"),
+                       line(658, "You", "but the PDF one still drops page breaks."),
+                       line(667, "Sam Okafor", "I'd ship CSV on its own and move PDF to next sprint."),
+                       line(675, "Priya Shah", "Agreed."),
+                       line(722, "Speaker 3", "I can pick up the page-break fix."),
+                       line(725, "Speaker 3", "I'm next to Sam today, same laptop."),
+                       line(740, "You", "Perfect, thanks."),
+                       line(750, "Them", "Good. Then the release notes say CSV now.")]
+        named.lines[named.lines.count - 1].placing = true
+        named.marks = [.init(id: UUID(), t: 700, label: "Ship CSV first")]
         var muted = call
         muted.muted = true
         muted.microphoneLevel = -100
@@ -368,10 +392,12 @@ struct SettingsCapture {
         room.microphoneLevel = -20
         room.microphone = MeetingMicrophone(device: AudioInputDevice(id: 0, uid: "preview-builtin", name: "MacBook Pro Microphone", kind: .builtIn),
                                             reason: .ranking)
-        room.lines = [line(402, "", "So the library said yes for the twelfth, and they'll let us in an hour early."),
+        room.lines = [line(402, "", "So the library said yes for the twelfth,"),
+                      line(405, "", "and they'll let us in an hour early."),
                       line(409, "", "Is that the room with the projector?"),
                       line(414, "", "It is. I'll bring the adapter."),
-                      line(470, "", "Then the twelfth it is. Can someone put it on the calendar?")]
+                      line(470, "", "Then the twelfth it is."),
+                      line(473, "", "Can someone put it on the calendar?")]
         var quietRoom = room
         quietRoom.microphoneLevel = -100
         let zoom = MeetingCandidate(app: AudioClientApp(bundleID: "us.zoom.xos", name: "Zoom", pid: nil, processes: [],
@@ -399,6 +425,7 @@ struct SettingsCapture {
         // The Sidekick in its own window, chrome and all: always dark, so one appearance.
         let sidekicks: [(String, () -> Void)] = [
             ("call", { meetings.preview(.recording(call)) }),
+            ("names", { meetings.preview(.recording(named)) }),
             ("scrolled-back", { meetings.preview(.recording(call)) }),
             ("marking", { meetings.preview(.recording(call), markedAt: Date().addingTimeInterval(600)) }),
             ("muted", { meetings.preview(.recording(muted)) }),
@@ -421,7 +448,7 @@ struct SettingsCapture {
                 sidekick.push(microphone: name.contains("muted") || name.contains("silent") || name.contains("ending") || name.contains("quiet") ? -100 : microphone,
                               system: name.contains("in-person") || name.contains("ending") ? -100 : system)
             }
-            if name == "call" || name == "expanded" { sidekick.showsConsent = false }
+            if name == "call" || name == "names" || name == "expanded" { sidekick.showsConsent = false }
             if name == "scrolled-back" { sidekick.previewScrolledBack = true }
             meetings.setTypedNotes(name == "expanded" ? """
                 Pricing: free tier stays at three tools a month. Revisit once lending is steady.
