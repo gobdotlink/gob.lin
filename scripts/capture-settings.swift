@@ -372,6 +372,7 @@ struct SettingsCapture {
                        line(725, "Speaker 3", "I'm next to Sam today, same laptop."),
                        line(740, "You", "Perfect, thanks."),
                        line(750, "Them", "Good. Then the release notes say CSV now.")]
+        named.lines[named.lines.count - 1].placing = true
         named.marks = [.init(id: UUID(), t: 700, label: "Ship CSV first")]
         var muted = call
         muted.muted = true

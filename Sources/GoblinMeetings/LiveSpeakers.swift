@@ -20,19 +20,24 @@ struct LiveSpanBuilder {
 
     init(origin: Double) { self.origin = origin }
 
-    /// Up to here the model has decided who was talking.
-    var placedUntil: Double { time(frames) }
+    /// How far the model has listened.
+    var processedUntil: Double { time(frames) }
 
-    /// The closed spans, and the ones still going cut at `placedUntil`.
+    /// Up to here every voice is decided: a voice that has only just started may still turn out to be a span, so its
+    /// start is the limit until it does.
+    var decidedUntil: Double {
+        open.filter { frames - $0.value < Self.shortestFrames }.map { time($0.value) }.min() ?? processedUntil
+    }
+
+    /// The closed spans, and the ones still going cut at `processedUntil`.
     var spans: [DiarizedSpan] {
         closed + open.filter { frames - $0.value >= Self.shortestFrames }
-            .map { DiarizedSpan(speaker: $0.key, start: time($0.value), end: placedUntil) }
+            .map { DiarizedSpan(speaker: $0.key, start: time($0.value), end: processedUntil) }
             .sorted { $0.start < $1.start }
     }
 
-    /// One chunk's probabilities, `frameCount` frames of `speakers` each. Returns the spans it closed.
-    mutating func add(_ probabilities: [Float], frameCount: Int, speakers: Int) -> [DiarizedSpan] {
-        var finished: [DiarizedSpan] = []
+    /// One chunk's probabilities, `frameCount` frames of `speakers` each.
+    mutating func add(_ probabilities: [Float], frameCount: Int, speakers: Int) {
         for offset in 0..<frameCount {
             let frame = frames + offset
             for slot in 0..<speakers {
@@ -42,13 +47,11 @@ struct LiveSpanBuilder {
                     open[slot] = first
                     if frame + 1 - first == Self.shortestFrames, !arrival.contains(slot) { arrival.append(slot) }
                 } else if let first = open.removeValue(forKey: slot), frame - first >= Self.shortestFrames {
-                    finished.append(DiarizedSpan(speaker: slot, start: time(first), end: time(frame)))
+                    closed.append(DiarizedSpan(speaker: slot, start: time(first), end: time(frame)))
                 }
             }
         }
         frames += frameCount
-        closed += finished
-        return finished
     }
 
     private func time(_ frame: Int) -> Double { origin + Double(frame) * Self.frameSeconds }
@@ -59,6 +62,8 @@ struct LiveSpanBuilder {
 /// call. The after-call pass decides the names that are kept; these are only shown while recording.
 public final class LiveSpeakers: @unchecked Sendable {
     public struct Snapshot: Sendable, Equatable {
+        /// The model's first second: the audio before it was let go while the model loaded, so it's never placed.
+        public var placedFrom: Double
         /// A line ending after this isn't placed yet.
         public var placedUntil: Double
         public var spans: [DiarizedSpan]
@@ -66,19 +71,31 @@ public final class LiveSpeakers: @unchecked Sendable {
         public var names: [Int: String]
     }
 
+    /// Where a line stands with the speaker model.
+    public enum Placement: Equatable, Sendable {
+        /// The model hasn't decided all of it yet.
+        case waiting
+        /// The voice that said most of it.
+        case voice(Int)
+        /// It was said before the audio the model got, so it stays Them.
+        case never
+    }
+
     /// 2.88 s behind the audio, at the quality of the model card's low-latency profile.
     static let preset = "fast32"
+    /// One for every call, so a call started while the first download runs waits for that download.
+    static let files = MeetingSpeakerModel.files(preset: preset)
     /// A voice's voiceprint is made, and matched again, as its clean speech passes each of these.
     static let voiceprintSeconds = [VoiceStretches.minimumSeconds, 10, 20]
-    /// The call's recent audio, for voiceprints: a span closes a few seconds after the voice starts.
+    /// The call's recent audio, for voiceprints.
     static let recentSeconds = 60.0
     /// Audio kept while the model downloads or loads; beyond it the oldest is let go and goes unplaced.
     static let waitingSeconds = 600.0
+    /// Further behind the call than this, the log says so once, and again when it has caught up.
+    static let behindSeconds = 10.0
 
     private let queue = DispatchQueue(label: "gob.lin.meetings.live-speakers", qos: .utility)
     private let voices: MeetingVoiceOptions?
-    /// A recorded call replayed has its own voices in People already; those would only match themselves.
-    private let excludingMeeting: String?
     private let log: @Sendable (String) -> Void
     private let onUpdate: @Sendable (Snapshot) -> Void
 
@@ -86,14 +103,20 @@ public final class LiveSpeakers: @unchecked Sendable {
     private var diarizer: Nemotron3Diarizer?
     private var builder: LiveSpanBuilder?
     private var stopped = false
+    /// The model couldn't download, load or run: the call's audio isn't kept for it any more.
+    private var failed = false
+    private var behind = false
+    private var folder: URL?
     private var waiting: [Float] = []
     private var waitingStart = 0.0
     private var recent: [Float] = []
     private var recentStart = 0.0
     private var speech: [Int: [Float]] = [:]
+    /// How far into the call each voice's speech has been looked at for its voiceprint.
+    private var collectedUntil: [Int: Double] = [:]
     private var printsMade: [Int: Int] = [:]
     private var named: [Int: String] = [:]
-    /// How far into the call each voiceprint that named someone had its speech, for measuring how soon names come.
+    /// How far into the call the speech that first named each person ended, for measuring how soon names come.
     private var namedFrom: [String: Double] = [:]
     /// Seconds of speech in the newest voiceprint applied to each voice: voiceprints finish out of order, and an older
     /// one mustn't undo a newer one.
@@ -101,10 +124,9 @@ public final class LiveSpeakers: @unchecked Sendable {
     private var namingNow = 0
 
     /// `voices` names voices from People while its switch is on; without it they stay "Speaker N".
-    public init(voices: MeetingVoiceOptions?, excludingMeeting: String? = nil, log: @escaping @Sendable (String) -> Void,
+    public init(voices: MeetingVoiceOptions?, log: @escaping @Sendable (String) -> Void,
                 onUpdate: @escaping @Sendable (Snapshot) -> Void) {
         self.voices = voices
-        self.excludingMeeting = excludingMeeting
         self.log = log
         self.onUpdate = onUpdate
     }
@@ -113,22 +135,27 @@ public final class LiveSpeakers: @unchecked Sendable {
     public func start() {
         Task.detached(priority: .utility) { [self] in
             do {
-                let files = MeetingSpeakerModel.files(preset: Self.preset)
-                try await MeetingPostProcessOptions.acquire(files, named: "the live speaker model", modelDownload: nil, log: log)
+                try await MeetingPostProcessOptions.acquire(Self.files, named: "the live speaker model", modelDownload: nil, log: log)
                 let config = MeetingSpeakerModel.config(preset: Self.preset)
                 // Handed over once and only used on `queue` from then on.
-                nonisolated(unsafe) let models = try await Nemotron3Models.load(config: config, directory: files.directory)
+                nonisolated(unsafe) let models = try await Nemotron3Models.load(config: config, directory: Self.files.directory)
                 queue.async { self.ready(Nemotron3Diarizer(config: config, models: models)) }
             } catch {
-                log("live speakers: \(error.localizedDescription)")
+                queue.async { self.fail("live speakers: \(error.localizedDescription)") }
             }
         }
+    }
+
+    /// The meeting's folder: its participant list limits who a voice can be, as after the call, and voices People
+    /// learned from this same meeting aren't matched against it.
+    public func record(in folder: URL) {
+        queue.async { self.folder = folder }
     }
 
     /// The call's track at 16 kHz from the session's start, gaps already filled with silence.
     public func append(_ samples: [Float]) {
         queue.async { [self] in
-            guard !stopped else { return }
+            guard !stopped, !failed else { return }
             Self.keep(&recent, start: &recentStart, adding: samples, seconds: Self.recentSeconds)
             if let diarizer {
                 diarizer.appendAudio(samples)
@@ -143,27 +170,26 @@ public final class LiveSpeakers: @unchecked Sendable {
     public func stop() {
         queue.async { [self] in
             stopped = true
-            diarizer = nil
-            waiting = []
-            recent = []
-            speech = [:]
+            release()
         }
     }
 
-    /// The voice that said most of `segment`'s words, or nil while the model hasn't placed all of it.
-    public static func voice(for segment: TranscriptSegment, in snapshot: Snapshot) -> Int? {
-        guard snapshot.placedUntil >= segment.end else { return nil }
+    /// Where `segment` stands in `snapshot`.
+    public static func placement(of segment: TranscriptSegment, in snapshot: Snapshot) -> Placement {
+        guard segment.start >= snapshot.placedFrom else { return .never }
+        guard snapshot.placedUntil >= segment.end else { return .waiting }
         // A window around the line keeps this cheap late in a long call; the nearest voice is never far.
         let near = snapshot.spans.filter { $0.end > segment.start - 30 && $0.start < segment.end + 30 }
         let speakers = MeetingPostProcessor.speakers(for: segment, spans: near.isEmpty ? snapshot.spans : near)
         var counts: [Int: Int] = [:]
         for case let speaker? in speakers { counts[speaker, default: 0] += 1 }
         // Ties go to whoever spoke first in the line.
-        return speakers.compactMap { $0 }.first { counts[$0] == counts.values.max() }
+        guard let voice = speakers.compactMap({ $0 }).first(where: { counts[$0] == counts.values.max() }) else { return .waiting }
+        return .voice(voice)
     }
 
     private func ready(_ diarizer: Nemotron3Diarizer) {
-        guard !stopped else { return }
+        guard !stopped, !failed else { return }
         log("live speakers ready")
         self.diarizer = diarizer
         builder = LiveSpanBuilder(origin: waitingStart)
@@ -172,80 +198,121 @@ public final class LiveSpeakers: @unchecked Sendable {
         run()
     }
 
+    private func fail(_ message: String) {
+        log(message)
+        failed = true
+        release()
+    }
+
+    private func release() {
+        diarizer = nil
+        waiting = []
+        recent = []
+        speech = [:]
+    }
+
     private func run() {
         guard let diarizer, var builder else { return }
         let results: [Nemotron3ChunkResult]
         do { results = try diarizer.processBufferedAudio() } catch {
-            log("live speakers stopped: \(error.localizedDescription)")
-            self.diarizer = nil
+            fail("live speakers stopped: \(error.localizedDescription)")
             return
         }
         guard !results.isEmpty else { return }
-        var finished: [DiarizedSpan] = []
-        for result in results {
-            finished += builder.add(result.probabilities, frameCount: result.frameCount, speakers: result.numSpeakers)
-        }
+        for result in results { builder.add(result.probabilities, frameCount: result.frameCount, speakers: result.numSpeakers) }
         self.builder = builder
-        for span in finished { collect(span, among: builder.spans) }
+        noteLag(builder)
+        collect(builder)
         emit()
     }
 
-    /// Keeps the stretches of `span` nobody else talked over, for its voice's voiceprint.
-    private func collect(_ span: DiarizedSpan, among spans: [DiarizedSpan]) {
-        let budget = Self.voiceprintSeconds.last ?? 20
-        let have = Double(speech[span.speaker]?.count ?? 0) / MeetingAudio.sampleRate
-        guard have < budget else { return }
-        let others = spans.filter { $0.speaker != span.speaker && $0.end > span.start && $0.start < span.end }
-            .sorted { $0.start < $1.start }
-        var pieces: [ClosedRange<Double>] = []
-        var cursor = span.start
-        for other in others {
-            if other.start - cursor >= VoiceStretches.shortestPiece { pieces.append(cursor...other.start) }
-            cursor = max(cursor, other.end)
+    /// Says once when the model falls well behind the call, as sharing the chip with live captions might make it.
+    private func noteLag(_ builder: LiveSpanBuilder) {
+        let heard = recentStart + Double(recent.count) / MeetingAudio.sampleRate
+        let lag = heard - builder.processedUntil
+        if !behind, lag > Self.behindSeconds {
+            behind = true
+            log(String(format: "live speakers are %.0f s behind the call", lag))
+        } else if behind, lag < Self.behindSeconds / 2 {
+            behind = false
+            log("live speakers caught up")
         }
-        if span.end - cursor >= VoiceStretches.shortestPiece { pieces.append(cursor...span.end) }
-        for piece in pieces {
-            let start = Int((piece.lowerBound - recentStart) * MeetingAudio.sampleRate)
-            let end = Int((piece.upperBound - recentStart) * MeetingAudio.sampleRate)
-            guard start >= 0, end <= recent.count, end > start else { continue }
-            speech[span.speaker, default: []] += recent[start..<end]
-        }
-        let seconds = Double(speech[span.speaker]?.count ?? 0) / MeetingAudio.sampleRate
-        let made = printsMade[span.speaker] ?? 0
-        if made < Self.voiceprintSeconds.count, seconds >= Self.voiceprintSeconds[made] {
-            printsMade[span.speaker] = made + 1
-            name(span.speaker, from: speech[span.speaker] ?? [], seconds: seconds, heardBy: span.end)
+    }
+
+    /// Takes each voice's new speech that nobody talked over, up to where every voice is decided, for its voiceprint.
+    /// A voice talking for minutes gets its voiceprints as it goes, not when it stops.
+    private func collect(_ builder: LiveSpanBuilder) {
+        guard voices?.enabled() == true else { return }
+        let budget = Int((Self.voiceprintSeconds.last ?? 20) * MeetingAudio.sampleRate)
+        let spans = builder.spans
+        let decided = builder.decidedUntil
+        for span in spans where span.end > collectedUntil[span.speaker] ?? -1 {
+            let slot = span.speaker
+            let from = max(span.start, collectedUntil[slot] ?? span.start)
+            let to = min(span.end, decided)
+            guard to > from else { continue }
+            collectedUntil[slot] = to
+            guard (speech[slot]?.count ?? 0) < budget else { continue }
+            let others = spans.filter { $0.speaker != slot && $0.end > from && $0.start < to }.sorted { $0.start < $1.start }
+            var pieces: [ClosedRange<Double>] = []
+            var cursor = from
+            for other in others {
+                if other.start - cursor >= VoiceStretches.shortestPiece { pieces.append(cursor...other.start) }
+                cursor = max(cursor, other.end)
+            }
+            if to - cursor >= VoiceStretches.shortestPiece { pieces.append(cursor...to) }
+            for piece in pieces {
+                // Only what's still in memory: the start of a long stretch may have been let go already.
+                let start = max(0, Int((piece.lowerBound - recentStart) * MeetingAudio.sampleRate))
+                let end = min(recent.count, Int((piece.upperBound - recentStart) * MeetingAudio.sampleRate),
+                              start + budget - (speech[slot]?.count ?? 0))
+                if end > start { speech[slot, default: []] += recent[start..<end] }
+            }
+            let seconds = Double(speech[slot]?.count ?? 0) / MeetingAudio.sampleRate
+            let made = printsMade[slot] ?? 0
+            var reached = made
+            while reached < Self.voiceprintSeconds.count, seconds >= Self.voiceprintSeconds[reached] { reached += 1 }
+            if reached > made {
+                printsMade[slot] = reached
+                name(slot, from: speech[slot] ?? [], seconds: seconds, heardBy: to)
+            }
         }
     }
 
     /// Matches a voice against People with the after-call rules; a name, once given, stays unless someone else wins.
     private func name(_ slot: Int, from samples: [Float], seconds: Double, heardBy: Double) {
-        guard let voices, voices.enabled() else { return }
+        guard let voices else { return }
+        let folder = folder
         namingNow += 1
         Task.detached(priority: .utility) { [self] in
             var match: MeetingVoices.Match?
             do {
                 let embedding = try await voices.embed(samples)
-                let voice = MeetingVoice(label: "\(slot)", track: .system, seconds: seconds, clipStart: 0, clipEnd: 0,
-                                         embedding: embedding)
-                let people = voices.people.people().map { person in
-                    var person = person
-                    person.samples.removeAll { $0.meetingID == excludingMeeting }
-                    return person
+                // Remember voices may have been turned off, and every voice forgotten, while that ran.
+                if voices.enabled() {
+                    let voice = MeetingVoice(label: "\(slot)", track: .system, seconds: seconds, clipStart: 0, clipEnd: 0,
+                                             embedding: embedding)
+                    let people = voices.people.people().map { person in
+                        var person = person
+                        person.samples.removeAll { $0.meetingID == folder?.lastPathComponent }
+                        return person
+                    }
+                    let participants = folder.map(MeetingParticipants.read) ?? MeetingParticipants()
+                    match = VoiceMatching.match([voice], people: people, participants: participants, inPerson: false)["\(slot)"]
+                    log(String(format: "live voiceprint: voice %d, %.0f s of speech by %.0f s: %@", slot, seconds, heardBy,
+                               match.map { String(format: "%@ %.2f%@", $0.name, $0.similarity, $0.named ? "" : " (not named)") } ?? "nobody close"))
                 }
-                match = VoiceMatching.match([voice], people: people, participants: MeetingParticipants(), inPerson: false)["\(slot)"]
-                log(String(format: "live voiceprint: voice %d, %.0f s of speech by %.0f s: %@", slot, seconds, heardBy,
-                           match.map { String(format: "%@ %.2f%@", $0.name, $0.similarity, $0.named ? "" : " (not named)") } ?? "nobody close"))
             } catch {
                 log("live voiceprint: \(error.localizedDescription)")
             }
             let found = match
             queue.async { [self] in
                 namingNow -= 1
-                guard !stopped, let match = found, match.named else { return }
+                guard !stopped, voices.enabled(), let match = found, match.named else { return }
                 namedFrom[match.name] = min(namedFrom[match.name] ?? heardBy, heardBy)
-                guard seconds >= appliedSeconds[slot] ?? 0, named[slot] != match.name else { return }
+                guard seconds >= appliedSeconds[slot] ?? 0 else { return }
                 appliedSeconds[slot] = seconds
+                guard named[slot] != match.name else { return }
                 named[slot] = match.name
                 emit()
             }
@@ -254,9 +321,11 @@ public final class LiveSpeakers: @unchecked Sendable {
 
     private func emit() {
         guard let builder else { return }
+        // With Remember voices off, names from People aren't shown, including ones given before it was turned off.
+        let fromPeople = voices?.enabled() == true ? named : [:]
         var names: [Int: String] = [:]
-        for (index, slot) in builder.arrival.enumerated() { names[slot] = named[slot] ?? "Speaker \(index + 1)" }
-        onUpdate(Snapshot(placedUntil: builder.placedUntil, spans: builder.spans, names: names))
+        for (index, slot) in builder.arrival.enumerated() { names[slot] = fromPeople[slot] ?? "Speaker \(index + 1)" }
+        onUpdate(Snapshot(placedFrom: builder.origin, placedUntil: builder.decidedUntil, spans: builder.spans, names: names))
     }
 
     /// Appends to a rolling buffer, letting the oldest go in steps so it isn't copied on every append.
@@ -273,12 +342,14 @@ public final class LiveSpeakers: @unchecked Sendable {
 // MARK: Replaying a recorded call
 
 extension LiveSpeakers {
-    /// How the live names came out on a recorded call, line by line, next to the names the after-call pass gave.
+    /// The live speakers' final attribution of a recorded call's saved call-track lines, next to the names the
+    /// after-call pass gave them. It's the end state, after every voiceprint has finished, not a moment of the call.
     public struct Replay: Codable, Sendable {
         public struct Line: Codable, Sendable {
             public var start: Double
             public var live: String
-            public var afterCall: String
+            /// Nil when no after-call line overlaps it, so it isn't scored.
+            public var afterCall: String?
             public var text: String
         }
 
@@ -287,15 +358,16 @@ extension LiveSpeakers {
         /// Each name the live speakers gave from People, and how far into the call the speech that named it ended:
         /// live, the name shows a voiceprint's time (well under a second) and the model's 2.9 s after that.
         public var namedAt: [String: Double]
-        /// Lines whose live voice is the after-call voice that voice was most often: whether one voice stayed one voice.
+        /// Scored lines whose live voice matches its after-call voice, with each live voice paired to one after-call
+        /// voice: a person split in two or two people merged into one both cost lines.
         public var sameVoiceShare: Double
-        /// Lines named from People live that have that name after the call too.
+        /// Scored lines named from People live that have that name after the call too, and those that don't.
         public var namedRight: Int
         public var namedWrong: Int
         public var lines: [Line]
     }
 
-    /// Plays a processed call's track through the live speakers as fast as they run, then places its live lines.
+    /// Plays a processed call's track through the live speakers as fast as they run, then places its saved lines.
     public static func replay(_ directory: URL, voices: MeetingVoiceOptions?,
                               log: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Replay {
         let samples = try WAVFile.readSamples(directory.appendingPathComponent("\(MeetingTrack.system.fileStem).wav"))
@@ -305,13 +377,13 @@ extension LiveSpeakers {
                                                    from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.transcriptFile)))
             .filter { $0.track == .system }
         let latest = Mutex<Snapshot?>(nil)
-        let live = LiveSpeakers(voices: voices, excludingMeeting: directory.lastPathComponent, log: log) { snapshot in
-            latest.withLock { $0 = snapshot }
-        }
+        let live = LiveSpeakers(voices: voices, log: log) { snapshot in latest.withLock { $0 = snapshot } }
+        defer { live.stop() }
+        live.record(in: directory)
         let began = Date()
         live.start()
         // The model first, so none of the call waits past what a live call would hold.
-        while await live.onQueue({ $0.diarizer == nil && !$0.stopped }) {
+        while await live.onQueue({ $0.diarizer == nil && !$0.stopped && !$0.failed }) {
             if Date().timeIntervalSince(began) > 600 { throw ReplayError("The live speaker model didn't load.") }
             try await Task.sleep(for: .milliseconds(200))
         }
@@ -320,28 +392,39 @@ extension LiveSpeakers {
             live.append(Array(samples[start..<min(samples.count, start + step)]))
         }
         while await live.onQueue({ $0.namingNow > 0 || !$0.waiting.isEmpty }) { try await Task.sleep(for: .milliseconds(100)) }
+        if await live.onQueue({ $0.failed }) { throw ReplayError("The live speaker model failed; --verbose says why.") }
         let replaySeconds = Date().timeIntervalSince(began)
         let namedAt = await live.onQueue { $0.namedFrom }
-        live.stop()
 
         guard let snapshot = latest.withLock({ $0 }) else { throw ReplayError("The live speaker model placed nothing.") }
         let lines = segments.map { segment in
-            let voice = voice(for: segment, in: snapshot)
-            let afterCall = turns.max { overlap($0, segment) < overlap($1, segment) }.map(\.speaker) ?? "?"
-            return (voice, Replay.Line(start: segment.start, live: voice.flatMap { snapshot.names[$0] } ?? "Them", afterCall: afterCall,
-                                text: segment.text))
+            let placement = placement(of: segment, in: snapshot)
+            let voice: Int? = if case .voice(let voice) = placement { voice } else { nil }
+            let afterCall = turns.filter { overlap($0, segment) > 0 }.max { overlap($0, segment) < overlap($1, segment) }?.speaker
+            return (voice, Replay.Line(start: segment.start, live: voice.flatMap { snapshot.names[$0] } ?? "Them",
+                                       afterCall: afterCall, text: segment.text))
         }
-        var mostOften: [Int: String] = [:]
-        for voice in Set(lines.compactMap { $0.0 }) {
-            let theirs = lines.filter { $0.0 == voice }.map { $0.1.afterCall }
-            mostOften[voice] = Dictionary(grouping: theirs, by: { $0 }).max { $0.value.count < $1.value.count }?.key
+        let scored = lines.filter { $0.1.afterCall != nil }
+        // Each live voice paired with one after-call voice, most shared lines first.
+        var shared: [Pair: Int] = [:]
+        for case let (voice?, line) in scored { shared[Pair(voice: voice, afterCall: line.afterCall ?? ""), default: 0] += 1 }
+        var pairedVoices = Set<Int>(), pairedNames = Set<String>(), same = 0
+        for (pair, count) in shared.sorted(by: { $0.value > $1.value })
+        where !pairedVoices.contains(pair.voice) && !pairedNames.contains(pair.afterCall) {
+            pairedVoices.insert(pair.voice)
+            pairedNames.insert(pair.afterCall)
+            same += count
         }
-        let same = lines.filter { $0.0.map { mostOften[$0] } == $0.1.afterCall }.count
-        let named = lines.map { $0.1 }.filter { !MeetingTimeline.isUnnamed($0.live) && $0.live != "Them" }
+        let named = scored.map { $0.1 }.filter { !MeetingTimeline.isUnnamed($0.live) && $0.live != "Them" }
         return Replay(callSeconds: Double(samples.count) / MeetingAudio.sampleRate, replaySeconds: replaySeconds,
-                      namedAt: namedAt, sameVoiceShare: lines.isEmpty ? 0 : Double(same) / Double(lines.count),
+                      namedAt: namedAt, sameVoiceShare: scored.isEmpty ? 0 : Double(same) / Double(scored.count),
                       namedRight: named.filter { $0.live == $0.afterCall }.count,
                       namedWrong: named.filter { $0.live != $0.afterCall }.count, lines: lines.map { $0.1 })
+    }
+
+    private struct Pair: Hashable {
+        let voice: Int
+        let afterCall: String
     }
 
     struct ReplayError: Error, LocalizedError {

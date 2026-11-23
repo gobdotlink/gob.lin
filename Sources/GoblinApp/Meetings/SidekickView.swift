@@ -65,6 +65,7 @@ struct SidekickView: View {
             levels(recording).padding(.horizontal, 14).padding(.bottom, 10)
             Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5)
             SidekickCaptions(lines: recording.lines, marks: recording.marks, inPerson: recording.inPerson, namesLive: recording.namesLive,
+                             voiceOrder: recording.voiceOrder,
                              consent: model.showsConsent, flash: model.flash, model: model, meetings: meetings)
             Rectangle().fill(.white.opacity(0.1)).frame(height: 0.5)
             footer(recording)
@@ -318,6 +319,7 @@ private struct SidekickCaptions: View {
     let marks: [MeetingsController.LiveMark]
     let inPerson: Bool
     let namesLive: Bool
+    let voiceOrder: [String]
     let consent: Bool
     let flash: String?
     @ObservedObject var model: SidekickModel
@@ -384,8 +386,8 @@ private struct SidekickCaptions: View {
     }
 
     var body: some View {
-        // With names live, Them is a voice not placed yet: it stays grey and takes no colour from the people named.
-        let colors = VoiceColors(lines.map(\.speaker).filter { !namesLive || $0 != "Them" })
+        // The call's order first, so a voice keeps its colour; the lines after it for a preview, which has no order.
+        let colors = VoiceColors(voiceOrder + lines.filter { !$0.placing }.map(\.speaker))
         return ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 11) {
                 if consent {
@@ -468,11 +470,10 @@ private struct SidekickCaptions: View {
     }
 
     private func bubble(_ turn: Turn, colors: VoiceColors) -> some View {
-        // With names live, Them is a line whose voice isn't placed yet.
-        let pending = namesLive && turn.speaker == "Them"
+        let pending = namesLive && turn.lines.contains(where: \.placing)
         let isYou = turn.speaker == "You"
         return TranscriptBubble(text: turn.lines.map(\.text).joined(separator: " "), isYou: isYou,
-                                name: turn.showsName && !isYou ? turn.speaker : nil, nameColor: colors(turn.speaker),
+                                name: turn.showsName && !isYou ? turn.speaker : nil, nameColor: pending ? nil : colors(turn.speaker),
                                 time: turn.showsTime ? MeetingsController.elapsed(turn.start) : nil, pending: pending)
             .accessibilityElement(children: .combine)
     }

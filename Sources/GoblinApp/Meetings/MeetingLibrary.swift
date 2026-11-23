@@ -8,6 +8,8 @@ struct MeetingLine: Identifiable, Hashable, Sendable {
     var speaker: String
     let start: Double
     let text: String
+    /// A call-track line the live speaker model hasn't placed yet: it says Them until it is.
+    var placing = false
 }
 
 /// The app's view of `MeetingStore`: every read of a meeting folder goes through the store.

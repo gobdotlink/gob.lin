@@ -107,7 +107,8 @@ enum MeetingsCommand {
             let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
             try write(try await VoiceStretches.voices(inMeeting: folder, embed: VoiceprintEmbedder.lazy()))
         case "live-names":
-            // The live names a processed call would have shown, next to the after-call names. Reads People, keeps nothing.
+            // The live speakers' final attribution of a processed call's saved lines, next to the after-call names.
+            // Reads People and the call's participant list, and keeps nothing.
             let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
             let voices = MeetingVoiceOptions(enabled: { true }, embed: VoiceprintEmbedder.lazy(),
                                              people: PeopleStore(meetingsRoot: folder.deletingLastPathComponent()))

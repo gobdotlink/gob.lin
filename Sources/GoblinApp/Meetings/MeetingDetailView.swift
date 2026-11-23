@@ -46,20 +46,22 @@ struct MeetingDetailView: View {
     private var inPerson: Bool { meeting.kind == .inPerson }
 
     var body: some View {
-        ScrollView {
+        // Once per redraw for the chips, the timeline and the transcript, which redraw as playback moves.
+        let colors = voiceColors
+        return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                if !lanes.isEmpty { people.padding(.top, 14) }
+                if !lanes.isEmpty { people(colors).padding(.top, 14) }
                 if let undo { undoBar(undo).padding(.top, 12) }
                 notices
                 // Without voices (nothing transcribed, or processing failed) the kept audio can still be played.
                 if !lanes.isEmpty || (meeting.state != .recording && player.hasAudio) {
-                    MeetingTimelineView(meeting: meeting, lanes: lanes, marks: detail?.marks ?? [], colors: voiceColors, player: player,
+                    MeetingTimelineView(meeting: meeting, lanes: lanes, marks: detail?.marks ?? [], colors: colors, player: player,
                                         audioDeleted: detail.map { $0.microphoneAudio == nil && $0.systemAudio == nil } ?? false,
                                         onName: { who = $0 }, onRename: startRename, onMerge: merge)
                         .padding(.top, 16)
                 }
-                transcript.padding(.top, 20)
+                transcript(colors).padding(.top, 20)
                 notes.padding(.top, 20)
                 if let typed = detail?.typedNotes { yourNotes(typed).padding(.top, 20) }
             }
@@ -119,13 +121,13 @@ struct MeetingDetailView: View {
     }
 
     /// One chip per voice, then the rest of the participant list.
-    private var people: some View {
+    private func people(_ colors: VoiceColors) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             FlowRows(spacing: 6) {
                 ForEach(lanes) { lane in
                     SpeakerChip(lane: lane, others: lanes.filter { $0.id != lane.id },
                                 namedFromVoice: detail?.namedFromVoice.contains(lane.name) ?? false,
-                                offersWho: !(detail?.voiceSuggestions[lane.name] ?? []).isEmpty, color: voiceColors(lane.name),
+                                offersWho: !(detail?.voiceSuggestions[lane.name] ?? []).isEmpty, color: colors(lane.name),
                                 onName: { who = lane },
                                 onRename: { startRename(lane) }, onMerge: { merge(lane, into: $0) })
                 }
@@ -197,8 +199,7 @@ struct MeetingDetailView: View {
 
     // MARK: Transcript
 
-    private var transcript: some View {
-        let colors = voiceColors
+    private func transcript(_ colors: VoiceColors) -> some View {
         let you = Set(lanes.filter(\.isYou).map(\.name))
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
@@ -254,8 +255,7 @@ struct MeetingDetailView: View {
                 Text(MeetingTimeline.clock(turn.start)).font(.meta).foregroundStyle(.tertiary).monospacedDigit()
                     .frame(width: 44, alignment: .leading)
                 TranscriptBubble(text: turn.text, isYou: isYou, name: showsName && !isYou ? turn.speaker : nil,
-                                 nameColor: colors(turn.speaker))
-                    .textSelection(.enabled)
+                                 nameColor: colors(turn.speaker), selectable: true)
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
             .background(current ? AnyShapeStyle(GoblinBrand.selection) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
@@ -478,8 +478,10 @@ struct TranscriptBubble: View {
     var name: String?
     var nameColor: Color?
     var time: String?
-    /// A live line whose voice isn't placed yet: quieter, with a dashed edge, until its name arrives.
+    /// A live line whose voice isn't placed yet: quieter, with a dashed edge, until it's placed.
     var pending = false
+    /// The words can be selected and copied; the name above them can't, so a drag over it still plays the line.
+    var selectable = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Radius.transcriptBubble, style: .continuous)
@@ -492,8 +494,11 @@ struct TranscriptBubble: View {
                 .font(.meta)
                 .padding(.horizontal, 2)
             }
-            Text(text).font(.transcript).lineSpacing(3).foregroundStyle(pending ? .secondary : .primary)
-                .fixedSize(horizontal: false, vertical: true)
+            Group {
+                let words = Text(text).font(.transcript).lineSpacing(3).foregroundStyle(pending ? .secondary : .primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if selectable { words.textSelection(.enabled) } else { words }
+            }
                 .padding(.horizontal, 11).padding(.vertical, 6)
                 .background(isYou ? GoblinBrand.yourBubble : GoblinBrand.theirBubble, in: shape)
                 .overlay { if pending { shape.strokeBorder(.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])) } }
