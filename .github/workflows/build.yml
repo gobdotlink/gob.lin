@@ -7,11 +7,11 @@ on:
     branches: [main]
   pull_request:
 
-# A newer push to a pull request replaces its unfinished run. Main runs always finish, so their
-# caches are saved.
+# A newer push to a pull request replaces its unfinished run. Each main push gets its own group, so
+# every merge is built and saves the caches.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   package:
@@ -27,6 +27,10 @@ jobs:
           path: .build
           key: spm-${{ steps.xcode.outputs.build }}-${{ hashFiles('Package.resolved') }}
           restore-keys: spm-${{ steps.xcode.outputs.build }}-
+      # Three checks link every object in GoblinCore's folder, so a restored object from a since-renamed
+      # source would be linked twice. GoblinCore recompiles every run anyway, as its build stamp changes.
+      - name: Drop restored GoblinCore objects
+        run: rm -f .build/*/debug/GoblinCore.build/*.o
       - name: Build and smoke-check package
         run: scripts/smoke.sh
       - name: Check dictionary and text-processing guardrails
@@ -38,7 +42,7 @@ jobs:
           # Every swift build restamps GoblinCore, so a build inside one check would rewrite
           # objects another check is linking. One build here serves them all.
           swift build
-          checks=(rewrite-credentials updates live-delivery live-transcription audio-capture feedback-media)
+          checks=(rewrite-credentials updates live-delivery live-transcription feedback-media)
           pids=()
           for check in "${checks[@]}"; do
             scripts/check-$check.sh > "$RUNNER_TEMP/$check.log" 2>&1 &
@@ -56,6 +60,8 @@ jobs:
               cat "$RUNNER_TEMP/${checks[$i]}.log"
             fi
           done
+          # The capture check's timing assertions expect an otherwise idle runner.
+          scripts/check-audio-capture.sh || failed=1
           exit "$failed"
 
   xcode:
