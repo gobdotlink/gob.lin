@@ -64,7 +64,7 @@ struct SidekickView: View {
             header(recording)
             levels(recording).padding(.horizontal, 14).padding(.bottom, 10)
             Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5)
-            SidekickCaptions(lines: recording.lines, marks: recording.marks, inPerson: recording.inPerson,
+            SidekickCaptions(lines: recording.lines, marks: recording.marks, inPerson: recording.inPerson, namesLive: recording.namesLive,
                              consent: model.showsConsent, flash: model.flash, model: model, meetings: meetings)
             Rectangle().fill(.white.opacity(0.1)).frame(height: 0.5)
             footer(recording)
@@ -80,11 +80,11 @@ struct SidekickView: View {
                 HStack(spacing: 7) {
                     RecordingReel()
                     Text("Recording").fontWeight(.semibold).foregroundStyle(.white.opacity(0.62))
-                    Elapsed(start: recording.startedAt).foregroundStyle(.white.opacity(0.4))
+                    Elapsed(start: recording.startedAt).foregroundStyle(.white.opacity(0.55))
                 }
                 .font(.status)
                 Text(recording.inPerson ? "In person · \(recording.title)" : "\(recording.app) · \(recording.title)")
-                    .font(.meta).foregroundStyle(.white.opacity(0.4)).lineLimit(1).truncationMode(.tail)
+                    .font(.meta).foregroundStyle(.white.opacity(0.55)).lineLimit(1).truncationMode(.tail)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -121,7 +121,7 @@ struct SidekickView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "flag.fill").foregroundStyle(GoblinBrand.candle)
                         Text("Mark This")
-                        Text(MeetingMarkHotkey.title).foregroundStyle(.white.opacity(0.45)).fontWeight(.regular)
+                        Text(MeetingMarkHotkey.title).foregroundStyle(.white.opacity(0.55)).fontWeight(.regular)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -282,7 +282,7 @@ private struct SidekickNotes: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("YOUR NOTES").font(.capsLabel).tracking(0.85).foregroundStyle(.white.opacity(0.45))
+            Text("YOUR NOTES").font(.capsLabel).tracking(0.85).foregroundStyle(.white.opacity(0.55))
                 .padding(.leading, 5)
             TextEditor(text: $draft)
                 .font(Self.font).lineSpacing(4)
@@ -297,7 +297,7 @@ private struct SidekickNotes: View {
                 }
                 .accessibilityLabel("Your notes")
             if !draft.isEmpty {
-                Text("I'll fold these into the notes after the call.").font(.status).foregroundStyle(.white.opacity(0.4))
+                Text("I'll fold these into the notes after the call.").font(.status).foregroundStyle(.white.opacity(0.55))
                     .padding(.leading, 5)
             }
         }
@@ -317,6 +317,7 @@ private struct SidekickCaptions: View {
     let lines: [MeetingLine]
     let marks: [MeetingsController.LiveMark]
     let inPerson: Bool
+    let namesLive: Bool
     let consent: Bool
     let flash: String?
     @ObservedObject var model: SidekickModel
@@ -328,39 +329,64 @@ private struct SidekickCaptions: View {
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// One paragraph of captions, headed by the name when the side changes and the time once it's moved a minute.
+    private struct Turn {
+        let speaker: String
+        let start: Double
+        let showsName: Bool
+        let showsTime: Bool
+        var lines: [MeetingLine]
+    }
+
     private enum Item: Identifiable {
-        case turn(speaker: String, start: Double, lines: [MeetingLine])
+        case turn(Turn)
         case mark(MeetingsController.LiveMark)
 
         var id: String {
             switch self {
-            case .turn(_, _, let lines): lines[0].id.uuidString
+            case .turn(let turn): turn.lines[0].id.uuidString
             case .mark(let mark): mark.id.uuidString
             }
         }
     }
 
-    /// Consecutive lines from one side make one turn; a mark splits a turn where it falls.
+    /// On a call, one side's lines flow into one bubble for up to a minute; a mark splits it where it falls. In person
+    /// a new bubble starts after a line that ends a sentence, since a pause there is the only live hint that someone
+    /// else is talking.
     private var items: [Item] {
         var items: [Item] = []
         var pendingMarks = marks[...]
+        var shownTime = -Double.infinity
         for line in lines {
             while let mark = pendingMarks.first, mark.t <= line.start {
                 items.append(.mark(mark))
                 pendingMarks = pendingMarks.dropFirst()
             }
-            if case .turn(let speaker, let start, let turn) = items.last, speaker == line.speaker {
-                items[items.count - 1] = .turn(speaker: speaker, start: start, lines: turn + [line])
-            } else {
-                items.append(.turn(speaker: line.speaker, start: line.start, lines: [line]))
+            let last: Turn? = if case .turn(let turn) = items.last { turn } else { nil }
+            if var turn = last, turn.speaker == line.speaker, line.start - turn.start < 60,
+               !inPerson || !Self.endsSentence(turn.lines.last?.text ?? "") {
+                turn.lines.append(line)
+                items[items.count - 1] = .turn(turn)
+                continue
             }
+            let showsTime = line.start - shownTime >= 60
+            if showsTime { shownTime = line.start }
+            items.append(.turn(Turn(speaker: line.speaker, start: line.start,
+                                    showsName: !line.speaker.isEmpty && last?.speaker != line.speaker,
+                                    showsTime: showsTime, lines: [line])))
         }
         items += pendingMarks.map(Item.mark)
         return items
     }
 
+    private static func endsSentence(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespaces).last.map { ".?!…".contains($0) } ?? false
+    }
+
     var body: some View {
-        ScrollView(.vertical) {
+        // With names live, Them is a voice not placed yet: it stays grey and takes no colour from the people named.
+        let colors = VoiceColors(lines.map(\.speaker).filter { !namesLive || $0 != "Them" })
+        return ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 11) {
                 if consent {
                     HStack(alignment: .top, spacing: 6) {
@@ -374,12 +400,13 @@ private struct SidekickCaptions: View {
                     .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
                 }
                 systemLine(inPerson ? "Voices get names after you stop. Live, I just write down what's said."
+                                    : namesLive ? "I'm guessing names from voices I know. I'll check them after the call."
                                     : "Names come after the call. Live, I only know you and them.", symbol: "person.2")
                 if lines.isEmpty { systemLine("Listening. The first words show up a moment after they're said.", symbol: "ellipsis") }
                 ForEach(items) { item in
                     Group {
                         switch item {
-                        case .turn(let speaker, let start, let lines): turn(speaker: speaker, start: start, lines: lines)
+                        case .turn(let turn): bubble(turn, colors: colors)
                         case .mark(let mark): SidekickMarkRow(mark: mark, model: model, meetings: meetings)
                         }
                     }
@@ -440,26 +467,14 @@ private struct SidekickCaptions: View {
         .frame(maxHeight: .infinity)
     }
 
-    private func turn(speaker: String, start: Double, lines: [MeetingLine]) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 6) {
-                if !speaker.isEmpty {
-                    Text(speaker).fontWeight(.semibold).foregroundStyle(.white.opacity(speaker == "You" ? 0.8 : 0.48))
-                }
-                Spacer(minLength: 0)
-                Text(MeetingsController.elapsed(start)).monospacedDigit().foregroundStyle(.white.opacity(0.28))
-            }
-            .font(.meta)
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(lines) { line in
-                    Text(line.text).font(.row).lineSpacing(5).foregroundStyle(.white.opacity(0.92))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .transition(.opacity)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+    private func bubble(_ turn: Turn, colors: VoiceColors) -> some View {
+        // With names live, Them is a line whose voice isn't placed yet.
+        let pending = namesLive && turn.speaker == "Them"
+        let isYou = turn.speaker == "You"
+        return TranscriptBubble(text: turn.lines.map(\.text).joined(separator: " "), isYou: isYou,
+                                name: turn.showsName && !isYou ? turn.speaker : nil, nameColor: colors(turn.speaker),
+                                time: turn.showsTime ? MeetingsController.elapsed(turn.start) : nil, pending: pending)
+            .accessibilityElement(children: .combine)
     }
 
     private func systemLine(_ text: String, symbol: String) -> some View {
@@ -467,7 +482,7 @@ private struct SidekickCaptions: View {
             Image(systemName: symbol)
             Text(text).fixedSize(horizontal: false, vertical: true)
         }
-        .font(.meta).foregroundStyle(.white.opacity(0.4))
+        .font(.meta).foregroundStyle(.white.opacity(0.55))
     }
 }
 

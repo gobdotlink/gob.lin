@@ -7,6 +7,7 @@ struct MeetingTimelineView: View {
     let meeting: StoredMeeting
     let lanes: [MeetingLane]
     let marks: [MeetingMark]
+    let colors: VoiceColors
     @ObservedObject var player: MeetingPlayer
     let audioDeleted: Bool
     let onName: (MeetingLane) -> Void
@@ -109,7 +110,7 @@ struct MeetingTimelineView: View {
 
     private func fill(_ lane: MeetingLane, on: Bool) -> AnyShapeStyle {
         if lane.needsName { return AnyShapeStyle(LightState.waiting.color.opacity(on ? 1 : 0.55)) }
-        return AnyShapeStyle(GoblinBrand.moss.opacity(on ? 1 : 0.62))
+        return AnyShapeStyle((colors(lane.name) ?? GoblinBrand.moss).opacity(on ? 1 : 0.62))
     }
 
     @ViewBuilder private func laneName(_ lane: MeetingLane) -> some View {
@@ -140,7 +141,8 @@ struct MeetingTimelineView: View {
                 .disabled(!player.hasAudio)
             } label: {
                 HStack(spacing: 4) {
-                    Text(lane.name).font(.status.weight(.medium)).lineLimit(1).truncationMode(.tail)
+                    Text(lane.name).font(.status.weight(.medium)).foregroundStyle(colors(lane.name) ?? .primary)
+                        .lineLimit(1).truncationMode(.tail)
                     Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())

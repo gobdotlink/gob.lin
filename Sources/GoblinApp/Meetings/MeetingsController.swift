@@ -48,6 +48,9 @@ final class MeetingsController: ObservableObject {
         var keepRecording = false
         /// A conversation in the room, recorded from the mic alone: no call app, no You/Them, no mute state.
         var inPerson = false
+        /// The call's voices are told apart as it goes, so its lines carry a name ("Sam Okafor", "Speaker 3") instead of
+        /// Them; a line still says Them until its voice is placed. The names are checked again after Stop.
+        var namesLive = false
         /// The mic stopped and hasn't come back; it's tried again every few seconds.
         var microphoneLost = false
         /// The call's sound stopped arriving after the output device changed; the tap is tried again every few seconds.
@@ -289,6 +292,12 @@ final class MeetingsController: ObservableObject {
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     /// Every live line of the current recording, for Copy All and Copy New.
     private var transcriptLines: [MeetingLine] = []
+    /// This recording's live speakers, so an update from a recording that already ended is ignored.
+    private var liveToken = UUID()
+    private var liveSnapshot: LiveSpeakers.Snapshot?
+    /// Call-track lines the speaker model hasn't placed yet, and the voice of each line it has.
+    private var unplacedSegments: [UUID: TranscriptSegment] = [:]
+    private var lineVoices: [UUID: Int] = [:]
     /// The lines Copy New or Copy All has already copied.
     private var copiedLines: Set<UUID> = []
     private var microphoneSoundAt = Date()
@@ -1018,15 +1027,27 @@ final class MeetingsController: ObservableObject {
             appName = "In person"
         }
         let engine = speechEngine()
+        let token = UUID()
+        liveToken = token
+        liveSnapshot = nil
+        unplacedSegments = [:]
+        lineVoices = [:]
+        // A call's voices are told apart as it records; in the room they're sorted out after Stop.
+        let live = target == .none ? nil : LiveSpeakers(voices: library.voices, log: { [logger] message in
+            logger.notice("\(message, privacy: .private)")
+        }, onUpdate: { [weak self] snapshot in Task { @MainActor in self?.placeSpeakers(snapshot, token: token) } })
+        live?.start()
         let session: MeetingSession
         // Dictation's language, as the meeting's Parakeet takes it; one it doesn't know falls back to detection.
         let recognition = SpeechModelCatalog.parakeet.capabilities.options(for: speechModels.preferredLanguage)
         do {
             session = try MeetingSession(title: title, source: appName, target: target, engine: engine, recognition: recognition,
+                liveSpeakers: live,
                 onSegment: { [weak self] segment in Task { @MainActor in self?.append(segment) } },
                 onEvent: { _ in },
                 onProblem: { [weak self] problem in Task { @MainActor in self?.sessionReported(problem) } })
         } catch {
+            live?.stop()
             logger.error("couldn't start: no folder: \(error.localizedDescription, privacy: .private)")
             phase = .failed("I couldn't make a folder for the recording: \(error.localizedDescription)")
             return
@@ -1196,7 +1217,15 @@ final class MeetingsController: ObservableObject {
         }
         if segment.track == .microphone { microphoneMidpoints[segment.id] = (segment.start + segment.end) / 2 }
         // In person, voices are told apart only after Stop: live lines carry no speaker.
-        let speaker = recording.inPerson ? "" : segment.track == .microphone ? "You" : "Them"
+        var speaker = recording.inPerson ? "" : segment.track == .microphone ? "You" : "Them"
+        if segment.track == .system, !recording.inPerson {
+            if let liveSnapshot, let voice = LiveSpeakers.voice(for: segment, in: liveSnapshot) {
+                lineVoices[segment.id] = voice
+                speaker = liveSnapshot.names[voice] ?? speaker
+            } else {
+                unplacedSegments[segment.id] = segment
+            }
+        }
         let line = MeetingLine(id: segment.id, speaker: speaker, start: segment.start, text: segment.text)
         // The two tracks' chunks decode independently, so a line can arrive after a later one.
         transcriptLines.insert(line, byStart: \.start)
@@ -1204,6 +1233,29 @@ final class MeetingsController: ObservableObject {
         // The speech model runs again; what it missed is still left for after the call.
         if recording.captions == .failing { recording.captions = .behind }
         if recording.lines.count > Self.liveLineLimit { recording.lines.removeFirst(recording.lines.count - Self.liveLineLimit) }
+        phase = .recording(recording)
+    }
+
+    /// The speaker model placed more of the call: lines it reached get their voice, and a voice named from People
+    /// renames its earlier lines too.
+    private func placeSpeakers(_ snapshot: LiveSpeakers.Snapshot, token: UUID) {
+        guard token == liveToken, case .recording(var recording) = phase else { return }
+        liveSnapshot = snapshot
+        for (id, segment) in unplacedSegments {
+            guard let voice = LiveSpeakers.voice(for: segment, in: snapshot) else { continue }
+            lineVoices[id] = voice
+            unplacedSegments[id] = nil
+        }
+        let lineVoices = lineVoices
+        func named(_ line: MeetingLine) -> MeetingLine {
+            guard let voice = lineVoices[line.id], let name = snapshot.names[voice], name != line.speaker else { return line }
+            var line = line
+            line.speaker = name
+            return line
+        }
+        recording.lines = recording.lines.map(named)
+        transcriptLines = transcriptLines.map(named)
+        recording.namesLive = true
         phase = .recording(recording)
     }
 

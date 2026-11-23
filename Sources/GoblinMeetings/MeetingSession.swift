@@ -90,14 +90,16 @@ public final class MeetingSession: @unchecked Sendable {
     /// The first write that failed: the session's files take nothing after it.
     private var writeFailure: String?
     private let onSegment: @Sendable (TranscriptSegment) -> Void
+    private let liveSpeakers: LiveSpeakers?
     private let onEvent: @Sendable (String) -> Void
     private let onProblem: @Sendable (MeetingSessionProblem) -> Void
 
     /// `recognition` is passed to the speech engine for every chunk: dictation's language, as Parakeet takes it.
-    /// `onProblem` hears capture dropping out or coming back, and the live transcript falling behind.
+    /// `onProblem` hears capture dropping out or coming back, and the live transcript falling behind. `liveSpeakers`
+    /// hears the call's track, to tell its voices apart as it records.
     public init(title: String, source: String, target: SystemAudioTarget, recordMicrophone: Bool = true,
                 engine: any PCMSpeechEngine, recognition: RecognitionOptions = .init(language: "en"),
-                root: URL = MeetingStorage.root,
+                root: URL = MeetingStorage.root, liveSpeakers: LiveSpeakers? = nil,
                 onSegment: @escaping @Sendable (TranscriptSegment) -> Void,
                 onEvent: @escaping @Sendable (String) -> Void,
                 onProblem: @escaping @Sendable (MeetingSessionProblem) -> Void = { _ in }) throws {
@@ -108,6 +110,7 @@ public final class MeetingSession: @unchecked Sendable {
         self.engine = engine
         self.recognition = recognition
         self.onSegment = onSegment
+        self.liveSpeakers = target == .none ? nil : liveSpeakers
         self.onEvent = onEvent
         self.onProblem = onProblem
         info = MeetingSessionInfo(title: title, source: source, target: target.description, startedAt: now)
@@ -185,8 +188,11 @@ public final class MeetingSession: @unchecked Sendable {
                                            onChunk: { transcriber.submit($0) }, onEvent: event, onWriteFailure: writeFailed)
         // An in-person conversation has no call audio: no tap and no system track.
         let inPerson = target == .none
+        let onSystemSamples: (@Sendable ([Float]) -> Void)?
+        if let live = liveSpeakers { onSystemSamples = { live.append($0) } } else { onSystemSamples = nil }
         let system = inPerson ? nil : try TrackRecorder(track: .system, directory: directory, sessionStart: hostStart,
-                                                        onChunk: { transcriber.submit($0) }, onEvent: event,
+                                                        onChunk: { transcriber.submit($0) },
+                                                        onSamples: onSystemSamples, onEvent: event,
                                                         onWriteFailure: writeFailed)
         let microphoneCapture: any MeetingAudioSource = heard?.microphone ?? MicrophoneCapture()
         let tap: (any MeetingAudioSource)? = inPerson ? nil : heard?.system ?? SystemAudioTap(target: target)
@@ -258,6 +264,8 @@ public final class MeetingSession: @unchecked Sendable {
                 await transcriber.finish()
             }
         }
+        // The last lines have their captions; the after-call pass decides who said them, with its own model.
+        liveSpeakers?.stop()
         saveInfo()
         lock.withLock {
             closed = true

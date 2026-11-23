@@ -42,6 +42,7 @@ struct MeetingDetailView: View {
     }
 
     private var turns: [TranscriptTurn] { detail?.turns ?? [] }
+    private var voiceColors: VoiceColors { VoiceColors(turns.map(\.speaker), you: Set(lanes.filter(\.isYou).map(\.name))) }
     private var inPerson: Bool { meeting.kind == .inPerson }
 
     var body: some View {
@@ -53,7 +54,7 @@ struct MeetingDetailView: View {
                 notices
                 // Without voices (nothing transcribed, or processing failed) the kept audio can still be played.
                 if !lanes.isEmpty || (meeting.state != .recording && player.hasAudio) {
-                    MeetingTimelineView(meeting: meeting, lanes: lanes, marks: detail?.marks ?? [], player: player,
+                    MeetingTimelineView(meeting: meeting, lanes: lanes, marks: detail?.marks ?? [], colors: voiceColors, player: player,
                                         audioDeleted: detail.map { $0.microphoneAudio == nil && $0.systemAudio == nil } ?? false,
                                         onName: { who = $0 }, onRename: startRename, onMerge: merge)
                         .padding(.top, 16)
@@ -124,7 +125,8 @@ struct MeetingDetailView: View {
                 ForEach(lanes) { lane in
                     SpeakerChip(lane: lane, others: lanes.filter { $0.id != lane.id },
                                 namedFromVoice: detail?.namedFromVoice.contains(lane.name) ?? false,
-                                offersWho: !(detail?.voiceSuggestions[lane.name] ?? []).isEmpty, onName: { who = lane },
+                                offersWho: !(detail?.voiceSuggestions[lane.name] ?? []).isEmpty, color: voiceColors(lane.name),
+                                onName: { who = lane },
                                 onRename: { startRename(lane) }, onMerge: { merge(lane, into: $0) })
                 }
             }
@@ -196,7 +198,9 @@ struct MeetingDetailView: View {
     // MARK: Transcript
 
     private var transcript: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let colors = voiceColors
+        let you = Set(lanes.filter(\.isYou).map(\.name))
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 CapsHeader("Transcript")
                 if let kept = audioKeptLine { Text("· " + kept).font(.meta).foregroundStyle(.secondary) }
@@ -209,7 +213,7 @@ struct MeetingDetailView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(rows, id: \.id) { row in
                     switch row {
-                    case .turn(let turn): turnRow(turn)
+                    case .turn(let turn, let showsName): turnRow(turn, showsName: showsName, colors: colors, you: you)
                     case .mark(let mark, _): markRow(mark)
                     }
                 }
@@ -218,10 +222,11 @@ struct MeetingDetailView: View {
     }
 
     private enum Row {
-        case turn(TranscriptTurn), mark(MeetingMark, Int)
+        /// `showsName` when the speaker changed since the row before.
+        case turn(TranscriptTurn, showsName: Bool), mark(MeetingMark, Int)
         var id: String {
             switch self {
-            case .turn(let turn): turn.id.uuidString
+            case .turn(let turn, _): turn.id.uuidString
             case .mark(let mark, let index): "mark-\(index)-\(mark.t)"
             }
         }
@@ -233,27 +238,26 @@ struct MeetingDetailView: View {
         var rows: [Row] = []
         for turn in turns {
             while let next = marks.first, next.0.t <= turn.start { rows.append(.mark(next.0, next.1)); marks.removeFirst() }
-            rows.append(.turn(turn))
+            let previous: String? = if case .turn(let last, _) = rows.last { last.speaker } else { nil }
+            rows.append(.turn(turn, showsName: previous != turn.speaker))
         }
         rows += marks.map { .mark($0.0, $0.1) }
         return rows
     }
 
-    private func turnRow(_ turn: TranscriptTurn) -> some View {
-        let unnamed = MeetingTimeline.isUnnamed(turn.speaker)
+    private func turnRow(_ turn: TranscriptTurn, showsName: Bool, colors: VoiceColors, you: Set<String>) -> some View {
+        let isYou = you.contains(turn.speaker)
         // The line under the playhead, while anything plays.
         let current = player.playing && player.time >= turn.start - 0.1 && player.time <= turn.end + 0.1
         return Button { if player.hasAudio { player.play(turn.start...turn.end, track: turn.track) } } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(MeetingTimeline.clock(turn.start)).font(.meta).foregroundStyle(.tertiary).monospacedDigit()
                     .frame(width: 44, alignment: .leading)
-                Text(turn.speaker).font(.status.weight(.semibold))
-                    .foregroundStyle(unnamed ? AnyShapeStyle(GoblinBrand.candle) : AnyShapeStyle(.secondary))
-                    .lineLimit(1).frame(width: 96, alignment: .leading)
-                Text(turn.text).font(.row).lineSpacing(2).frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                TranscriptBubble(text: turn.text, isYou: isYou, name: showsName && !isYou ? turn.speaker : nil,
+                                 nameColor: colors(turn.speaker))
+                    .textSelection(.enabled)
             }
-            .padding(.horizontal, 6).padding(.vertical, 6)
+            .padding(.horizontal, 6).padding(.vertical, 4)
             .background(current ? AnyShapeStyle(GoblinBrand.selection) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -396,6 +400,7 @@ struct SpeakerChip: View {
     var namedFromVoice = false
     /// A voice with a stand-in name ("Them") that sounds like someone: its menu offers Who's This? too.
     var offersWho = false
+    var color: Color?
     let onName: () -> Void
     let onRename: () -> Void
     let onMerge: (MeetingLane) -> Void
@@ -425,7 +430,7 @@ struct SpeakerChip: View {
 
     private var face: some View {
         HStack(spacing: 6) {
-            Initials(name: lane.name, unnamed: lane.needsName)
+            Initials(name: lane.name, unnamed: lane.needsName, color: color)
             Text(lane.name).font(.status.weight(.medium)).lineLimit(1)
             if namedFromVoice {
                 Image(systemName: "waveform").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
@@ -447,18 +452,55 @@ struct Initials: View {
     let name: String
     var unnamed = false
     var size: CGFloat = 20
+    /// The voice's colour in this meeting (`VoiceColors`); grey where there's no meeting to colour it by.
+    var color: Color?
 
     var body: some View {
         Text(unnamed ? "?" : Self.letters(name))
-            .font(.system(size: size * 0.45, weight: .semibold)).foregroundStyle(.white)
+            .font(.system(size: size * 0.45, weight: .semibold)).foregroundStyle(color == nil || unnamed ? .white : VoiceColors.onColor)
             .frame(width: size, height: size)
-            .background(unnamed ? AnyShapeStyle(LightState.waiting.color) : AnyShapeStyle(Color.secondary.opacity(0.7)), in: Circle())
+            .background(unnamed ? AnyShapeStyle(LightState.waiting.color) : AnyShapeStyle(color ?? Color.secondary.opacity(0.7)), in: Circle())
             .accessibilityHidden(true)
     }
 
     static func letters(_ name: String) -> String {
         let words = name.split(separator: " ").filter { $0.first?.isLetter == true }
         return String(words.prefix(2).compactMap(\.first)).uppercased()
+    }
+}
+
+/// One person's words in a transcript, laid out like Messages: yours on the right in a moss tint, everyone else's on
+/// the left in grey under their name in their voice colour. The Sidekick and a finished meeting both draw these.
+struct TranscriptBubble: View {
+    let text: String
+    let isYou: Bool
+    /// Shown above the bubble when the speaker changes; never for you, whose side already says it.
+    var name: String?
+    var nameColor: Color?
+    var time: String?
+    /// A live line whose voice isn't placed yet: quieter, with a dashed edge, until its name arrives.
+    var pending = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.transcriptBubble, style: .continuous)
+        VStack(alignment: isYou ? .trailing : .leading, spacing: 3) {
+            if name != nil || time != nil {
+                HStack(spacing: 6) {
+                    if let name { Text(name).fontWeight(.semibold).foregroundStyle(nameColor ?? Color.secondary) }
+                    if let time { Text(time).monospacedDigit().foregroundStyle(.secondary) }
+                }
+                .font(.meta)
+                .padding(.horizontal, 2)
+            }
+            Text(text).font(.transcript).lineSpacing(3).foregroundStyle(pending ? .secondary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 11).padding(.vertical, 6)
+                .background(isYou ? GoblinBrand.yourBubble : GoblinBrand.theirBubble, in: shape)
+                .overlay { if pending { shape.strokeBorder(.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])) } }
+        }
+        // A bubble never runs the full width, so the two sides stay apart.
+        .padding(isYou ? .leading : .trailing, 40)
+        .frame(maxWidth: .infinity, alignment: isYou ? .trailing : .leading)
     }
 }
 

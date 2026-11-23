@@ -43,6 +43,8 @@ final class TrackRecorder: @unchecked Sendable {
     private let timing: FileHandle
     private let sessionStart: Double
     private let onChunk: @Sendable (SpeechChunk) -> Void
+    /// Hears every sample written, silence included, on the session's clock.
+    private let onSamples: (@Sendable ([Float]) -> Void)?
     private let onEvent: @Sendable (String) -> Void
     private let onWriteFailure: @Sendable (any Error) -> Void
     private let lock = NSLock()
@@ -63,11 +65,13 @@ final class TrackRecorder: @unchecked Sendable {
 
     /// `onWriteFailure` hears the first write that fails; the recording should stop then.
     init(track: MeetingTrack, directory: URL, sessionStart: Double,
-         onChunk: @escaping @Sendable (SpeechChunk) -> Void, onEvent: @escaping @Sendable (String) -> Void,
+         onChunk: @escaping @Sendable (SpeechChunk) -> Void, onSamples: (@Sendable ([Float]) -> Void)? = nil,
+         onEvent: @escaping @Sendable (String) -> Void,
          onWriteFailure: @escaping @Sendable (any Error) -> Void = { _ in }) throws {
         self.track = track
         self.sessionStart = sessionStart
         self.onChunk = onChunk
+        self.onSamples = onSamples
         self.onEvent = onEvent
         self.onWriteFailure = onWriteFailure
         chunker = SpeechChunker(track: track)
@@ -152,6 +156,7 @@ final class TrackRecorder: @unchecked Sendable {
         let pcm = clamped.map { Int16($0 * 32_767) }
         guard pcm.withUnsafeBytes({ append(Data($0), to: file) }) else { return }
         for chunk in chunker.feed(clamped) { onChunk(chunk) }
+        onSamples?(clamped)
         stats.samples += clamped.count
     }
 
