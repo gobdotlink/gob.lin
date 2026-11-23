@@ -347,8 +347,8 @@ private func sameChunks(_ got: [SpeechChunk], _ expected: [SpeechChunk]) -> Bool
     #expect(sameChunks(chunks.value, SpeechChunker.chunks(of: own, track: .microphone)))
 }
 
-@Test func withoutTheCallsTrackOrTheCancellerTheLiveTranscriptHearsTheMicrophoneAsHeard() async {
-    // The microphone waits for the call's sound as far as it has come, and goes on without it when told it stalled.
+@Test func aStalledCallTrackPairsWithSilenceAndAMissingOrBrokenCancellerPassesTheMicrophoneThrough() async {
+    // The microphone waits for the call's sound as far as it has come, and goes on against silence when told it stalled.
     var pairing = EchoPairing()
     pairing.addMicrophone([Float](repeating: 0.1, count: 48_000))
     pairing.addReference([Float](repeating: 0.2, count: 16_000))
@@ -356,7 +356,8 @@ private func sameChunks(_ got: [SpeechChunk], _ expected: [SpeechChunk]) -> Bool
     #expect(pairing.take(all: false) == nil)
     #expect(pairing.take(all: true)?.reference == [Float](repeating: 0, count: 32_000))
 
-    // The canceller breaks partway: every sample still reaches the transcript, in place.
+    // The canceller breaks partway: the transcript gets the same speech chunks, at the same samples, as from the
+    // microphone as heard.
     let heard = tone([1.0...2.0, 4.0...5.0], seconds: 6, frequency: 330)
     let chunks = Heard<SpeechChunk>()
     let log = Heard<String>()

@@ -263,8 +263,6 @@ public final class MeetingSession: @unchecked Sendable {
         microphoneCapture?.stop()
         let microphoneStats = microphone?.finish()
         let systemStats = system?.finish()
-        // The microphone's last chunks, once the canceller has had all of both tracks.
-        await echo?.finish()
         lock.withLock {
             info.endedAt = Date()
             info.microphone = microphoneStats
@@ -273,6 +271,8 @@ public final class MeetingSession: @unchecked Sendable {
         // The audio is complete on disk before the transcript catches up, so a sleep or a quit here loses nothing.
         saveInfo()
         log("capture stopped; finishing \(transcriber?.backlog ?? 0) queued chunks")
+        // The microphone's last chunks, now the canceller has had all of both tracks; before the transcript's deadline.
+        await echo?.finish()
         if let transcriber {
             if let transcriptDeadline {
                 // The worker can't be cancelled mid-chunk, so the deadline races it rather than waiting for it.

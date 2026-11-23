@@ -2,6 +2,7 @@ import FluidAudio
 import Foundation
 import GoblinCore
 import GoblinEngines
+import os
 
 /// 16 kHz mono microphone samples and the call's own sound (the system track, cut or padded to the same length) in;
 /// the microphone with the call's sound taken out, the same length and on the same timeline.
@@ -194,19 +195,24 @@ struct LiveEchoStream: Sendable {
 /// pass after the call.
 ///
 /// The microphone waits for the call's sound, but only while the call's track keeps arriving: once nothing has come from
-/// it for `stallSeconds` (the tap stopped, or the call app went quiet) the microphone goes on against silence. Waiting
-/// on arrival rather than on audio keeps a burst (the audio heard before a recording was accepted, a replay) paired.
-/// Without the model (not downloaded yet, or it fails), the microphone goes to the live transcript as heard.
+/// it for `stallSeconds` and none of it is still queued (the tap stopped, or the call app went quiet) the microphone
+/// goes on against silence. Arrival is timed as the track hands its audio over, and queued audio counts as arrived, so
+/// neither a burst (the audio heard before a recording was accepted, a replay) nor a worker running behind pairs the
+/// microphone with silence while the call's sound for it is still to be read. Without the model (not downloaded yet, or it fails), the microphone goes to the live
+/// transcript as heard, without waiting.
 final class LiveEchoCanceller: @unchecked Sendable {
     private enum Input: Sendable { case microphone([Float]), system([Float]) }
     static let stallSeconds = 0.5
     private let inputs: AsyncStream<Input>.Continuation
     private let worker: Task<Void, Never>
+    /// When the call's track last handed over audio, and how many of its pieces the worker hasn't read yet.
+    private let system = OSAllocatedUnfairLock(initialState: (arrived: ContinuousClock.now, queued: 0))
 
     init(load: @escaping @Sendable () async throws -> LiveEchoStream?, log: @escaping @Sendable (String) -> Void,
          onChunk: @escaping @Sendable (SpeechChunk) -> Void) {
         let (stream, inputs) = AsyncStream.makeStream(of: Input.self)
         self.inputs = inputs
+        let system = system
         worker = Task {
             var work = Work(log: log, onChunk: onChunk)
             do {
@@ -215,17 +221,16 @@ final class LiveEchoCanceller: @unchecked Sendable {
             } catch {
                 log("live echo cancellation off: \(error.localizedDescription)")
             }
-            let clock = ContinuousClock()
-            var systemArrived = clock.now
             for await input in stream {
                 switch input {
                 case .microphone(let samples): work.pairing.addMicrophone(samples)
                 case .system(let samples):
                     work.pairing.addReference(samples)
-                    systemArrived = clock.now
+                    system.withLock { $0.queued -= 1 }
                 }
-                let stalled = clock.now - systemArrived > .seconds(Self.stallSeconds)
-                if let pair = work.pairing.take(all: stalled) { await work.cancel(pair.microphone, pair.reference) }
+                let (arrived, queued) = system.withLock { ($0.arrived, $0.queued) }
+                let stalled = queued == 0 && ContinuousClock.now - arrived > .seconds(Self.stallSeconds)
+                if let pair = work.pairing.take(all: stalled || work.stream == nil) { await work.cancel(pair.microphone, pair.reference) }
             }
             await work.finish()
         }
@@ -237,7 +242,10 @@ final class LiveEchoCanceller: @unchecked Sendable {
     func microphone(_ samples: [Float]) { inputs.yield(.microphone(samples)) }
 
     /// The call's sound, in order, on the same timeline.
-    func system(_ samples: [Float]) { inputs.yield(.system(samples)) }
+    func system(_ samples: [Float]) {
+        system.withLock { $0 = (.now, $0.queued + 1) }
+        inputs.yield(.system(samples))
+    }
 
     /// After both tracks have finished: cleans what's left and hands over the last chunks.
     func finish() async {
