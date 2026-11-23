@@ -30,6 +30,30 @@ struct RewriteSettingsTests {
         #expect(!settings.usesScreenContext)
     }
 
+    @Test func openAIConsentAndSpeedSurviveTheMoveToTheResponsesAPI() throws {
+        // Consent and a typed speed saved for Chat Completions, while another provider was selected.
+        let saved = #"{"enabled":true,"baseURL":"https://api.groq.com/openai/v1","model":"openai/gpt-oss-20b","cleanup":"light","provider":"groq","screenContextEndpoint":"https://api.openai.com/v1/chat/completions","providerConfigurations":{"openAI":{"baseURL":"https://api.openai.com/v1","model":"gpt-6-luna","reasoning":"off","temperature":0,"extraRequestJSON":"{\"service_tier\": \"priority\", \"max_tokens\": 512}"}}}"#
+        var settings = try JSONDecoder().decode(RewriteSettings.self, from: Data(saved.utf8))
+        #expect(!settings.usesScreenContext)
+        // Back on OpenAI, the page shows the consent dictation will act on, and Standard can't still send a paid tier.
+        settings.selectProvider(.openAI)
+        #expect(settings.usesScreenContext && settings.serviceTier == .fast && settings.extraRequestJSON == #"{"max_tokens":512}"#)
+        settings.selectProvider(.groq)
+        #expect(settings.serviceTier == nil)
+        settings.selectProvider(.openAI)
+        settings = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
+        #expect(settings.serviceTier == .fast && settings.usesScreenContext)
+        // The current OpenAI profile is moved too; Standard spellings, null and tiers the picker lacks leave no speed
+        // behind and no key that would make saving fail.
+        for typed in [#""default""#, "null", #""flex""#] {
+            var current = settings
+            current.serviceTier = nil
+            current.extraRequestJSON = #"{"service_tier":\#(typed)}"#
+            current = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(current))
+            #expect(current.serviceTier == nil && current.extraRequestJSON.isEmpty, "\(typed)")
+        }
+    }
+
     @Test func providerSwitchesRememberTuningAndPersistOmittedTemperature() throws {
         var settings = RewriteSettings(enabled: true, cleanup: .medium)
         settings.selectProvider(.groq)

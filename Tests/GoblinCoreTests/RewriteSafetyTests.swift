@@ -69,6 +69,9 @@ struct RewriteSafetyTests {
     }
     private let settings = RewriteSettings(enabled: true, baseURL: "https://provider.invalid/v1", model: "fixture-model", cleanup: .light)
     private let success = #"{"choices":[{"message":{"content":"Cleaned text."}}]}"#
+    /// OpenAI's own API answers in the Responses shape.
+    private let responsesSuccess = #"{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Cleaned text."}]}]}"#
+    private func success(for provider: RewriteProvider) -> String { provider.offersServiceTiers ? responsesSuccess : success }
 
     @Test func unsupportedReasoningFallbackIsRememberedAndPayloadIsData() async throws {
         let reject = #"{"error":{"message":"Unsupported reasoning_effort","param":"reasoning_effort"}}"#
@@ -272,7 +275,7 @@ struct RewriteSafetyTests {
                 var configured = settings
                 configured.selectProvider(provider)
                 configured.selectModel(preset)
-                RewriteStubState.shared.prepare([StubReply(status: 200, body: success)])
+                RewriteStubState.shared.prepare([StubReply(status: 200, body: success(for: provider))])
                 #expect(await client().rewrite("Dictation", settings: configured, apiKey: "fixture-key").failure == nil)
                 let request = RewriteStubState.shared.received()[0]
                 #expect(request.url == (try configured.endpoint()))
@@ -285,8 +288,10 @@ struct RewriteSafetyTests {
                     #expect((body["reasoning"] as? [String: Bool])?["enabled"] == false && body["reasoning_effort"] == nil)
                 case .zai:
                     #expect((body["thinking"] as? [String: String])?["type"] == "disabled" && body["reasoning_effort"] == nil)
-                case .cerebras, .groq, .openAI, .requesty:
+                case .cerebras, .groq, .requesty:
                     #expect(body["reasoning_effort"] as? String == (preset.reasoning == .off ? "none" : "low"))
+                case .openAI:
+                    #expect((body["reasoning"] as? [String: String])?["effort"] == (preset.reasoning == .off ? "none" : "low") && body["reasoning_effort"] == nil)
                 default: break // Provider-specific mappings are covered in RewriteProviderTests.
                 }
                 if provider == .groq, preset.id == "openai/gpt-oss-20b" {
@@ -338,7 +343,7 @@ struct RewriteSafetyTests {
             for reasoning in [RewriteReasoning.off, .low, .medium, .high, .providerDefault] {
                 configured.reasoning = reasoning
                 configured.extraRequestJSON = #"{"temperature":0.2,"top_p":0.9,"top_logprobs":2,"logprobs":true}"#
-                RewriteStubState.shared.prepare([StubReply(status: 200, body: success)])
+                RewriteStubState.shared.prepare([StubReply(status: 200, body: success(for: provider))])
                 #expect(await client().rewrite("Dictation", settings: configured, apiKey: "fixture-key").failure == nil)
                 let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
                 for key in ["temperature", "top_p", "top_logprobs", "logprobs"] {
@@ -349,12 +354,12 @@ struct RewriteSafetyTests {
         var automatic = settings
         automatic.selectProvider(.openAI)
         automatic.reasoning = .automatic
-        let reject = #"{"error":{"param":"reasoning_effort"}}"#
-        RewriteStubState.shared.prepare([StubReply(status: 400, body: reject), StubReply(status: 200, body: success)])
+        let reject = #"{"error":{"param":"reasoning.effort"}}"#
+        RewriteStubState.shared.prepare([StubReply(status: 400, body: reject), StubReply(status: 200, body: responsesSuccess)])
         #expect(await client().rewrite("Dictation", settings: automatic, apiKey: "fixture-key").failure == nil)
         let bodies = try RewriteStubState.shared.received().map { try JSONSerialization.jsonObject(with: $0.httpBody!) as! [String: Any] }
-        #expect(bodies[0]["temperature"] as? Int == 0 && bodies[0]["reasoning_effort"] as? String == "none")
-        #expect(bodies[1]["temperature"] == nil && bodies[1]["reasoning_effort"] as? String == "low")
+        #expect(bodies[0]["temperature"] as? Int == 0 && (bodies[0]["reasoning"] as? [String: String])?["effort"] == "none")
+        #expect(bodies[1]["temperature"] == nil && (bodies[1]["reasoning"] as? [String: String])?["effort"] == "low")
         automatic.reasoning = .providerDefault
         automatic.extraRequestJSON = #"{"reasoning_effort":"none","temperature":0.4}"#
         #expect(try automatic.requestParameters(automaticEffort: nil)["temperature"] as? Double == 0.4)

@@ -26,6 +26,8 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
     public var reasoning: RewriteReasoning
     public var temperature: Double?
     public var extraRequestJSON: String
+    /// Sent only to OpenAI's own API; see `RewriteProvider.offersServiceTiers`.
+    public var serviceTier: RewriteServiceTier?
     public var providerConfigurations: [String: RewriteProviderConfiguration]
     /// The provider address allowed to receive the app, window title and text around the cursor. Consent belongs to
     /// that address, so switching provider or editing the address never carries it somewhere new.
@@ -33,8 +35,8 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
 
     public init(enabled: Bool = false, baseURL: String = "https://api.openai.com/v1", model: String = "", cleanup: RewriteCleanup = .light,
                 provider: RewriteProvider? = nil, reasoning: RewriteReasoning = .automatic, temperature: Double? = 0,
-                extraRequestJSON: String = "", providerConfigurations: [String: RewriteProviderConfiguration] = [:],
-                screenContextEndpoint: String? = nil) {
+                extraRequestJSON: String = "", serviceTier: RewriteServiceTier? = nil,
+                providerConfigurations: [String: RewriteProviderConfiguration] = [:], screenContextEndpoint: String? = nil) {
         self.enabled = enabled
         self.baseURL = baseURL
         self.model = model
@@ -43,6 +45,7 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         self.reasoning = reasoning
         self.temperature = temperature
         self.extraRequestJSON = extraRequestJSON
+        self.serviceTier = serviceTier
         self.providerConfigurations = providerConfigurations
         self.screenContextEndpoint = screenContextEndpoint
     }
@@ -50,12 +53,19 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
     /// Whether cleanup with the current provider and address gets the app, window title and text around the cursor.
     /// Never on device: Apple's small model followed instructions written in screen text and used none of its spellings.
     public var usesScreenContext: Bool {
-        get { !provider.runsOnDevice && screenContextEndpoint != nil && screenContextEndpoint == (try? endpoint().absoluteString) }
+        get {
+            guard !provider.runsOnDevice, let screenContextEndpoint else { return false }
+            // OpenAI cleanup moved from Chat Completions to the Responses API at the same address, which keeps nothing
+            // either (`store: false`), so consent given to the old endpoint still names the same recipient. Checked
+            // here rather than rewritten on load, so the open Cleanup page and the next dictation always agree.
+            if provider == .openAI, screenContextEndpoint == RewriteProvider.openAI.baseURL + "/chat/completions" { return true }
+            return screenContextEndpoint == (try? endpoint().absoluteString)
+        }
         set { screenContextEndpoint = newValue && !provider.runsOnDevice ? try? endpoint().absoluteString : nil }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, baseURL, model, cleanup, provider, reasoning, temperature, extraRequestJSON, providerConfigurations, screenContextEndpoint
+        case enabled, baseURL, model, cleanup, provider, reasoning, temperature, extraRequestJSON, serviceTier, providerConfigurations, screenContextEndpoint
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,8 +77,11 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
                   reasoning: try fields.decodeIfPresent(RewriteReasoning.self, forKey: .reasoning) ?? .automatic,
                   temperature: fields.contains(.temperature) ? try fields.decodeIfPresent(Double.self, forKey: .temperature) : 0,
                   extraRequestJSON: try fields.decodeIfPresent(String.self, forKey: .extraRequestJSON) ?? "",
+                  serviceTier: try fields.decodeIfPresent(RewriteServiceTier.self, forKey: .serviceTier),
                   providerConfigurations: try fields.decodeIfPresent([String: RewriteProviderConfiguration].self, forKey: .providerConfigurations) ?? [:],
                   screenContextEndpoint: try fields.decodeIfPresent(String.self, forKey: .screenContextEndpoint))
+        if provider == .openAI { configuration.adoptTypedServiceTier() }
+        providerConfigurations[RewriteProvider.openAI.rawValue]?.adoptTypedServiceTier()
     }
 
     // Encode nil explicitly so "omit temperature" survives a save and reload.
@@ -82,15 +95,19 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         try fields.encode(reasoning, forKey: .reasoning)
         try fields.encode(temperature, forKey: .temperature)
         try fields.encode(extraRequestJSON, forKey: .extraRequestJSON)
+        try fields.encodeIfPresent(serviceTier, forKey: .serviceTier)
         try fields.encode(providerConfigurations, forKey: .providerConfigurations)
         try fields.encodeIfPresent(screenContextEndpoint, forKey: .screenContextEndpoint)
     }
 
     public var configuration: RewriteProviderConfiguration {
-        get { RewriteProviderConfiguration(baseURL: baseURL, model: model, reasoning: reasoning, temperature: temperature, extraRequestJSON: extraRequestJSON) }
+        get {
+            RewriteProviderConfiguration(baseURL: baseURL, model: model, reasoning: reasoning, temperature: temperature,
+                                         extraRequestJSON: extraRequestJSON, serviceTier: serviceTier)
+        }
         set {
             baseURL = newValue.baseURL; model = newValue.model; reasoning = newValue.reasoning
-            temperature = newValue.temperature; extraRequestJSON = newValue.extraRequestJSON
+            temperature = newValue.temperature; extraRequestJSON = newValue.extraRequestJSON; serviceTier = newValue.serviceTier
         }
     }
 
@@ -119,8 +136,12 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         guard let parameters = try? JSONSerialization.jsonObject(with: Data(extraRequestJSON.utf8)) as? [String: Any] else {
             throw RewriteFailure.configuration("Extra request options must be a JSON object.")
         }
-        guard Set(parameters.keys).isDisjoint(with: ["model", "messages", "stream"]) else {
-            throw RewriteFailure.configuration("Extra options cannot replace model, messages, or stream.")
+        // OpenAI's prompt travels in input and instructions, and its speed comes only from the Speed picker,
+        // so Standard never quietly sends a paid tier.
+        guard Set(parameters.keys).isDisjoint(with: ["model", "messages", "stream"] + (provider.offersServiceTiers ? ["input", "instructions", "service_tier"] : [])) else {
+            throw RewriteFailure.configuration(provider.offersServiceTiers
+                ? "Extra options cannot replace model, input, instructions, stream, or service_tier. Choose the speed under Speed."
+                : "Extra options cannot replace model, messages, or stream.")
         }
         let reasoningKeys: Set<String> = ["reasoning_effort", "reasoning", "thinking", "enable_thinking", "disable_reasoning", "chat_template_kwargs", "thinking_config", "extra_body", "output_config"]
         guard reasoning == .providerDefault || Set(parameters.keys).isDisjoint(with: reasoningKeys) else {
@@ -136,9 +157,21 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         // deadline ends generation long before this, so it never cuts off a usable reply.
         if provider == .anthropic { body["max_tokens"] = 4096 }
         body.merge(reasoning.parameters(provider: provider, automaticEffort: automaticEffort)) { _, value in value }
+        if provider.offersServiceTiers {
+            // The Responses API stores responses unless told not to; Chat Completions never did.
+            body["store"] = false
+            if let serviceTier { body["service_tier"] = serviceTier.rawValue }
+        }
         for (key, value) in try extraRequestParameters() {
             if value is NSNull { body.removeValue(forKey: key) }
             else { body[key] = value }
+        }
+        if provider.offersServiceTiers {
+            // Options saved while OpenAI cleanup used Chat Completions keep working on the Responses API.
+            for legacy in ["max_completion_tokens", "max_tokens"] {
+                if let value = body.removeValue(forKey: legacy), body["max_output_tokens"] == nil { body["max_output_tokens"] = value }
+            }
+            if let effort = body.removeValue(forKey: "reasoning_effort"), body["reasoning"] == nil { body["reasoning"] = ["effort": effort] }
         }
         // Cleanup consumes only final text. These model-specific output controls
         // stay safe even after changing effort or loading an older provider profile.
@@ -151,10 +184,10 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
                 body["reasoning_format"] = "hidden"
             }
         }
-        // Luna accepts sampling options only with reasoning explicitly disabled.
-        // Check each attempt, so Automatic's none -> low retry is compatible too.
-        let luna = provider == .openAI ? "gpt-6-luna" : ([.openRouter, .vercel, .requesty].contains(provider) ? "openai/gpt-6-luna" : "")
-        if !luna.isEmpty, model == luna || model.hasPrefix(luna + "-") {
+        // OpenAI's models accept sampling options only with reasoning explicitly disabled: Astra refuses temperature
+        // at low effort, Luna at any effort but none. Check each attempt, so Automatic's none -> low retry is compatible too.
+        let luna = [.openRouter, .vercel, .requesty].contains(provider) ? "openai/gpt-6-luna" : ""
+        if provider == .openAI || !luna.isEmpty && (model == luna || model.hasPrefix(luna + "-")) {
             let routerReasoning = body["reasoning"] as? [String: Any]
             // Requesty runs "none" as low effort, so Luna's sampling options never survive it.
             let reasoningOff = provider != .requesty && (body["reasoning_effort"] as? String == "none"
@@ -166,8 +199,11 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         return body
     }
 
-    /// The completion endpoint. Anthropic is called through its own Messages API.
-    public func endpoint() throws -> URL { try providerURL(appending: provider == .anthropic ? "messages" : "chat/completions") }
+    /// The completion endpoint. Anthropic is called through its own Messages API, and OpenAI through its Responses
+    /// API, the one that offers every service tier.
+    public func endpoint() throws -> URL {
+        try providerURL(appending: provider == .anthropic ? "messages" : provider.offersServiceTiers ? "responses" : "chat/completions")
+    }
 
     /// The model list endpoint, derived from the same address.
     public func modelsEndpoint() throws -> URL { try providerURL(appending: "models") }
@@ -368,12 +404,13 @@ public actor RewriteClient {
             let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
             var effort = canRetryEffort ? nextEffort(for: scope) : "none"
             let anthropic = settings.provider == .anthropic
+            let responses = settings.provider.offersServiceTiers
             while true {
                 try Task.checkCancellation()
                 var body = try settings.requestParameters(automaticEffort: effort)
-                if anthropic {
-                    body["system"] = messages.filter { $0["role"] == "system" }.compactMap { $0["content"] }.joined(separator: "\n\n")
-                    body["messages"] = messages.filter { $0["role"] != "system" }
+                if anthropic || responses {
+                    body[anthropic ? "system" : "instructions"] = messages.filter { $0["role"] == "system" }.compactMap { $0["content"] }.joined(separator: "\n\n")
+                    body[anthropic ? "messages" : "input"] = messages.filter { $0["role"] != "system" }
                 } else {
                     body["messages"] = messages
                 }
@@ -396,6 +433,11 @@ public actor RewriteClient {
                         effort = nextEffort(for: scope)
                         continue
                     }
+                    // A chosen speed is never quietly dropped: it costs more, so say which one was turned down.
+                    if responses, let tier = body["service_tier"] as? String, response.statusCode == 400,
+                       let error = Self.providerError(data), error.param == "service_tier" || error.message.contains("service_tier") || error.message.contains("service tier") {
+                        throw RewriteFailure.configuration("\(settings.provider.title) won't run \(settings.model) at \(tier.capitalized) speed for this key. Choose another speed.")
+                    }
                     throw RewriteFailure.httpStatus(response.statusCode)
                 }
                 let text: String, stopped: Bool
@@ -403,6 +445,13 @@ public actor RewriteClient {
                     let reply = try JSONDecoder().decode(MessagesResponse.self, from: data)
                     guard reply.stop_reason == "end_turn" || reply.stop_reason == "stop_sequence" else { throw RewriteFailure.invalidResponse }
                     text = reply.content.filter { $0.type == "text" }.compactMap(\.text).joined()
+                    stopped = true
+                } else if responses {
+                    let reply = try JSONDecoder().decode(ResponsesReply.self, from: data)
+                    let parts = reply.output.filter { $0.type == "message" }.flatMap { $0.content ?? [] }
+                    // Incomplete means cut off by the token limit or a content filter: never type half a cleanup.
+                    guard reply.status == "completed", !parts.contains(where: { $0.type == "refusal" }) else { throw RewriteFailure.invalidResponse }
+                    text = parts.filter { $0.type == "output_text" }.compactMap(\.text).joined()
                     stopped = true
                 } else {
                     let reply = try JSONDecoder().decode(ChatResponse.self, from: data)
@@ -441,15 +490,21 @@ public actor RewriteClient {
         return ["none", "low"].first { !rejected.contains($0) }
     }
 
-    private func rejectsReasoningEffort(_ data: Data, anthropic: Bool) -> Bool {
+    private static func providerError(_ data: Data) -> (param: String?, message: String)? {
         struct ErrorResponse: Decodable {
             struct Detail: Decodable { var message: String?; var param: String? }
             var error: Detail
         }
-        guard let error = try? JSONDecoder().decode(ErrorResponse.self, from: data).error else { return false }
-        let message = error.message?.lowercased() ?? ""
+        guard let error = try? JSONDecoder().decode(ErrorResponse.self, from: data).error else { return nil }
+        return (error.param, error.message?.lowercased() ?? "")
+    }
+
+    private func rejectsReasoningEffort(_ data: Data, anthropic: Bool) -> Bool {
+        guard let (param, message) = Self.providerError(data) else { return false }
         // Anthropic names the rejected field, e.g. "thinking.type.disabled" or "output_config.effort".
-        return error.param == "reasoning_effort" || message.contains("reasoning_effort") || message.contains("reasoning effort")
+        // The Responses API nests it: "reasoning.effort".
+        return param == "reasoning_effort" || param == "reasoning.effort" || message.contains("reasoning_effort")
+            || message.contains("reasoning.effort") || message.contains("reasoning effort")
             || anthropic && (message.contains("thinking") || message.contains("effort"))
     }
 
@@ -474,6 +529,17 @@ public actor RewriteClient {
             var finish_reason: String?
         }
         var choices: [Choice]
+    }
+
+    /// Text arrives in `output_text` parts of `message` items, after any `reasoning` items.
+    private struct ResponsesReply: Decodable {
+        struct Item: Decodable {
+            struct Part: Decodable { var type: String; var text: String? }
+            var type: String
+            var content: [Part]?
+        }
+        var status: String?
+        var output: [Item]
     }
 
     private struct MessagesResponse: Decodable {
