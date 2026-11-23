@@ -251,8 +251,10 @@ public final class LiveSpeakers: @unchecked Sendable {
             let from = max(span.start, collectedUntil[slot] ?? span.start)
             let to = min(span.end, decided)
             guard to > from else { continue }
-            collectedUntil[slot] = to
-            guard (speech[slot]?.count ?? 0) < budget else { continue }
+            guard (speech[slot]?.count ?? 0) < budget else {
+                collectedUntil[slot] = to
+                continue
+            }
             let others = spans.filter { $0.speaker != slot && $0.end > from && $0.start < to }.sorted { $0.start < $1.start }
             var pieces: [ClosedRange<Double>] = []
             var cursor = from
@@ -260,7 +262,10 @@ public final class LiveSpeakers: @unchecked Sendable {
                 if other.start - cursor >= VoiceStretches.shortestPiece { pieces.append(cursor...other.start) }
                 cursor = max(cursor, other.end)
             }
+            // A clean tail too short to keep yet, at the edge of what's decided, may grow with the next update: it's
+            // looked at again then rather than dropped.
             if to - cursor >= VoiceStretches.shortestPiece { pieces.append(cursor...to) }
+            collectedUntil[slot] = to - cursor < VoiceStretches.shortestPiece && to == decided && cursor < to ? cursor : to
             for piece in pieces {
                 // Only what's still in memory: the start of a long stretch may have been let go already.
                 let start = max(0, Int((piece.lowerBound - recentStart) * MeetingAudio.sampleRate))
@@ -409,7 +414,8 @@ extension LiveSpeakers {
         var shared: [Pair: Int] = [:]
         for case let (voice?, line) in scored { shared[Pair(voice: voice, afterCall: line.afterCall ?? ""), default: 0] += 1 }
         var pairedVoices = Set<Int>(), pairedNames = Set<String>(), same = 0
-        for (pair, count) in shared.sorted(by: { $0.value > $1.value })
+        // Ties in a fixed order, so the same call always scores the same.
+        for (pair, count) in shared.sorted(by: { ($0.value, $1.key.voice, $1.key.afterCall) > ($1.value, $0.key.voice, $0.key.afterCall) })
         where !pairedVoices.contains(pair.voice) && !pairedNames.contains(pair.afterCall) {
             pairedVoices.insert(pair.voice)
             pairedNames.insert(pair.afterCall)
