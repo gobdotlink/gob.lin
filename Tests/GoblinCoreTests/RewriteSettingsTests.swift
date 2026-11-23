@@ -31,15 +31,24 @@ struct RewriteSettingsTests {
     }
 
     @Test func openAIConsentAndSpeedSurviveTheMoveToTheResponsesAPI() throws {
-        let saved = #"{"enabled":true,"baseURL":"https://api.openai.com/v1","model":"gpt-6-luna","cleanup":"light","provider":"openAI","screenContextEndpoint":"https://api.openai.com/v1/chat/completions"}"#
+        // Consent and a typed speed saved for Chat Completions, while another provider was selected.
+        let saved = #"{"enabled":true,"baseURL":"https://api.groq.com/openai/v1","model":"openai/gpt-oss-20b","cleanup":"light","provider":"groq","screenContextEndpoint":"https://api.openai.com/v1/chat/completions","providerConfigurations":{"openAI":{"baseURL":"https://api.openai.com/v1","model":"gpt-6-luna","reasoning":"off","temperature":0,"extraRequestJSON":"{\"service_tier\": \"priority\", \"max_tokens\": 512}"}}}"#
         var settings = try JSONDecoder().decode(RewriteSettings.self, from: Data(saved.utf8))
-        #expect(settings.usesScreenContext && settings.screenContextEndpoint == "https://api.openai.com/v1/responses" && settings.serviceTier == nil)
-        settings.serviceTier = .fast
+        #expect(!settings.usesScreenContext)
+        // Back on OpenAI, the page shows the consent dictation will act on, and Standard can't still send a paid tier.
+        settings.selectProvider(.openAI)
+        #expect(settings.usesScreenContext && settings.serviceTier == .fast && settings.extraRequestJSON == #"{"max_tokens":512}"#)
         settings.selectProvider(.groq)
         #expect(settings.serviceTier == nil)
         settings.selectProvider(.openAI)
         settings = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
         #expect(settings.serviceTier == .fast && settings.usesScreenContext)
+        // The current OpenAI profile is moved too; Standard spellings leave no speed behind.
+        var current = settings
+        current.serviceTier = nil
+        current.extraRequestJSON = #"{"service_tier":"default"}"#
+        current = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(current))
+        #expect(current.serviceTier == nil && current.extraRequestJSON.isEmpty)
     }
 
     @Test func providerSwitchesRememberTuningAndPersistOmittedTemperature() throws {

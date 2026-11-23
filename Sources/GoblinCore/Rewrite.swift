@@ -75,9 +75,13 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
                   screenContextEndpoint: try fields.decodeIfPresent(String.self, forKey: .screenContextEndpoint))
         // OpenAI cleanup moved from Chat Completions to the Responses API at the same address, which keeps
         // nothing either (`store: false`), so consent given for the old endpoint still names the same recipient.
-        if provider == .openAI, screenContextEndpoint == RewriteProvider.openAI.baseURL + "/chat/completions" {
-            screenContextEndpoint = try? endpoint().absoluteString
+        // Moved whichever named provider is selected now, so switching back to OpenAI finds it; only Local and
+        // Custom can still be using that exact address for Chat Completions.
+        if provider.hasFixedAddress, screenContextEndpoint == RewriteProvider.openAI.baseURL + "/chat/completions" {
+            screenContextEndpoint = RewriteProvider.openAI.baseURL + "/responses"
         }
+        if provider == .openAI { configuration.adoptTypedServiceTier() }
+        providerConfigurations[RewriteProvider.openAI.rawValue]?.adoptTypedServiceTier()
     }
 
     // Encode nil explicitly so "omit temperature" survives a save and reload.
@@ -132,8 +136,12 @@ public struct RewriteSettings: Codable, Equatable, Sendable {
         guard let parameters = try? JSONSerialization.jsonObject(with: Data(extraRequestJSON.utf8)) as? [String: Any] else {
             throw RewriteFailure.configuration("Extra request options must be a JSON object.")
         }
-        guard Set(parameters.keys).isDisjoint(with: ["model", "messages", "input", "instructions", "stream"]) else {
-            throw RewriteFailure.configuration("Extra options cannot replace model, messages, input, instructions, or stream.")
+        // OpenAI's prompt travels in input and instructions, and its speed comes only from the Speed picker,
+        // so Standard never quietly sends a paid tier.
+        guard Set(parameters.keys).isDisjoint(with: ["model", "messages", "stream"] + (provider.offersServiceTiers ? ["input", "instructions", "service_tier"] : [])) else {
+            throw RewriteFailure.configuration(provider.offersServiceTiers
+                ? "Extra options cannot replace model, input, instructions, stream, or service_tier. Choose the speed under Speed."
+                : "Extra options cannot replace model, messages, or stream.")
         }
         let reasoningKeys: Set<String> = ["reasoning_effort", "reasoning", "thinking", "enable_thinking", "disable_reasoning", "chat_template_kwargs", "thinking_config", "extra_body", "output_config"]
         guard reasoning == .providerDefault || Set(parameters.keys).isDisjoint(with: reasoningKeys) else {
@@ -426,7 +434,7 @@ public actor RewriteClient {
                         continue
                     }
                     // A chosen speed is never quietly dropped: it costs more, so say which one was turned down.
-                    if let tier = body["service_tier"] as? String, response.statusCode == 400,
+                    if responses, let tier = body["service_tier"] as? String, response.statusCode == 400,
                        let error = Self.providerError(data), error.param == "service_tier" || error.message.contains("service_tier") || error.message.contains("service tier") {
                         throw RewriteFailure.configuration("\(settings.provider.title) won't run \(settings.model) at \(tier.capitalized) speed for this key. Choose another speed.")
                     }

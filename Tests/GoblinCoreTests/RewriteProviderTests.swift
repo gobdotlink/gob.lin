@@ -86,15 +86,17 @@ struct RewriteProviderTests {
         let input = body["input"] as! [[String: String]]
         #expect(input.count == 1 && input[0]["role"] == "user" && input[0]["content"]?.contains("cleaned text") == true)
 
-        // Cut off, refused, or empty for words that weren't only hesitations: the dictation is typed as spoken.
+        // Cut off, or empty for words that weren't only hesitations: the dictation is typed as spoken.
         for cut in [#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","content":[{"type":"output_text","text":"Send"}]}]}"#,
-                    #"{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"No."}]}]}"#,
                     #"{"status":"completed","output":[]}"#] {
             let (failed, _) = try await rewrite("send it", settings, replies: [(200, cut)])
             #expect(failed.failure == .invalidResponse && failed.outputText == "send it")
         }
-        let (empty, _) = try await rewrite("uh", settings, replies: [(200, #"{"status":"completed","output":[]}"#)])
+        // Hesitations alone may clean up to nothing, but a refusal never counts as that.
+        let (empty, _) = try await rewrite("um uh", settings, replies: [(200, #"{"status":"completed","output":[]}"#)])
         #expect(empty.failure == nil && empty.outputText.isEmpty)
+        let (refusal, _) = try await rewrite("um uh", settings, replies: [(200, #"{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"No."}]}]}"#)])
+        #expect(refusal.failure == .invalidResponse && refusal.outputText == "um uh")
 
         // A turned-down speed fails once, by name, with no quiet retry at Standard.
         let refused = #"{"error":{"message":"Invalid 'service_tier' argument: The requested service tier is not allowed for this project.","type":"invalid_request_error","param":"service_tier","code":null}}"#
@@ -117,7 +119,13 @@ struct RewriteProviderTests {
         #expect(standard["service_tier"] == nil && standard["max_output_tokens"] as? Int == 512 && standard["max_completion_tokens"] == nil)
         #expect((standard["reasoning"] as? [String: String])?["effort"] == "low" && standard["reasoning_effort"] == nil)
 
-        // Only OpenAI's own API gets a tier: Custom starts from OpenAI's tuning but speaks Chat Completions.
+        // The Speed picker is the only source of OpenAI's speed; typing one in Advanced options is refused.
+        settings.extraRequestJSON = #"{"service_tier":"fast"}"#
+        #expect(throws: RewriteFailure.self) { try settings.requestParameters(automaticEffort: nil) }
+
+        // Only OpenAI's own API gets a tier or reserves its prompt fields: Custom starts from OpenAI's tuning
+        // but speaks Chat Completions, where input and instructions are ordinary options.
+        settings.extraRequestJSON = #"{"instructions":null,"input":null}"#
         settings.serviceTier = .fast
         settings.selectProvider(.custom)
         let custom = try settings.requestParameters(automaticEffort: nil)

@@ -107,6 +107,7 @@ struct SettingsCapture {
                     var openAI = RewriteSettings(enabled: true, cleanup: .light, provider: .openAI)
                     openAI.configuration = RewriteProvider.openAI.configuration
                     openAI.model = "gpt-6-astra"
+                    openAI.reasoning = .automatic // Astra can't turn reasoning off.
                     openAI.serviceTier = .ultrafast
                     let openAIProvider = CleanupProviderSheet(settings: openAI, defaults: defaults, inspectCredentials: false, turnOn: false,
                                                               onSave: { _ in }, onFailure: { _ in })
