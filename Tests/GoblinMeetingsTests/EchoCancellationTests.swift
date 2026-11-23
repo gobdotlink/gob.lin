@@ -286,3 +286,94 @@ private func liveTranscript(in root: URL) async throws -> [String] {
     #expect(MeetingEchoModel.files.manifestID == "localvqe-v1.3-256ms")
     #expect(MeetingEchoModel.files.downloadBytes > 19_000_000)
 }
+
+/// A canceller that subtracts the reference and hands its output back one hop late, as LocalVQE does; it breaks on its
+/// `breaksAt`th call.
+private actor DelayedSubtraction {
+    private var pending: [Float] = []
+    private var calls = 0
+    private let breaksAt: Int?
+    init(breaksAt: Int? = nil) { self.breaksAt = breaksAt }
+
+    func enhance(_ microphone: [Float], _ reference: [Float]) throws -> [Float] {
+        calls += 1
+        if let breaksAt, calls >= breaksAt { throw CancellerBroke() }
+        pending += zip(microphone, reference).map { $0 - $1 }
+        let ready = max(0, pending.count - 256)
+        defer { pending.removeFirst(ready) }
+        return Array(pending.prefix(ready))
+    }
+
+    func flush() -> [Float] { defer { pending = [] }; return pending }
+
+    nonisolated var stream: LiveEchoStream {
+        LiveEchoStream(enhance: { try await self.enhance($0, $1) }, flush: { await self.flush() })
+    }
+}
+
+private final class Heard<Item>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [Item] = []
+    var value: [Item] { lock.withLock { items } }
+    func add(_ item: Item) { lock.withLock { items.append(item) } }
+}
+
+private func sameChunks(_ got: [SpeechChunk], _ expected: [SpeechChunk]) -> Bool {
+    got.count == expected.count && zip(got, expected).allSatisfy { got, expected in
+        got.startSample == expected.startSample && got.samples.count == expected.samples.count
+            && zip(got.samples, expected.samples).allSatisfy { abs($0 - $1) < 1e-5 }
+    }
+}
+
+@Test func theLiveTranscriptHearsTheMicrophoneWithTheCallTakenOutOnTheSameTimeline() async {
+    let own = tone([1.0...2.0, 4.0...5.0], seconds: 6, frequency: 330)
+    let call = tone([2.5...3.5], seconds: 6)
+    let heard = zip(own, call).map { $0 + $1 }
+    let chunks = Heard<SpeechChunk>()
+    let canceller = LiveEchoCanceller(load: { DelayedSubtraction().stream }, log: { _ in }, onChunk: chunks.add)
+    // The call's track arrives in bigger, later pieces than the microphone's, as a tap and a mic do.
+    var microphone = 0, system = 0
+    while microphone < heard.count || system < call.count {
+        if microphone < heard.count {
+            canceller.microphone(Array(heard[microphone..<min(microphone + 1_000, heard.count)]))
+            microphone += 1_000
+        }
+        if microphone > system + 3_000 || microphone >= heard.count, system < call.count {
+            canceller.system(Array(call[system..<min(system + 3_000, call.count)]))
+            system += 3_000
+        }
+    }
+    await canceller.finish()
+    #expect(sameChunks(chunks.value, SpeechChunker.chunks(of: own, track: .microphone)))
+}
+
+@Test func aStalledCallTrackPairsWithSilenceAndAMissingOrBrokenCancellerPassesTheMicrophoneThrough() async {
+    // The microphone waits for the call's sound as far as it has come, and goes on against silence when told it stalled.
+    var pairing = EchoPairing()
+    pairing.addMicrophone([Float](repeating: 0.1, count: 48_000))
+    pairing.addReference([Float](repeating: 0.2, count: 16_000))
+    #expect(pairing.take(all: false)?.reference == [Float](repeating: 0.2, count: 16_000))
+    #expect(pairing.take(all: false) == nil)
+    #expect(pairing.take(all: true)?.reference == [Float](repeating: 0, count: 32_000))
+
+    // The canceller breaks partway: the transcript gets the same speech chunks, at the same samples, as from the
+    // microphone as heard.
+    let heard = tone([1.0...2.0, 4.0...5.0], seconds: 6, frequency: 330)
+    let chunks = Heard<SpeechChunk>()
+    let log = Heard<String>()
+    let canceller = LiveEchoCanceller(load: { DelayedSubtraction(breaksAt: 8).stream }, log: log.add, onChunk: chunks.add)
+    for start in stride(from: 0, to: heard.count, by: 1_600) {
+        canceller.microphone(Array(heard[start..<min(start + 1_600, heard.count)]))
+        canceller.system([Float](repeating: 0, count: min(1_600, heard.count - start)))
+    }
+    await canceller.finish()
+    #expect(sameChunks(chunks.value, SpeechChunker.chunks(of: heard, track: .microphone)))
+    #expect(log.value.contains { $0.hasPrefix("live echo cancellation stopped") })
+
+    // Not downloaded: as heard from the start.
+    let unloaded = Heard<SpeechChunk>()
+    let without = LiveEchoCanceller(load: { nil }, log: { _ in }, onChunk: unloaded.add)
+    without.microphone(heard)
+    await without.finish()
+    #expect(sameChunks(unloaded.value, SpeechChunker.chunks(of: heard, track: .microphone)))
+}

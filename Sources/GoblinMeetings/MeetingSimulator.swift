@@ -5,12 +5,13 @@ import GoblinEngines
 /// Replays audio files through the same recorder, chunker and live transcriber as a real call,
 /// faster than real time, so the pipeline can be tested without capture permissions. Writes a new
 /// meeting folder under `root` (default `MeetingStorage.root`) and returns it; post-processing is separate.
+/// `cancelsEchoLive` takes the call's sound out of the microphone before the live transcript, as a real call does.
 /// A chunk the speech engine fails on throws `MeetingProcessingError.untranscribed` once the folder is written, so a
 /// simulation never reports a transcript with speech missing.
 public enum MeetingSimulator {
     public static func run(system systemURL: URL, microphone microphoneURL: URL?, echoGain: Float,
                            engine: any PCMSpeechEngine, recognition: RecognitionOptions = .init(language: "en"),
-                           title: String, root: URL? = nil,
+                           title: String, root: URL? = nil, cancelsEchoLive: Bool = false,
                            log: @escaping @Sendable (String) -> Void) async throws -> URL {
         let converter = AudioConverter()
         let system = try converter.resampleAudioFile(systemURL)
@@ -36,10 +37,14 @@ public enum MeetingSimulator {
             guard case .failed(let message) = reason else { return }
             writeLock.withLock { failed.append((chunk.seconds, message)) }
         })
+        let submit: @Sendable (SpeechChunk) -> Void = { transcriber.submit($0) }
+        let echo = cancelsEchoLive ? LiveEchoCanceller(load: LiveEchoCanceller.localVQE, log: log, onChunk: submit) : nil
+        let microphoneSamples: @Sendable ([Float]) -> Void = { echo?.microphone($0) }
+        let systemSamples: @Sendable ([Float]) -> Void = { echo?.system($0) }
         let microphoneTrack = try TrackRecorder(track: .microphone, directory: directory, sessionStart: 0,
-                                                onChunk: { transcriber.submit($0) }, onEvent: log)
+                                                onChunk: echo == nil ? submit : nil, onSamples: microphoneSamples, onEvent: log)
         let systemTrack = try TrackRecorder(track: .system, directory: directory, sessionStart: 0,
-                                            onChunk: { transcriber.submit($0) }, onEvent: log)
+                                            onChunk: submit, onSamples: systemSamples, onEvent: log)
         let step = 1_600
         var position = 0
         while position < count {
@@ -53,6 +58,7 @@ public enum MeetingSimulator {
         }
         let microphoneStats = microphoneTrack.finish()
         let systemStats = systemTrack.finish()
+        await echo?.finish()
         await transcriber.finish()
         try? segments.close()
         var info = MeetingSessionInfo(title: title, source: "simulation", target: systemURL.lastPathComponent, startedAt: started)

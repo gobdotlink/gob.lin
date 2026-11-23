@@ -34,7 +34,8 @@ public struct TrackStats: Codable, Sendable {
 
 /// Resamples one source to 16 kHz mono, writes it to a WAV that stays readable after a crash
 /// (only the header sizes go stale), keeps a sample → host-time index, pads gaps with silence
-/// so both tracks share a timeline, and cuts speech chunks for live transcription.
+/// so both tracks share a timeline, and cuts speech chunks for live transcription unless something else cuts them
+/// (a call's microphone, whose echo of the call is taken out first).
 final class TrackRecorder: @unchecked Sendable {
     let track: MeetingTrack
     let audioURL: URL
@@ -42,7 +43,7 @@ final class TrackRecorder: @unchecked Sendable {
     private let file: FileHandle
     private let timing: FileHandle
     private let sessionStart: Double
-    private let onChunk: @Sendable (SpeechChunk) -> Void
+    private let onChunk: (@Sendable (SpeechChunk) -> Void)?
     /// Hears every sample written, silence included, on the session's clock.
     private let onSamples: (@Sendable ([Float]) -> Void)?
     private let onEvent: @Sendable (String) -> Void
@@ -61,11 +62,12 @@ final class TrackRecorder: @unchecked Sendable {
     /// A write failed (a full disk): the track keeps what reached the file and takes no more.
     private var writeFailed = false
 
-    private var chunker: SpeechChunker
+    private var chunker: SpeechChunker?
 
-    /// `onWriteFailure` hears the first write that fails; the recording should stop then.
+    /// `onWriteFailure` hears the first write that fails; the recording should stop then. Without `onChunk` the track
+    /// cuts no chunks.
     init(track: MeetingTrack, directory: URL, sessionStart: Double,
-         onChunk: @escaping @Sendable (SpeechChunk) -> Void, onSamples: (@Sendable ([Float]) -> Void)? = nil,
+         onChunk: (@Sendable (SpeechChunk) -> Void)?, onSamples: (@Sendable ([Float]) -> Void)? = nil,
          onEvent: @escaping @Sendable (String) -> Void,
          onWriteFailure: @escaping @Sendable (any Error) -> Void = { _ in }) throws {
         self.track = track
@@ -74,7 +76,7 @@ final class TrackRecorder: @unchecked Sendable {
         self.onSamples = onSamples
         self.onEvent = onEvent
         self.onWriteFailure = onWriteFailure
-        chunker = SpeechChunker(track: track)
+        chunker = onChunk == nil ? nil : SpeechChunker(track: track)
         queue = DispatchQueue(label: "gob.lin.meetings.track.\(track.rawValue)", qos: .userInitiated)
         audioURL = directory.appendingPathComponent("\(track.fileStem).wav")
         let timingURL = directory.appendingPathComponent("\(track.fileStem).timing.jsonl")
@@ -96,7 +98,7 @@ final class TrackRecorder: @unchecked Sendable {
         queue.sync {
             guard !finished else { return stats }
             finished = true
-            for chunk in chunker.finish() { onChunk(chunk) }
+            for chunk in chunker?.finish() ?? [] { onChunk?(chunk) }
             try? file.synchronize()
             // After a failed write the header may not fit either; the reader trusts the file's length over it.
             try? WAVFile.patchHeader(file, dataBytes: stats.samples * 2)
@@ -156,7 +158,7 @@ final class TrackRecorder: @unchecked Sendable {
         let clamped = samples.map { $0.isFinite ? max(-1, min(1, $0)) : 0 }
         let pcm = clamped.map { Int16($0 * 32_767) }
         guard pcm.withUnsafeBytes({ append(Data($0), to: file) }) else { return }
-        for chunk in chunker.feed(clamped) { onChunk(chunk) }
+        for chunk in chunker?.feed(clamped) ?? [] { onChunk?(chunk) }
         onSamples?(clamped)
         stats.samples += clamped.count
     }

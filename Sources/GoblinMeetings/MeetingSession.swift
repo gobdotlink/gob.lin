@@ -71,6 +71,7 @@ public final class MeetingSession: @unchecked Sendable {
 
     private let target: SystemAudioTarget
     private let recordMicrophone: Bool
+    private let cancelsEchoLive: Bool
     /// Where the meeting mic preference and dictation's ranking are read.
     private let defaults: UserDefaults
     private let engine: any PCMSpeechEngine
@@ -79,6 +80,7 @@ public final class MeetingSession: @unchecked Sendable {
     private var info: MeetingSessionInfo
     private var microphone: TrackRecorder?
     private var system: TrackRecorder?
+    private var echo: LiveEchoCanceller?
     private var microphoneCapture: (any MeetingAudioSource)?
     private var tap: (any MeetingAudioSource)?
     private var transcriber: MeetingTranscriber?
@@ -98,8 +100,10 @@ public final class MeetingSession: @unchecked Sendable {
 
     /// `recognition` is passed to the speech engine for every chunk: dictation's language, as Parakeet takes it.
     /// `onProblem` hears capture dropping out or coming back, and the live transcript falling behind. `liveSpeakers`
-    /// hears the call's track, to tell its voices apart as it records.
+    /// hears the call's track, to tell its voices apart as it records. With `cancelsEchoLive`, a call's microphone has
+    /// the call's sound taken out before the live transcript hears it, once the echo canceller is downloaded.
     public init(title: String, source: String, target: SystemAudioTarget, recordMicrophone: Bool = true,
+                cancelsEchoLive: Bool = false,
                 engine: any PCMSpeechEngine, recognition: RecognitionOptions = .init(language: "en"),
                 root: URL = MeetingStorage.root, defaults: UserDefaults = .standard, liveSpeakers: LiveSpeakers? = nil,
                 onSegment: @escaping @Sendable (TranscriptSegment) -> Void,
@@ -109,6 +113,7 @@ public final class MeetingSession: @unchecked Sendable {
         directory = try MeetingStorage.newDirectory(title: title, date: now, in: root)
         self.target = target
         self.recordMicrophone = recordMicrophone
+        self.cancelsEchoLive = cancelsEchoLive
         self.defaults = defaults
         self.engine = engine
         self.recognition = recognition
@@ -197,14 +202,20 @@ public final class MeetingSession: @unchecked Sendable {
             guard let self else { return }
             lock.withLock { failWrite(error) }
         }
-        let microphone = try TrackRecorder(track: .microphone, directory: directory, sessionStart: hostStart,
-                                           onChunk: { transcriber.submit($0) }, onEvent: event, onWriteFailure: writeFailed)
         // An in-person conversation has no call audio: no tap and no system track.
         let inPerson = target == .none
-        let onSystemSamples: (@Sendable ([Float]) -> Void)?
-        if let live = liveSpeakers { onSystemSamples = { live.append($0) } } else { onSystemSamples = nil }
+        let submit: @Sendable (SpeechChunk) -> Void = { transcriber.submit($0) }
+        let echo = cancelsEchoLive && !inPerson ? LiveEchoCanceller(load: LiveEchoCanceller.localVQE, log: event, onChunk: submit) : nil
+        let microphoneSamples: @Sendable ([Float]) -> Void = { echo?.microphone($0) }
+        let microphone = try TrackRecorder(track: .microphone, directory: directory, sessionStart: hostStart,
+                                           onChunk: echo == nil ? submit : nil, onSamples: microphoneSamples,
+                                           onEvent: event, onWriteFailure: writeFailed)
+        let onSystemSamples: @Sendable ([Float]) -> Void = { [liveSpeakers] samples in
+            liveSpeakers?.append(samples)
+            echo?.system(samples)
+        }
         let system = inPerson ? nil : try TrackRecorder(track: .system, directory: directory, sessionStart: hostStart,
-                                                        onChunk: { transcriber.submit($0) },
+                                                        onChunk: submit,
                                                         onSamples: onSystemSamples, onEvent: event,
                                                         onWriteFailure: writeFailed)
         let microphoneCapture: any MeetingAudioSource = heard?.microphone ?? MicrophoneCapture(call: target, defaults: defaults)
@@ -214,6 +225,7 @@ public final class MeetingSession: @unchecked Sendable {
             self.transcriber = transcriber
             self.microphone = microphone
             self.system = system
+            self.echo = echo
             self.microphoneCapture = microphoneCapture
             self.tap = tap
         }
@@ -244,8 +256,8 @@ public final class MeetingSession: @unchecked Sendable {
     /// Stops capture and closes both tracks at once, then waits for the live transcript to catch up. With a
     /// `transcriptDeadline` (a quit), chunks still queued at the deadline are left out and counted instead.
     public func stop(transcriptDeadline: Duration? = nil) async -> MeetingSessionInfo {
-        let (tap, microphoneCapture, microphone, system, transcriber) = lock.withLock {
-            (self.tap, self.microphoneCapture, self.microphone, self.system, self.transcriber)
+        let (tap, microphoneCapture, microphone, system, echo, transcriber) = lock.withLock {
+            (self.tap, self.microphoneCapture, self.microphone, self.system, self.echo, self.transcriber)
         }
         tap?.stop()
         microphoneCapture?.stop()
@@ -259,6 +271,8 @@ public final class MeetingSession: @unchecked Sendable {
         // The audio is complete on disk before the transcript catches up, so a sleep or a quit here loses nothing.
         saveInfo()
         log("capture stopped; finishing \(transcriber?.backlog ?? 0) queued chunks")
+        // The microphone's last chunks, now the canceller has had all of both tracks; before the transcript's deadline.
+        await echo?.finish()
         if let transcriber {
             if let transcriptDeadline {
                 // The worker can't be cancelled mid-chunk, so the deadline races it rather than waiting for it.
