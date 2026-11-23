@@ -1,6 +1,6 @@
 name: Build
 
-# Pull requests build on each push; main builds after each merge, which also saves the caches
+# Pull requests build on each push; main builds after each merge, and its runs create the caches
 # that pull requests restore.
 on:
   push:
@@ -8,7 +8,7 @@ on:
   pull_request:
 
 # A newer push to a pull request replaces its unfinished run. Each main push gets its own group, so
-# every merge is built and saves the caches.
+# every merge is built. A job saves its cache only when no entry has that key yet.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
@@ -61,7 +61,7 @@ jobs:
             fi
           done
           # The capture check's timing assertions expect an otherwise idle runner.
-          scripts/check-audio-capture.sh || failed=1
+          scripts/check-audio-capture.sh || { failed=1; echo "::error::scripts/check-audio-capture.sh failed"; }
           exit "$failed"
 
   xcode:
