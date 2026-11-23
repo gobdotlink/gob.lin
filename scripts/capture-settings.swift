@@ -103,6 +103,15 @@ struct SettingsCapture {
                                                         inspectCredentials: false, turnOn: false, onSave: { _ in }, onFailure: { _ in })
                     try await shoot("settings-cleanup-provider", provider, size: NSSize(width: 680, height: 520))
                     try await shoot("settings-cleanup-provider-dark", provider, size: NSSize(width: 680, height: 520), dark: true)
+                    // OpenAI's own API adds the Speed row.
+                    var openAI = RewriteSettings(enabled: true, cleanup: .light, provider: .openAI)
+                    openAI.configuration = RewriteProvider.openAI.configuration
+                    openAI.model = "gpt-6-astra"
+                    openAI.serviceTier = .ultrafast
+                    let openAIProvider = CleanupProviderSheet(settings: openAI, defaults: defaults, inspectCredentials: false, turnOn: false,
+                                                              onSave: { _ in }, onFailure: { _ in })
+                    try await shoot("settings-cleanup-provider-openai", openAIProvider, size: NSSize(width: 680, height: 520))
+                    try await shoot("settings-cleanup-provider-openai-dark", openAIProvider, size: NSSize(width: 680, height: 520), dark: true)
                     let sol = model.dictionary.entries.first { $0.spelling == "Sol" }!
                     for dark in [false, true] {
                         try await shoot("settings-dictionary-entry\(dark ? "-dark" : "")", DictionaryEntryEditor(entry: sol, model: model.dictionary).background(Color(nsColor: .windowBackgroundColor)),

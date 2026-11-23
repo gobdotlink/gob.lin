@@ -1,7 +1,7 @@
 import GoblinCore
 import SwiftUI
 
-/// Service, address, model, reasoning and key, edited together and applied on Save.
+/// Service, address, model, reasoning, speed and key, edited together and applied on Save.
 struct CleanupProviderSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var settings: RewriteSettings
@@ -76,6 +76,19 @@ struct CleanupProviderSheet: View {
                     } label: {
                         Text("Reasoning")
                         Text("Off is fastest. Cleanup rarely needs more.").rowDetail()
+                    }
+                    if settings.provider.offersServiceTiers {
+                        LabeledContent {
+                            Picker("Speed", selection: $settings.serviceTier) {
+                                Text("Standard").tag(RewriteServiceTier?.none)
+                                ForEach(RewriteServiceTier.allCases) { Text($0.title).tag(Optional($0)) }
+                            }
+                            .labelsHidden().fixedSize().frame(width: Self.fieldWidth, alignment: .trailing)
+                        } label: {
+                            Text("Speed")
+                            Text("Fast and Ultrafast answer sooner and cost more.").rowDetail()
+                            Text("OpenAI decides which models run at each speed, and doesn't say until it's asked. If it turns down the speed for this model, I type your words as you said them until you pick another.")
+                        }
                     }
                     LabeledContent {
                         HStack(spacing: 8) {

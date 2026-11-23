@@ -11,6 +11,9 @@ public enum RewriteProvider: String, CaseIterable, Codable, Sendable, Identifiab
     /// The system on-device model: no address, model choice, or API key.
     public var runsOnDevice: Bool { self == .appleIntelligence }
 
+    /// OpenAI's own API offers paid speeds (`RewriteServiceTier`) and is called through its Responses API.
+    public var offersServiceTiers: Bool { self == .openAI }
+
     public var group: RewriteProviderGroup {
         switch self {
         case .cerebras, .groq, .sambaNova: .fast
@@ -172,6 +175,8 @@ public enum RewriteReasoning: String, CaseIterable, Codable, Sendable, Identifia
         switch provider {
         case .openRouter, .vercel:
             return ["reasoning": effort == "none" ? ["enabled": false] : ["effort": effort]]
+        case .openAI:
+            return ["reasoning": ["effort": effort]]
         case .zai:
             return effort == "none" ? ["thinking": ["type": "disabled"]] : ["thinking": ["type": "enabled"], "reasoning_effort": effort]
         case .anthropic:
@@ -192,6 +197,14 @@ public enum RewriteReasoning: String, CaseIterable, Codable, Sendable, Identifia
     }
 }
 
+/// OpenAI's faster, pricier processing. No tier is Standard. OpenAI decides which models run at each; nothing
+/// in its API says so ahead of a request, so a rejected tier fails cleanup with a sentence naming it.
+public enum RewriteServiceTier: String, CaseIterable, Codable, Sendable, Identifiable {
+    case fast, ultrafast
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+}
+
 /// Non-secret settings are remembered per provider; RewriteKeyStore keeps one key per provider (Custom per endpoint).
 public struct RewriteProviderConfiguration: Codable, Equatable, Sendable {
     public var baseURL: String
@@ -199,9 +212,11 @@ public struct RewriteProviderConfiguration: Codable, Equatable, Sendable {
     public var reasoning: RewriteReasoning
     public var temperature: Double?
     public var extraRequestJSON: String
+    public var serviceTier: RewriteServiceTier?
 
-    public init(baseURL: String, model: String, reasoning: RewriteReasoning, temperature: Double? = 0, extraRequestJSON: String = "") {
+    public init(baseURL: String, model: String, reasoning: RewriteReasoning, temperature: Double? = 0, extraRequestJSON: String = "",
+                serviceTier: RewriteServiceTier? = nil) {
         self.baseURL = baseURL; self.model = model; self.reasoning = reasoning
-        self.temperature = temperature; self.extraRequestJSON = extraRequestJSON
+        self.temperature = temperature; self.extraRequestJSON = extraRequestJSON; self.serviceTier = serviceTier
     }
 }

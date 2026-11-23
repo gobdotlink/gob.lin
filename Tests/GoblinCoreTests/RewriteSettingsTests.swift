@@ -30,6 +30,18 @@ struct RewriteSettingsTests {
         #expect(!settings.usesScreenContext)
     }
 
+    @Test func openAIConsentAndSpeedSurviveTheMoveToTheResponsesAPI() throws {
+        let saved = #"{"enabled":true,"baseURL":"https://api.openai.com/v1","model":"gpt-6-luna","cleanup":"light","provider":"openAI","screenContextEndpoint":"https://api.openai.com/v1/chat/completions"}"#
+        var settings = try JSONDecoder().decode(RewriteSettings.self, from: Data(saved.utf8))
+        #expect(settings.usesScreenContext && settings.screenContextEndpoint == "https://api.openai.com/v1/responses" && settings.serviceTier == nil)
+        settings.serviceTier = .fast
+        settings.selectProvider(.groq)
+        #expect(settings.serviceTier == nil)
+        settings.selectProvider(.openAI)
+        settings = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
+        #expect(settings.serviceTier == .fast && settings.usesScreenContext)
+    }
+
     @Test func providerSwitchesRememberTuningAndPersistOmittedTemperature() throws {
         var settings = RewriteSettings(enabled: true, cleanup: .medium)
         settings.selectProvider(.groq)

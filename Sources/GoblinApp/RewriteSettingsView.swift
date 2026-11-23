@@ -134,6 +134,7 @@ struct RewriteSettingsView: View {
         let model = settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
         var parts = [model.isEmpty ? "No model" : model]
         if !settings.provider.hasFixedAddress, let host = try? settings.endpoint().host() { parts.append(host) }
+        if settings.provider.offersServiceTiers, let tier = settings.serviceTier { parts.append(tier.title) }
         if keySaved { parts.append("key saved") }
         return parts.joined(separator: " · ")
     }
