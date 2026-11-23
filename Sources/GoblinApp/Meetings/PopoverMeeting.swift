@@ -97,9 +97,11 @@ private struct PopoverRecording: View {
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 if recording.inPerson {
                     meterRow("Room", levels: microphone, note: recording.microphoneLost ? "Not heard: the mic dropped out"
+                             : recording.microphoneSilence != nil ? "Not heard: \(recording.microphone?.device.name ?? "the mic") is silent"
                              : recording.dictating ? "Left out while you dictate" : nil)
                 } else {
                     meterRow("You", levels: microphone, note: recording.microphoneLost ? "Not heard: the mic dropped out"
+                             : recording.microphoneSilence != nil ? "Not heard: \(recording.microphone?.device.name ?? "the mic") is silent"
                              : recording.muted == true ? "Left out while you're muted"
                              : recording.dictating ? "Left out while you dictate" : nil)
                     meterRow("Them", levels: system, note: meetings.systemAudioPermission == .denied ? "Not heard: System Audio Recording is off"

@@ -1,5 +1,6 @@
 import AppKit
 import GoblinCore
+import GoblinEngines
 import GoblinMeetings
 import SwiftUI
 
@@ -341,6 +342,7 @@ struct SettingsCapture {
         call.meetingID = "2026-11-16 140100 Weekly sync"
         call.microphoneLevel = -24
         call.systemLevel = -16
+        call.microphone = MeetingMicrophone(device: AudioInputDevice(id: 0, uid: "preview-usb", name: "Lav Receiver", kind: .usb), reason: .call)
         call.lines = [line(245, "You", "Then let's hold the next batch until Thursday."),
                       line(370, "Them", "On pricing, I'd keep the free tier at three borrowed tools a month."),
                       line(412, "You", "Three feels right. We can raise it once lending is steady."),
@@ -353,6 +355,9 @@ struct SettingsCapture {
         var muted = call
         muted.muted = true
         muted.microphoneLevel = -100
+        var silent = call
+        silent.microphoneSilence = .silent
+        silent.microphoneLevel = -100
         var ending = call
         ending.releasedSince = Date().addingTimeInterval(-13)
         ending.systemLevel = -100
@@ -361,6 +366,8 @@ struct SettingsCapture {
         room.inPerson = true
         room.meetingID = "2026-11-16 140100 Conversation"
         room.microphoneLevel = -20
+        room.microphone = MeetingMicrophone(device: AudioInputDevice(id: 0, uid: "preview-builtin", name: "MacBook Pro Microphone", kind: .builtIn),
+                                            reason: .ranking)
         room.lines = [line(402, "", "So the library said yes for the twelfth, and they'll let us in an hour early."),
                       line(409, "", "Is that the room with the projector?"),
                       line(414, "", "It is. I'll bring the adapter."),
@@ -374,6 +381,7 @@ struct SettingsCapture {
         let popovers: [(String, () -> Void)] = [
             ("recording", { meetings.preview(.recording(call)) }),
             ("muted", { meetings.preview(.recording(muted), sidekickVisible: false) }),
+            ("mic-silent", { meetings.preview(.recording(silent)) }),
             ("ending", { meetings.preview(.recording(ending)) }),
             ("in-person", { meetings.preview(.recording(room)) }),
             ("in-person-quiet", { meetings.preview(.recording(quietRoom), quiet: true) }),
@@ -394,6 +402,7 @@ struct SettingsCapture {
             ("scrolled-back", { meetings.preview(.recording(call)) }),
             ("marking", { meetings.preview(.recording(call), markedAt: Date().addingTimeInterval(600)) }),
             ("muted", { meetings.preview(.recording(muted)) }),
+            ("mic-silent", { meetings.preview(.recording(silent)) }),
             ("ending", { meetings.preview(.recording(ending)) }),
             ("system-audio-off", { meetings.preview(.recording(call), systemAudio: .denied) }),
             ("in-person", { meetings.preview(.recording(room)) }),
@@ -409,7 +418,7 @@ struct SettingsCapture {
             let sidekick = SidekickModel(collapsed: pill, expanded: name.hasPrefix("expanded"))
             sidekick.onRight = name != "pill-left"
             for (microphone, system) in [(-30, -14), (-18, -40), (-26, -12), (-14, -30), (-22, -18)] as [(Float, Float)] {
-                sidekick.push(microphone: name.contains("muted") || name.contains("ending") || name.contains("quiet") ? -100 : microphone,
+                sidekick.push(microphone: name.contains("muted") || name.contains("silent") || name.contains("ending") || name.contains("quiet") ? -100 : microphone,
                               system: name.contains("in-person") || name.contains("ending") ? -100 : system)
             }
             if name == "call" || name == "expanded" { sidekick.showsConsent = false }

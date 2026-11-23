@@ -81,7 +81,7 @@ public enum AudioInputDevices {
 
     /// Read fresh at every open, so a key press never acts on a stale device list. A reroute narrows the
     /// list: right after an unplug it can still hold the dead device for a moment.
-    static func resolve(_ ranking: MicrophoneRanking, keeping usable: (AudioInputDevice) -> Bool = { _ in true }) throws -> AudioInputResolution {
+    public static func resolve(_ ranking: MicrophoneRanking, keeping usable: (AudioInputDevice) -> Bool = { _ in true }) throws -> AudioInputResolution {
         let listed = try snapshot()
         let snapshot = AudioInputSnapshot(devices: listed.devices.filter(usable), defaultUID: listed.defaultUID)
         guard let choice = ranking.resolve(connected: snapshot.devices.map(\.facts), systemDefault: snapshot.defaultUID),
@@ -199,13 +199,27 @@ public enum AudioInputDevices {
     }
 }
 
+/// Where an `AudioInputUnit` hands its audio: dictation's capture processor, or a meeting's mic. Called on the render
+/// thread, so nothing here may wait on another thread.
+public protocol AudioInputSink: AnyObject, Sendable {
+    /// About 100 ms of the device's audio, in its own format; the buffer is reused once this returns.
+    func receive(_ buffer: AVAudioPCMBuffer, time: AVAudioTime?)
+    func interrupt(_ kind: AudioCaptureFailure.Kind, file: StaticString, line: UInt)
+    /// The device stopped rendering or changed under the stream.
+    func inputBroke()
+    /// A stop is waiting for the audio up to this host time, so the batch is handed over now.
+    func stopWaits(through end: UInt64) -> Bool
+}
+
+extension CaptureProcessor: AudioInputSink {}
+
 /// A HAL input unit opened on one device before it initializes. An engine input node binds the system
 /// default first: with a Bluetooth headset as default, that switches the headset to its call profile and
 /// the engine's own default tracking races a later device change, which once stalled the main thread.
-final class AudioInputUnit: @unchecked Sendable {
-    let device: AudioInputDevice
+public final class AudioInputUnit: @unchecked Sendable {
+    public let device: AudioInputDevice
     /// The device's current rate and channel count, delivered as non-interleaved Float32.
-    let format: AVAudioFormat
+    public let format: AVAudioFormat
     private let unit: AudioUnit
     // Render-thread state between start and stop; touched elsewhere only before start.
     private let chunk: AVAudioPCMBuffer
@@ -214,12 +228,12 @@ final class AudioInputUnit: @unchecked Sendable {
     private let hostTicksPerFrame: Double
     private var chunkTime = AudioTimeStamp()
     private var delivered = false
-    private var processor: CaptureProcessor?
+    private var processor: (any AudioInputSink)?
     private var listeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     private var started = false
     private var closed = false
 
-    init(device: AudioInputDevice) throws {
+    public init(device: AudioInputDevice) throws {
         var description = AudioComponentDescription(componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_HALOutput,
                                                     componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
         var instance: AudioComponentInstance?
@@ -257,7 +271,7 @@ final class AudioInputUnit: @unchecked Sendable {
 
     deinit { close(); free(slice.unsafeMutablePointer) }
 
-    func start(delivering processor: CaptureProcessor) throws {
+    public func start(delivering processor: any AudioInputSink) throws {
         guard !closed else { throw AudioCaptureFailure(.startFailed) }
         guard !started else { return }
         self.processor = processor
@@ -266,7 +280,7 @@ final class AudioInputUnit: @unchecked Sendable {
     }
 
     /// Still running on the opened device in its opening format.
-    var isHealthy: Bool {
+    public var isHealthy: Bool {
         guard !closed else { return false }
         var running: UInt32 = 0, current = AudioDeviceID(0), alive: UInt32 = 0, hardware = AudioStreamBasicDescription()
         var size = UInt32(MemoryLayout<UInt32>.size), formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
@@ -282,7 +296,7 @@ final class AudioInputUnit: @unchecked Sendable {
     private static let listenerQueue = DispatchQueue(label: "app.goblin.capture-device-changes")
 
     /// Calls `changed` on a private queue when the device goes away or its input format may have changed.
-    func observeChanges(_ changed: @escaping @Sendable () -> Void) {
+    public func observeChanges(_ changed: @escaping @Sendable () -> Void) {
         for (selector, scope) in [(kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal),
                                   (kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal),
                                   (kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeInput)] {
@@ -293,7 +307,7 @@ final class AudioInputUnit: @unchecked Sendable {
     }
 
     /// Synchronous: no render callback runs after this returns.
-    func close() {
+    public func close() {
         guard !closed else { return }
         closed = true
         for (address, block) in listeners {
@@ -320,7 +334,7 @@ final class AudioInputUnit: @unchecked Sendable {
         if chunk.frameLength > 0, time.pointee.mSampleTime != chunkTime.mSampleTime + Double(chunk.frameLength) {
             if delivered { deliver(to: processor) } else { chunk.frameLength = 0 }
         }
-        guard chunk.frameLength + frames <= chunk.frameCapacity else { processor.interrupt(.bufferOverflow); return kAudioUnitErr_TooManyFramesToProcess }
+        guard chunk.frameLength + frames <= chunk.frameCapacity else { processor.interrupt(.bufferOverflow, file: #fileID, line: #line); return kAudioUnitErr_TooManyFramesToProcess }
         if chunk.frameLength == 0 { chunkTime = time.pointee }
         let channels = chunk.floatChannelData!
         for channel in 0..<slice.count {
@@ -340,7 +354,7 @@ final class AudioInputUnit: @unchecked Sendable {
         return noErr
     }
 
-    private func deliver(to processor: CaptureProcessor) {
+    private func deliver(to processor: any AudioInputSink) {
         // receive copies the samples, so the chunk refills immediately.
         processor.receive(chunk, time: AVAudioTime(audioTimeStamp: &chunkTime, sampleRate: format.sampleRate))
         chunk.frameLength = 0; delivered = true
