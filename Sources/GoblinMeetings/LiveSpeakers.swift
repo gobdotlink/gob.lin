@@ -313,7 +313,8 @@ public final class LiveSpeakers: @unchecked Sendable {
             let found = match
             queue.async { [self] in
                 namingNow -= 1
-                guard !stopped, voices.enabled(), let match = found, match.named else { return }
+                // A contact renamed "Them", "You" or "Speaker 2" in People would read as a side or a placeholder.
+                guard !stopped, voices.enabled(), let match = found, match.named, PeopleStore.isPersonName(match.name) else { return }
                 namedFrom[match.name] = min(namedFrom[match.name] ?? heardBy, heardBy)
                 guard seconds >= appliedSeconds[slot] ?? 0 else { return }
                 appliedSeconds[slot] = seconds
