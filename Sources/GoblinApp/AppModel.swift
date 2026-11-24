@@ -476,6 +476,9 @@ final class AppModel: ObservableObject {
     /// The same as the overlay's close button.
     func cancelRecording() { if let activeCapture { cancelDictation(activeCapture) } }
 
+    /// Skip in onboarding: drops a take started with a gob.lin window in front, never one meant for another app.
+    func cancelPracticeRecording() { if let activeCapture, activeCapture.session.target == nil { cancelDictation(activeCapture) } }
+
     /// Whether the app or field a take would type into is guarded by Secure Input. Another app's password field isn't.
     private func secureTarget() -> Bool {
         guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return true }

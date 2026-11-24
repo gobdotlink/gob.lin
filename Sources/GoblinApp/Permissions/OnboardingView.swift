@@ -40,7 +40,8 @@ struct OnboardingView: View {
         .caseBackground()
         .onChange(of: step, initial: true) { _, step in listen(on: step) }
         .onChange(of: hotkeys.recording) { _, recording in if recording != nil, step == .talkKey { keyChecked = true } }
-        .onChange(of: permissions.snapshot.ready) { _, ready in if ready { waitingFor = nil } }
+        // A grant that goes missing brings this window back, whatever step it was left on, the finale included.
+        .onChange(of: permissions.snapshot.ready) { _, ready in if ready { waitingFor = nil } else { step = .permissions } }
         .onDisappear { model.onboardingTake = nil }
     }
 
@@ -123,7 +124,8 @@ struct OnboardingView: View {
                 StatusRow(.waiting, Text("A permission was turned off, so I stopped listening safely.")).padding(.top, 12)
             }
             footer("Lights flip on as you allow each one.") {
-                if !permissions.snapshot.ready { Button("Check Again") { permissions.checkAgain() } }
+                // The failure row above asks for Check Again even when both grants are on.
+                if !permissions.snapshot.ready || permissions.tapFailure == .creationFailed { Button("Check Again") { permissions.checkAgain() } }
                 Button("Later") { permissions.closeOnboarding() }
                 Button("Continue") { step = .talkKey }.prominent().disabled(!permissions.snapshot.ready)
             }
@@ -229,6 +231,9 @@ struct OnboardingView: View {
             }
             footer("Try it as many times as you like.") {
                 Button("Back") { step = .talkKey }
+                // No take, no burst: the finale opens settled and shows the talk-key line instead of a timing.
+                // A practice recording still running is dropped, as the overlay's close button would.
+                if take == nil { Button("Skip") { model.cancelPracticeRecording(); step = .hired } }
                 Button("Continue") { step = .hired; celebrate = true }.prominent().disabled(take == nil)
             }
         }

@@ -308,10 +308,10 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
    - The shut goblin at 128 pt grips the plate's top edge.
    - The existing failure and revocation explanations become amber status rows.
 2. **Talk key:** the General keycap card on its own, plus a light that turns green when the key is pressed.
-3. **First take:** "Say something." and a line to read aloud: "The goblin types faster than I do." When the words land, the field gets a moss ring and the result reads "Nailed it. 7 words in 0.21 s, right where your cursor was." The cackle goblin at 64 pt grips the field.
+3. **First take:** "Say something." and a line to read aloud: "The goblin types faster than I do." When the words land, the field gets a moss ring and the result reads "Nailed it. 7 words in 0.21 s, right where your cursor was." The cackle goblin at 64 pt grips the field. Until then Skip sits beside the disabled Continue; it cancels a practice recording that's still running and opens the finale without a take.
 4. **Finale:** "You're hired."
    - The cackle goblin at 128 pt with sparkles and coins. They burst at 1× then 2× and fade over 600 ms; this is the app's one long animation.
-   - The timing sentence, the field with what they said, and a menu-bar hint: "That's me, top right."
+   - The timing sentence, the field with what they said, and a menu-bar hint: "That's me, top right." After Skip there's no field, the sentence reads "From now on, hold fn in any app and talk." with fn replaced by the talk key they picked, and the sparkles and coins are already settled.
    - The goblin, the sentences and the hint sit on the window's centre line, centred in the space above the bottom row.
    - The bottom row: the tagline on the left, on a faint tint, with Open Settings and Done on the right.
 
