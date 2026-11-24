@@ -24,7 +24,9 @@ struct MeetingsSwitch: View {
 struct MeetingsGeneralSection: View {
     let model: AppModel
     @ObservedObject private var meetings: MeetingsController
-    @State private var showingSetup = false
+    /// The setup sheet while it's up, as the switches it starts from: the last run's when that quit partway through.
+    /// The sheet is handed them as its item, since one presented by a flag can be built before they are set.
+    @State private var setup: SystemAudioAccess.SetupChoices?
 
     init(model: AppModel) {
         self.model = model
@@ -33,7 +35,7 @@ struct MeetingsGeneralSection: View {
 
     var body: some View {
         Section {
-            MeetingsSwitch(meetings: meetings, showingSetup: $showingSetup)
+            MeetingsSwitch(meetings: meetings, showingSetup: Binding(get: { setup != nil }, set: { setup = $0 ? .init() : nil }))
             if meetings.enabled {
                 StatusRow(.ready, Text("On. Meetings sits under History.")) {
                     Button("Meeting Recording…") { model.settingsSelection = .meetingRecording }
@@ -45,7 +47,12 @@ struct MeetingsGeneralSection: View {
                 }
             }
         } header: { CapsHeader("Meetings") }
-        .sheet(isPresented: $showingSetup) { MeetingsSetupSheet(meetings: meetings) { showingSetup = false } }
+        .sheet(item: $setup) { choices in MeetingsSetupSheet(meetings: meetings, choices: choices) { setup = nil } }
+        // gob.lin quit partway through setup, to let macOS apply System Audio Recording: pick up where that left off,
+        // with the switches as they were.
+        .onAppear {
+            if let choices = SystemAudioAccess.shared.takeResumeSetup(), !meetings.enabled, !meetings.setupFinished { setup = choices }
+        }
     }
 }
 
@@ -226,14 +233,18 @@ struct MeetingsSetupSheet: View {
     @ObservedObject private var systemAudio = SystemAudioAccess.shared
     let close: () -> Void
     /// On unless switched off here: turning Meetings on with them on is the person's yes to both.
-    @State private var writeNotes = true
-    @State private var rememberVoices = true
+    @State private var choices: SystemAudioAccess.SetupChoices
     /// Set by previews and captures; otherwise the controller's reading.
     private let previewNotifications: UNAuthorizationStatus?
     @State private var waitingForSystemAudio = false
+    /// Holds macOS's prompt open; cancelled when the sheet goes.
+    @State private var asking: Task<Void, Never>?
 
-    /// Previews and captures pass the states they want to show.
-    init(meetings: MeetingsController, notifications: UNAuthorizationStatus? = nil, close: @escaping () -> Void) {
+    /// Previews and captures pass the states they want to show. `choices` are the switches a sheet reopened after
+    /// a quit starts from.
+    init(meetings: MeetingsController, choices: SystemAudioAccess.SetupChoices = .init(),
+         notifications: UNAuthorizationStatus? = nil, close: @escaping () -> Void) {
+        _choices = State(initialValue: choices)
         self.meetings = meetings
         _notes = ObservedObject(wrappedValue: meetings.notes)
         self.close = close
@@ -259,14 +270,16 @@ struct MeetingsSetupSheet: View {
                 VStack(spacing: 0) {
                     row(.systemAudio, symbol: "speaker.wave.2", title: Text("System Audio Recording"),
                         detail: "Lets me hear the other side of the call.",
-                        light: systemAudio.status == .granted ? .ready : waitingForSystemAudio ? .waiting : .off,
-                        waiting: waitingForSystemAudio && systemAudio.status != .granted) {
-                        if systemAudio.status == .granted { allowed } else {
-                            action(waitingForSystemAudio ? "Open Again" : systemAudio.status == .denied ? "Open System Settings" : "Allow…",
-                                   current: current == .systemAudio) {
-                                waitingForSystemAudio = true
-                                Task { await systemAudio.request() }
-                            }
+                        light: systemAudio.status == .granted ? .ready : systemAudioNote != nil ? .waiting : .off,
+                        note: systemAudioNote) {
+                        if systemAudio.status == .granted { allowed } else if systemAudio.needsReopen {
+                            // Notifications can have an Open Settings of its own, for a different pane.
+                            Button("Open Settings") { systemAudio.openSettings() }.buttonStyle(.bordered)
+                                .accessibilityLabel("Open System Audio Recording Settings")
+                            action("Reopen gob.lin", current: current == .systemAudio) { Relaunch.now() }
+                        } else {
+                            action(waitingForSystemAudio || systemAudio.status == .denied ? "Open System Settings" : "Allow…",
+                                   current: current == .systemAudio, perform: askForSystemAudio)
                         }
                     }
                     rule(after: .systemAudio)
@@ -293,7 +306,7 @@ struct MeetingsSetupSheet: View {
             CapsHeader("After each call").padding(.leading, 14).padding(.top, 16).padding(.bottom, 4)
             Plate(padding: 4) {
                 VStack(spacing: 0) {
-                    Toggle(isOn: $writeNotes) {
+                    Toggle(isOn: $choices.writeNotes) {
                         Text("Write notes after each call")
                         // Shown, not behind the ⓘ: it says where the transcript goes, which is what this yes is for.
                         Text(notesLine).rowDetail()
@@ -301,7 +314,7 @@ struct MeetingsSetupSheet: View {
                     .toggleStyle(PlateToggleStyle())
                     .padding(.horizontal, 10).padding(.vertical, 8)
                     Hairline().padding(.horizontal, 10)
-                    Toggle(isOn: $rememberVoices) {
+                    Toggle(isOn: $choices.rememberVoices) {
                         Text("Remember voices")
                         Text("Keeps voiceprints of each call's voices and your own on this Mac, to name people next time.").rowDetail()
                     }
@@ -326,10 +339,10 @@ struct MeetingsSetupSheet: View {
                 Button("Turn On") {
                     meetings.setupFinished = true
                     // Leaving notes on here is the yes to sending transcripts to the notes model.
-                    notes.afterEachCall = writeNotes
-                    if writeNotes { notes.consented = true }
+                    notes.afterEachCall = choices.writeNotes
+                    if choices.writeNotes { notes.consented = true }
                     meetings.setEnabled(true)
-                    if rememberVoices { meetings.setRememberVoices(true) }
+                    if choices.rememberVoices { meetings.setRememberVoices(true) }
                     close()
                 }
                 .prominent().keyboardShortcut(.defaultAction)
@@ -348,10 +361,33 @@ struct MeetingsSetupSheet: View {
             if notes.tools.isEmpty, !notes.scanning { notes.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            systemAudio.refresh()
+            systemAudio.cameForward()
             if systemAudio.status == .granted { waitingForSystemAudio = false }
             Task { await meetings.refreshNotificationStatus() }
         }
+        // A quit from here saves the switches for the sheet the next launch opens.
+        .onChange(of: choices, initial: true) { systemAudio.setupChoices = choices }
+        .onDisappear {
+            asking?.cancel()
+            systemAudio.leftSetup()
+        }
+    }
+
+    /// The amber line under System Audio Recording while it's being asked for.
+    private var systemAudioNote: String? {
+        if systemAudio.status == .granted { return nil }
+        if systemAudio.needsReopen { return "Still off here. If gob.lin is already on in System Settings, macOS only tells me once I reopen." }
+        guard waitingForSystemAudio else { return nil }
+        return systemAudio.settingsOpened
+            ? "Waiting for System Settings. Flip gob.lin on. If macOS offers Quit & Reopen, say yes and I'll pick up here."
+            : "Waiting for macOS to ask. Choose Allow and I'll notice."
+    }
+
+    /// The first press raises macOS's prompt and waits for the answer; after that the button opens System Settings.
+    private func askForSystemAudio() {
+        guard !waitingForSystemAudio else { return systemAudio.openSettings() }
+        waitingForSystemAudio = true
+        asking = Task { await systemAudio.request() }
     }
 
     /// What the notes switch means: the model and who gets the transcript, or that a tool still needs setting up.
@@ -378,7 +414,7 @@ struct MeetingsSetupSheet: View {
         }
     }
 
-    private func row<Trailing: View>(_ item: Item, symbol: String, title: Text, detail: String, light: LightState, waiting: Bool = false,
+    private func row<Trailing: View>(_ item: Item, symbol: String, title: Text, detail: String, light: LightState, note: String? = nil,
                                      @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: 12) {
             VStack(spacing: 5) {
@@ -393,13 +429,13 @@ struct MeetingsSetupSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 title.font(.row.weight(.semibold))
                 Text(detail).font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if waiting {
-                    Text("Waiting for System Settings. Flip gob.lin on, then come back. I'll notice.")
-                        .font(.status).foregroundStyle(GoblinBrand.candle).padding(.top, 4)
+                if let note {
+                    Text(note).font(.status).foregroundStyle(GoblinBrand.candle).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
                 }
             }
-            Spacer(minLength: 8)
-            HStack(spacing: 6) { trailing() }
+            // The buttons keep their size and the words take the rest, so neither squeezes the other.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) { trailing() }.fixedSize().padding(.leading, 8)
         }
         .padding(.vertical, 11).padding(.leading, 8).padding(.trailing, 12)
         .background(current == item ? AnyShapeStyle(GoblinBrand.selection) : AnyShapeStyle(.clear),

@@ -149,11 +149,19 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
+    /// The app's own quit, set by its delegate: it closes any sheet first, since AppKit ignores a terminate while
+    /// one is up. Unset, as in the standalone check, AppKit's terminate is asked directly.
+    static var quit: (target: NSObject, action: Selector)?
+
     static func requestTermination() {
         // AppKit enters a nested event loop while awaiting async shutdown. Enter
         // termination from a run-loop callback, outside both the Swift task and
         // the main dispatch queue, so shutdown can use the main actor's queue.
-        NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
+        if let quit {
+            quit.target.perform(quit.action, with: nil, afterDelay: 0)
+        } else {
+            NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
+        }
     }
 
     private func credentials() async throws -> String? {

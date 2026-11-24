@@ -209,6 +209,11 @@ struct SettingsCapture {
                         SystemAudioAccess.shared.override = .unknown
                         try await shoot("meetings-setup" + (dark ? "-dark" : ""), MeetingsSetupSheet(meetings: model.meetings, notifications: .notDetermined) {},
                                         size: NSSize(width: 620, height: 640), dark: dark)
+                        // Back from System Settings and still without access: the switch may be on already.
+                        SystemAudioAccess.shared.override = .denied
+                        SystemAudioAccess.shared.needsReopen = true
+                        try await shoot("meetings-setup-reopen" + (dark ? "-dark" : ""), MeetingsSetupSheet(meetings: model.meetings, notifications: .notDetermined) {},
+                                        size: NSSize(width: 620, height: 660), dark: dark)
                         SystemAudioAccess.shared.override = .granted
                         try await shoot("meetings-setup-allowed" + (dark ? "-dark" : ""), MeetingsSetupSheet(meetings: model.meetings, notifications: .notDetermined) {},
                                         size: NSSize(width: 620, height: 640), dark: dark)

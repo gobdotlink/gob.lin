@@ -42,6 +42,12 @@ struct GoblinApp: App {
         }
         .defaultSize(width: 1040, height: 720)
         .windowResizability(.contentSize)
+        .commands {
+            // AppKit's own Quit does nothing while a sheet is up; this one closes the sheet first.
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit gob.lin") { UpdateChecker.requestTermination() }.keyboardShortcut("q")
+            }
+        }
     }
 
     private func attachLifecycle() { lifecycle.model = model }
@@ -86,6 +92,11 @@ private struct MenuBarLabel: View {
                 model.openWindow = { id in
                     openWindow(id: id)
                     NSApp.activate(ignoringOtherApps: true)
+                }
+                // The last run quit partway through Meetings setup; General opens the setup sheet again.
+                if SystemAudioAccess.shared.resumeSetup != nil {
+                    model.settingsSelection = .general
+                    model.openWindow?("settings")
                 }
             }
     }
