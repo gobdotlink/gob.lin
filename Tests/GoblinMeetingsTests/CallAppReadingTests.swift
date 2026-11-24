@@ -157,6 +157,27 @@ import Testing
     #expect(AccessibilityProbe.muteState([account, "1 AXTabGroup: Sam Riverside (Co-host), Computer audio muted"]) == nil)
 }
 
+@Test func aMeetTileReadAsOneGroupDoesNotAddADoubledName() {
+    var collector = MeetingParticipants.Collector()
+    collector.add([
+        "22 AXPopUpButton: More options for Jordan Lee | More options for Jordan Lee",
+        "17 AXGroup: Pin Jordan Lee to your main screen Mute Jordan Lee's microphone More options for Jordan Lee Jordan Lee | Pin Jordan Lee to your main screen Mute Jordan Lee's microphone More options for Jordan Lee Jordan Lee",
+        "17 AXGroup: Pin Alex Kim to your main screen Mute Alex Kim's microphone More options for Alex Kim Alex Kim",
+    ])
+    // Someone whose button was never read is still listed, once, from their tile.
+    #expect(collector.participants.all == ["Jordan Lee", "Alex Kim"])
+
+    // A tile and a button give the same name when it has a comma, and a name that reads like the tile's own
+    // wording is still just a name.
+    collector = MeetingParticipants.Collector()
+    collector.add([
+        "17 AXGroup: Pin Priya Shah, PhD to your main screen Mute Priya Shah, PhD's microphone More options for Priya Shah, PhD Priya Shah, PhD",
+        "22 AXPopUpButton: More options for Priya Shah, PhD",
+        "17 AXGroup: Pin to your main screen Sam to your main screen Mute to your main screen Sam's microphone More options for to your main screen Sam",
+    ])
+    #expect(collector.participants.all == ["Priya Shah", "to your main screen Sam"])
+}
+
 @Test func participantsGatheredLiveMatchTheLogReading() {
     var collector = MeetingParticipants.Collector()
     collector.add(["3 AXStaticText: Sam Rivera (Host, me)", "4 AXTabGroup: Alex Kim, Computer audio muted"])

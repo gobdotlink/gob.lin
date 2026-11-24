@@ -1,7 +1,8 @@
 import Foundation
 
 /// Who the call app said was in the meeting, gathered from the call window while recording and kept in participants.json.
-/// Zoom: tiles "<name>, Computer audio muted" and "More options for <name>"; Meet: "More options for <name>".
+/// Zoom: tiles "<name>, Computer audio muted" and "More options for <name>"; Meet: "More options for <name>",
+/// or a whole tile read as one group, "Pin <name> to your main screen … More options for <name> <name>".
 /// Self is "<name> (Host, me)", Zoom's account button "Zoom, <name>, In a Zoom Meeting", or this Mac's user name.
 /// A recording with the raw accessibility log (`meetingsDebugAccessibilityLog`) is re-read from that log instead,
 /// so changed rules apply to old test captures.
@@ -50,10 +51,18 @@ public struct MeetingParticipants: Codable, Sendable, Hashable {
                 if role.hasSuffix("AXTabGroup"), let range = value.range(of: ", Computer audio") ?? value.range(of: ", No audio connected") {
                     add(name: String(value[..<range.lowerBound]))
                 }
-                if let range = value.range(of: "More options for ") {
-                    let rest = value[range.upperBound...]
-                    let name = rest.components(separatedBy: CharacterSet(charactersIn: ",|")).first ?? ""
-                    if !name.hasSuffix("Zoom Meeting"), !name.contains("'s Zoom") { add(name: name) }
+                for part in value.components(separatedBy: " | ") {
+                    if part.hasPrefix("More options for ") {
+                        let name = part.dropFirst("More options for ".count).components(separatedBy: ",").first ?? ""
+                        if !name.hasSuffix("Zoom Meeting"), !name.contains("'s Zoom") { add(name: name) }
+                    } else if part.hasPrefix("Pin "), part.contains("More options for ") {
+                        // Meet also reads a whole tile as one group ("Pin <name> to your main screen … More options for
+                        // <name> <name>"). The tile's label runs on after the last name, so the name comes from the start,
+                        // cut at a comma as the button's is.
+                        let rest = part.dropFirst("Pin ".count)
+                        guard let end = rest.range(of: " to your main screen") else { continue }
+                        add(name: rest[..<end.lowerBound].components(separatedBy: ",").first ?? "")
+                    }
                 }
                 if let range = value.range(of: " (Host, me)") ?? value.range(of: " (me)") { me = String(value[..<range.lowerBound]) }
                 if value.hasPrefix("Zoom, "), value.contains(", In a Zoom Meeting") {
