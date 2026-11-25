@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Naming a voice nobody recognised: three clips to listen to, names it could be and why, a free name, and,
 /// on a call that listed fewer people than I heard, the shared-laptop case. In person there's no participant
-/// list, so it offers "That's me" and a free name instead.
+/// list, so it offers "That's me" and a free name instead; the same for someone heard beside you on a call's mic.
 struct WhoIsThisSheet: View {
     let meeting: StoredMeeting
     let lane: MeetingLane
@@ -23,19 +23,24 @@ struct WhoIsThisSheet: View {
     @State private var laptopOwner = ""
 
     private var inPerson: Bool { meeting.kind == .inPerson }
+    /// On a call, a voice from this Mac's mic that isn't you: someone in the room, who the call never listed.
+    private var besideYou: Bool { !inPerson && lane.isOnMicrophoneOnly }
     private var clips: [TranscriptTurn] { MeetingTimeline.clips(of: lane.name, in: turns) }
     private var suggestions: [SpeakerSuggestion] {
         // A voice that sounds like someone comes first; the participant list fills in the rest.
-        let listed = inPerson ? [] : SpeakerSuggestions.suggestions(lanes: lanes, participants: participants)
+        let listed = inPerson || besideYou ? [] : SpeakerSuggestions.suggestions(lanes: lanes, participants: participants)
         let heard = voiceSuggestions.filter { $0.name != lane.name }
         return Array((heard + listed.filter { item in !heard.contains { $0.name == item.name } }).prefix(4))
     }
-    private var extraVoices: Int { inPerson ? 0 : SpeakerSuggestions.extraVoices(lanes: lanes, participants: participants) }
-    /// In person, nobody is You until someone says so.
-    private var offerMe: Bool {
-        inPerson && !lanes.contains(where: \.isYou) && !voiceSuggestions.contains { $0.name == MeetingPostProcessor.microphoneLabel }
+    private var extraVoices: Int {
+        inPerson || besideYou ? 0 : SpeakerSuggestions.extraVoices(lanes: lanes, participants: participants)
     }
-    private var owners: [String] { lanes.filter { !$0.needsName && !$0.isYou }.map(\.name) }
+    /// In person, nobody is You until someone says so; nor on a shared mic when I couldn't tell which voice was yours.
+    private var offerMe: Bool {
+        (inPerson || besideYou) && !lanes.contains(where: \.isYou) && !voiceSuggestions.contains { $0.name == MeetingPostProcessor.microphoneLabel }
+    }
+    /// Whose laptop a second voice could have come through: named people heard through the call, not beside you.
+    private var owners: [String] { lanes.filter { !$0.needsName && !$0.isYou && (inPerson || !$0.isOnMicrophoneOnly) }.map(\.name) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -97,7 +102,10 @@ struct WhoIsThisSheet: View {
 
     private var lead: String {
         let talked = MeetingTimeline.length(lane.talkSeconds)
-        return inPerson ? "\(lane.name) talked for \(talked). Listen, then give them a name."
+        // A lane someone merged from both tracks came through neither alone.
+        let mixed = Set(lane.stretches.map(\.track)).count > 1
+        return inPerson || mixed ? "\(lane.name) talked for \(talked). Listen, then give them a name."
+            : besideYou ? "\(lane.name) talked for \(talked), through your mic."
             : "\(lane.name) talked for \(talked), through the \(meeting.source.isEmpty ? "call" : meeting.source) audio."
     }
 
@@ -152,7 +160,7 @@ struct WhoIsThisSheet: View {
                             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
                         VStack(alignment: .leading, spacing: 1) {
                             Text("One laptop had two voices").font(.row.weight(.semibold))
-                            Text("\(meeting.source.isEmpty ? "The call" : meeting.source) listed \(participants.all.count) people, but I heard \(lanes.count). I'll keep the laptop's owner and name this voice.")
+                            Text("\(meeting.source.isEmpty ? "The call" : meeting.source) listed \(participants.all.count == 1 ? "1 person" : "\(participants.all.count) people"), but I heard \(participants.all.count + extraVoices). I'll keep the laptop's owner and name this voice.")
                                 .font(.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 8)

@@ -183,6 +183,22 @@ struct SettingsCapture {
                             try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: name == "meetings-who" ? 700 : 560), dark: dark)
                         }
                     }
+                    // Someone heard beside you on the call's own mic: no participant list, no laptop card.
+                    do {
+                        let detail = try await store.detail(sampleMeetings.weekly)
+                        let beside = TranscriptTurn(speaker: "Speaker 4", label: "Speaker 4", track: .microphone, start: 500, end: 512,
+                                                    text: "I can take the lending bug, I was in that code last week anyway.")
+                        let turns = (detail.turns + [beside]).sorted { $0.start < $1.start }
+                        let lanes = MeetingTimeline.lanes(turns, kind: .call)
+                        let player = MeetingPlayer()
+                        player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
+                        let sheet = WhoIsThisSheet(meeting: detail.summary, lane: lanes.first { $0.name == "Speaker 4" }!, lanes: lanes, turns: turns,
+                                                   participants: detail.participants, remembersVoices: true, player: player, onName: { _ in }, onClose: {})
+                            .background(Color(nsColor: .windowBackgroundColor))
+                        for dark in [false, true] {
+                            try await shoot("meetings-who-beside-you" + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: 330), dark: dark)
+                        }
+                    }
                     // The notes on their own, and a meeting without them, as the page shows them below the transcript.
                     for (name, id) in [("meetings-notes", sampleMeetings.weekly), ("meetings-notes-offer", sampleMeetings.design)] {
                         let detail = try await store.detail(id)

@@ -171,7 +171,7 @@ public struct MeetingPostProcessOptions: Sendable {
             let loadSeconds = Date().timeIntervalSince(loadStart)
             let diarizer = Nemotron3Diarizer(config: config, models: models)
             let start = Date()
-            log("diarizing \(Int(Double(samples.count) / MeetingAudio.sampleRate)) s of system audio")
+            log("telling voices apart in \(Int(Double(samples.count) / MeetingAudio.sampleRate)) s of audio")
             let (probabilities, frames) = try diarizer.processComplete(samples)
             let spans = Nemotron3Diarizer.segments(probabilities: probabilities, frameCount: frames)
                 .map { DiarizedSpan(speaker: $0.speakerIndex, start: Double($0.startSeconds), end: Double($0.endSeconds)) }
@@ -214,19 +214,29 @@ public enum MeetingPostProcessor {
             let url = directory.appendingPathComponent(MeetingStorage.audioFile(track))
             return FileManager.default.fileExists(atPath: url.path) ? try WAVFile.readSamples(url) : []
         }
+        // A call's microphone may hold more than the person at this Mac. Which of its voices is you takes voiceprints,
+        // so they're only told apart with Remember voices on.
+        let voiceOptions = options.voices.flatMap { $0.enabled() ? $0 : nil }
+        let splitsMicrophone = !inPerson && voiceOptions != nil
         let systemSamples = try samples(.system)
-        let microphoneSamples = inPerson || options.cancelsEcho ? try samples(.microphone) : nil
+        let microphoneSamples = inPerson || options.cancelsEcho || splitsMicrophone ? try samples(.microphone) : nil
         let diarizedSamples = inPerson ? microphoneSamples ?? [] : systemSamples
         // Both slow and independent: the microphone's echo is taken out while the system track's voices are told apart.
         async let echoPass = echoCancelledMicrophone(directory: directory, microphone: microphoneSamples ?? [], system: systemSamples,
-                                                     session: session, options: options, log: log)
+                                                     session: session, options: options, tellingVoicesApart: splitsMicrophone,
+                                                     log: log)
         var diarization = DiarizationResult(spans: [])
         if diarizedSamples.count > Int(MeetingAudio.sampleRate) {
             diarization = try await options.diarizer(diarizedSamples, log)
             diarization.spans.sort { $0.start < $1.start }
         }
         let spans = diarization.spans
-        let echo = try await echoPass
+        var (echo, microphoneHeard) = try await echoPass
+        // Without the call's sound taken out (it's off, or failed), the microphone as it was heard: the call's own
+        // voices on it are left out by when they talk.
+        if splitsMicrophone, microphoneHeard == nil, let microphoneSamples {
+            microphoneHeard = try await microphoneVoices(microphoneSamples, options: options, log: log)
+        }
         var liveMicrophoneWords: Int?, cleanedMicrophoneWords: Int?
         if case .transcribed(let cleaned, let cancelSeconds, let transcribeSeconds) = echo {
             // The cleaned audio's lines stand in for the live microphone's; the system track's stay as they are.
@@ -282,18 +292,50 @@ public enum MeetingPostProcessor {
         // Turns under their labels.
         let participants = MeetingParticipants.read(directory)
         var turns: [TranscriptTurn]
+        var microphoneSpans: [DiarizedSpan] = []
         if inPerson {
             // Everyone is on the mic, so voices are split there; nobody is "You" until named.
             turns = systemTurns(microphone, spans: spans, remote: [], track: .microphone)
         } else {
-            turns = microphone.map {
+            let remote = systemTurns(system, spans: spans, remote: participants.others)
+            var yours: [TranscriptTurn]?
+            if let voiceOptions, let heard = microphoneHeard, let microphoneSamples {
+                // You without this meeting's own earlier sample, which would only match itself.
+                let id = directory.lastPathComponent
+                let samples = voiceOptions.people.people().first(where: \.isMe)?.samples.filter { $0.meetingID != id }.map(\.embedding) ?? []
+                do {
+                    let split = try await microphoneTurns(microphone, spans: heard, system: remote, systemSpans: spans,
+                                                          audio: microphoneSamples, excluded: muted + dictations, yourSamples: samples,
+                                                          embed: voiceOptions.embed, log: log)
+                    // Telling them apart takes a while; with Remember voices turned off meanwhile the microphone is one
+                    // voice again.
+                    if voiceOptions.enabled() {
+                        yours = split.turns
+                        microphoneSpans = split.spans
+                    } else {
+                        log("microphone voices: Remember voices was turned off, so the microphone stays one voice")
+                    }
+                } catch {
+                    if error is CancellationError || Task.isCancelled { throw error }
+                    log("microphone voices: \(error.localizedDescription)")
+                }
+            }
+            turns = yours ?? microphone.map {
                 TranscriptTurn(speaker: microphoneLabel, label: microphoneLabel, track: .microphone, start: $0.start, end: $0.end,
                                text: $0.text, words: $0.words)
             }
-            turns += systemTurns(system, spans: spans, remote: participants.others)
+            turns += remote
+        }
+        // Only a shared microphone keeps its spans, for the voiceprints made from its voices.
+        let microphoneSpansURL = directory.appendingPathComponent(MeetingStorage.microphoneDiarizationFile)
+        if microphoneSpans.isEmpty {
+            try? FileManager.default.removeItem(at: microphoneSpansURL)
+        } else {
+            try JSONEncoder.pretty.encode(microphoneSpans).write(to: microphoneSpansURL, options: .atomic)
         }
         turns.sort { $0.start < $1.start }
-        turns = smoothFlicker(turns)
+        // Numbered once smoothing has settled who said what, so a voice smoothed away takes no number.
+        turns = numberVoices(smoothFlicker(turns))
         turns = merge(turns, by: { $0.label ?? $0.speaker })
 
         // Run again (Try Again, or the CLI): the voices may be numbered differently now, so names follow the voice
@@ -304,13 +346,15 @@ public enum MeetingPostProcessor {
         // Voiceprints belong to one attribution: a new one (another preset, Try Again) makes the old ones wrong, and so
         // is anything People learned from them. They go before the new attribution is written, so a failure later
         // never leaves old voiceprints beside new labels. Recognition below makes them again when it's on.
+        // Who else People knew before this meeting's samples went: a name the whole microphone had may be one of theirs.
+        let others = voiceOptions?.people.people().filter { !$0.isMe }.map(\.name) ?? []
         try invalidateVoiceprints(directory, people: options.voices?.people)
         let attributedURL = directory.appendingPathComponent(MeetingStorage.attributedFile)
         var namesCleared: [String] = []
         let names = speakerNames(directory)
         if !names.isEmpty, let data = try? Data(contentsOf: attributedURL),
            let previous = try? JSONDecoder.meeting.decode([TranscriptTurn].self, from: data) {
-            let carried = carryNames(names, from: previous, to: turns)
+            let carried = carryNames(names, from: previous, to: turns, others: others)
             namesCleared = carried.cleared
             try JSONEncoder.pretty.encode(Relabel(turns: turns, names: carried.names))
                 .write(to: directory.appendingPathComponent(MeetingStorage.relabelFile), options: .atomic)
@@ -327,7 +371,9 @@ public enum MeetingPostProcessor {
                 if !inPerson { audio[.system] = systemSamples }
                 // Read already when it was diarized (in person) or had its echo cancelled.
                 audio[.microphone] = try microphoneSamples ?? samples(.microphone)
-                try await recognizeVoices(directory, turns: turns, audio: audio, inPerson: inPerson, spans: spans,
+                var heard: [MeetingTrack: [DiarizedSpan]] = [inPerson ? .microphone : .system: spans]
+                if !inPerson, !microphoneSpans.isEmpty { heard[.microphone] = microphoneSpans }
+                try await recognizeVoices(directory, turns: turns, audio: audio, inPerson: inPerson, spans: heard,
                                           microphoneExcluded: muted + dictations, participants: participants, session: session,
                                           options: voices, log: log)
             } catch {
@@ -412,7 +458,7 @@ public enum MeetingPostProcessor {
     /// Makes a voiceprint of each voice, names the unnamed ones that clearly sound like someone in People (and keeps the
     /// closer calls as suggestions for Who's this?), then lets People learn from the meeting's named voices.
     static func recognizeVoices(_ directory: URL, turns: [TranscriptTurn], audio: [MeetingTrack: [Float]], inPerson: Bool,
-                                spans: [DiarizedSpan] = [], microphoneExcluded: [ClosedRange<Double>] = [],
+                                spans: [MeetingTrack: [DiarizedSpan]] = [:], microphoneExcluded: [ClosedRange<Double>] = [],
                                 participants: MeetingParticipants, session: MeetingSessionInfo?,
                                 options: MeetingVoiceOptions, log: @Sendable (String) -> Void) async throws {
         let voices = try await VoiceStretches.voices(in: turns, audio: audio, inPerson: inPerson, spans: spans,
@@ -575,19 +621,45 @@ public enum MeetingPostProcessor {
     /// Moves speakers.json's names from the voices of an earlier run (`previous`, under their labels then) to this
     /// run's: each new voice takes the name of the earlier voice it shares the most talking time with on the same
     /// track, when that's at least half of its own. Names no new voice takes come back as `cleared`.
-    static func carryNames(_ names: [String: String], from previous: [TranscriptTurn],
-                           to turns: [TranscriptTurn]) -> (names: [String: String], cleared: [String]) {
+    ///
+    /// A call's microphone has its own rules, because You is a voice there and not only a name. You takes the earlier
+    /// You's name and no other. A name the whole microphone had while it was one voice stays with You: the people now
+    /// heard beside them start without one, and when that name is one of `others` (someone else in People, whose
+    /// microphone it was taken to be) nobody takes it, since the voice now known to be you isn't theirs. Once You was
+    /// one voice among several, its name follows it like any other's when this run finds no You at all.
+    static func carryNames(_ names: [String: String], from previous: [TranscriptTurn], to turns: [TranscriptTurn],
+                           others: [String] = []) -> (names: [String: String], cleared: [String]) {
         func label(_ turn: TranscriptTurn) -> String { turn.label ?? turn.speaker }
+        func microphoneVoices(_ turns: [TranscriptTurn]) -> Set<String> { Set(turns.filter { $0.track == .microphone }.map(label)) }
+        let before = microphoneVoices(previous), now = microphoneVoices(turns)
+        // You as one voice among several, then and now.
+        let wasShared = before.contains(microphoneLabel) && before.count > 1
+        let isShared = now.contains(microphoneLabel) && now.count > 1
         // The earlier voices as they were shown: a merge gave several labels one name.
         let shown = Dictionary(grouping: previous) { "\($0.track.rawValue)\u{1F}\(names[label($0)] ?? label($0))" }
         var carried: [String: String] = [:]
         for (newLabel, group) in Dictionary(grouping: turns, by: label) {
             let talk = group.reduce(0) { $0 + max(0, $1.end - $1.start) }
             guard talk > 0 else { continue }
+            let toYou = newLabel == microphoneLabel && group.contains { $0.track == .microphone }
             var best: (name: String, overlap: Double)?
             for (key, old) in shown {
                 let parts = key.split(separator: "\u{1F}", maxSplits: 1).map(String.init)
                 guard parts.count == 2, group.contains(where: { $0.track.rawValue == parts[0] }) else { continue }
+                let fromYou = old.contains { $0.track == .microphone && label($0) == microphoneLabel }
+                if toYou {
+                    guard fromYou else { continue }
+                    if isShared, !wasShared, others.contains(where: { PeopleStore.sameName($0, parts[1]) }) { continue }
+                    // One voice in either run, it's the microphone's own voice then and now, however much of the
+                    // microphone each gave it. One voice among several both times, You may be someone else this time,
+                    // so it goes by when it talked.
+                    if !(wasShared && isShared) {
+                        best = (parts[1], .infinity)
+                        continue
+                    }
+                } else if fromYou {
+                    guard wasShared, !now.contains(microphoneLabel) else { continue }
+                }
                 var overlap = 0.0
                 for turn in group {
                     for earlier in old where earlier.track == turn.track && earlier.start < turn.end && earlier.end > turn.start {
@@ -784,13 +856,7 @@ public enum MeetingPostProcessor {
     /// voices stay "Speaker N" (nothing ties a voice to a name yet); the transcript lists the participants.
     static func systemTurns(_ system: [TranscriptSegment], spans: [DiarizedSpan], remote: [String],
                             track: MeetingTrack = .system) -> [TranscriptTurn] {
-        // The last word's speaker carries across lines, so overlapped speech stays with whoever was already talking.
-        var previous: Int?
-        let attributed = system.map { segment in
-            let speakers = speakers(for: segment, spans: spans, previous: previous)
-            previous = speakers.last ?? previous
-            return (segment, speakers)
-        }
+        let attributed = attributed(system, spans: spans)
         var order: [Int: Int] = [:]
         for (_, speakers) in attributed {
             for case let speaker? in speakers where order[speaker] == nil { order[speaker] = order.count + 1 }
@@ -799,18 +865,34 @@ public enum MeetingPostProcessor {
         // A 1:1 call needs no machine learning to name the other side.
         if order.count == 1, remote.count == 1 { names = names.mapValues { _ in remote[0] } }
         let fallback = remote.count == 1 ? remote[0] : (track == .microphone ? "Speaker 1" : unknownRemoteLabel)
+        return turns(attributed, track: track) { voice in voice.flatMap { names[$0] } ?? fallback }
+    }
 
+    /// Each line with the voice of each of its words (one voice for a line without word times).
+    static func attributed(_ segments: [TranscriptSegment], spans: [DiarizedSpan]) -> [(TranscriptSegment, [Int?])] {
+        // The last word's speaker carries across lines, so overlapped speech stays with whoever was already talking.
+        var previous: Int?
+        return segments.map { segment in
+            let speakers = speakers(for: segment, spans: spans, previous: previous)
+            previous = speakers.last ?? previous
+            return (segment, speakers)
+        }
+    }
+
+    /// Turns from lines whose words have their voices: a line is cut wherever the voice changes. `label` names a voice,
+    /// or the words no voice was found for.
+    static func turns(_ attributed: [(TranscriptSegment, [Int?])], track: MeetingTrack, label name: (Int?) -> String) -> [TranscriptTurn] {
         var turns: [TranscriptTurn] = []
         for (segment, speakers) in attributed {
             guard !segment.words.isEmpty else {
-                let label = speakers.first.flatMap { $0 }.flatMap { names[$0] } ?? fallback
+                let label = name(speakers.first.flatMap { $0 })
                 turns.append(TranscriptTurn(speaker: label, label: label, track: track, start: segment.start, end: segment.end,
                                             text: segment.text, words: []))
                 continue
             }
             var segmentTurns: [TranscriptTurn] = []
             for (word, speaker) in zip(segment.words, speakers) {
-                let label = speaker.flatMap { names[$0] } ?? fallback
+                let label = name(speaker)
                 if let last = segmentTurns.last, last.label == label {
                     segmentTurns[segmentTurns.count - 1].words.append(word)
                     segmentTurns[segmentTurns.count - 1].end = word.end
@@ -965,7 +1047,11 @@ public enum MeetingPostProcessor {
                 merged[merged.count - 1].end = max(last.end, turn.end)
                 merged[merged.count - 1].text += " " + turn.text
                 merged[merged.count - 1].words += turn.words
-                if merged[merged.count - 1].label != turn.label { merged[merged.count - 1].label = nil }
+                if last.label != turn.label {
+                    // Still the microphone's own voice when a voice merged into You shares its paragraph: on a call
+                    // that label, not the lane's name, says which lane is this Mac's person.
+                    merged[merged.count - 1].label = [last.label, turn.label].contains(microphoneLabel) ? microphoneLabel : nil
+                }
             } else {
                 merged.append(turn)
             }

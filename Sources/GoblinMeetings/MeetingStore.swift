@@ -584,7 +584,8 @@ public actor MeetingStore {
         var files = MeetingTrack.allCases.flatMap { [MeetingStorage.audioFile($0), MeetingStorage.timingFile($0)] }
         files += [MeetingStorage.segmentsFile, MeetingStorage.echoCancelledSegmentsFile, MeetingStorage.sessionFile,
                   MeetingStorage.transcriptFile, MeetingStorage.attributedFile, MeetingStorage.speakersFile, MeetingStorage.muteFile,
-                  MeetingStorage.diarizationFile, MeetingStorage.reportFile, MeetingStorage.deferredFile]
+                  MeetingStorage.diarizationFile, MeetingStorage.microphoneDiarizationFile, MeetingStorage.reportFile,
+                  MeetingStorage.deferredFile]
         var written: [String] = []
         for file in files where manager.fileExists(atPath: directory.appendingPathComponent(file).path) {
             try manager.copyItem(at: directory.appendingPathComponent(file), to: destination.appendingPathComponent(file))

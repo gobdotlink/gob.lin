@@ -36,12 +36,15 @@ public struct MeetingLane: Sendable, Hashable, Identifiable {
     public var id: String { name }
     /// The displayed name, which is also what `MeetingStore.renameSpeaker` takes.
     public var name: String
-    /// This Mac's person: the microphone on a call, or the voice someone named "You" in a conversation in the room.
+    /// This Mac's person: the microphone's own voice on a call, or a voice someone named "You".
     public var isYou: Bool
     /// A voice nobody has named yet ("Speaker 3").
     public var needsName: Bool
     public var stretches: [Stretch]
     public var talkSeconds: Double
+
+    /// Heard on this Mac's microphone and never through the call: on a call, someone beside you.
+    public var isOnMicrophoneOnly: Bool { !stretches.isEmpty && stretches.allSatisfy { $0.track == .microphone } }
 }
 
 public enum MeetingTimeline {
@@ -54,13 +57,15 @@ public enum MeetingTimeline {
     }
 
     /// One lane per displayed speaker: you first, then named voices by talk time, then unnamed ones in the order the
-    /// post-processor numbered them. In person every voice is on the microphone, so only the name "You" marks you.
+    /// post-processor numbered them. On a call you're the microphone's own voice, whatever it's been named; others
+    /// heard on a shared microphone, and every voice in the room, are you only by the name "You".
     public static func lanes(_ turns: [TranscriptTurn], kind: MeetingKind = .call) -> [MeetingLane] {
         var lanes: [String: MeetingLane] = [:]
         for turn in turns.sorted(by: { $0.start < $1.start }) where turn.end >= turn.start {
             var lane = lanes[turn.speaker] ?? MeetingLane(name: turn.speaker, isYou: false, needsName: isUnnamed(turn.speaker),
                                                            stretches: [], talkSeconds: 0)
-            lane.isYou = lane.isYou || (kind == .call ? turn.track == .microphone : turn.speaker == MeetingPostProcessor.microphoneLabel)
+            lane.isYou = lane.isYou || turn.speaker == MeetingPostProcessor.microphoneLabel
+                || (kind == .call && turn.track == .microphone && turn.label == MeetingPostProcessor.microphoneLabel)
             lane.talkSeconds += turn.talkSeconds
             if var last = lane.stretches.last, last.track == turn.track, turn.start - last.end <= joinGap {
                 last.end = max(last.end, turn.end)
@@ -201,10 +206,12 @@ public enum SpeakerSuggestions {
     }
 
     /// More voices came through the call than it listed people: someone shared a laptop. Returns how many extra.
+    /// People heard beside you on this Mac's microphone didn't come through the call, whether or not it listed them.
     public static func extraVoices(lanes: [MeetingLane], participants: MeetingParticipants) -> Int {
-        let others = participants.others.count
-        guard others > 0 else { return 0 }
-        return max(0, lanes.filter { !$0.isYou }.count - others)
+        guard !participants.others.isEmpty else { return 0 }
+        let beside = Set(lanes.filter { !$0.isYou && $0.isOnMicrophoneOnly }.map { $0.name.lowercased() })
+        let others = participants.others.filter { !beside.contains($0.lowercased()) }.count
+        return max(0, lanes.filter { !$0.isYou && !$0.isOnMicrophoneOnly }.count - others)
     }
 
     /// The name given to a second voice on someone's laptop when nobody types one.

@@ -95,17 +95,20 @@ public final class MeetingSession: @unchecked Sendable {
     private var writeFailure: String?
     private let onSegment: @Sendable (TranscriptSegment) -> Void
     private let liveSpeakers: LiveSpeakers?
+    private let microphoneSpeakers: LiveSpeakers?
     private let onEvent: @Sendable (String) -> Void
     private let onProblem: @Sendable (MeetingSessionProblem) -> Void
 
     /// `recognition` is passed to the speech engine for every chunk: dictation's language, as Parakeet takes it.
     /// `onProblem` hears capture dropping out or coming back, and the live transcript falling behind. `liveSpeakers`
-    /// hears the call's track, to tell its voices apart as it records. With `cancelsEchoLive`, a call's microphone has
-    /// the call's sound taken out before the live transcript hears it, once the echo canceller is downloaded.
+    /// hears the call's track, to tell its voices apart as it records, and `microphoneSpeakers` a call's microphone, as
+    /// the live transcript gets it. With `cancelsEchoLive`, a call's microphone has the call's sound taken out before
+    /// the live transcript hears it, once the echo canceller is downloaded.
     public init(title: String, source: String, target: SystemAudioTarget, recordMicrophone: Bool = true,
                 cancelsEchoLive: Bool = false,
                 engine: any PCMSpeechEngine, recognition: RecognitionOptions = .init(language: "en"),
                 root: URL = MeetingStorage.root, defaults: UserDefaults = .standard, liveSpeakers: LiveSpeakers? = nil,
+                microphoneSpeakers: LiveSpeakers? = nil,
                 onSegment: @escaping @Sendable (TranscriptSegment) -> Void,
                 onEvent: @escaping @Sendable (String) -> Void,
                 onProblem: @escaping @Sendable (MeetingSessionProblem) -> Void = { _ in }) throws {
@@ -119,6 +122,7 @@ public final class MeetingSession: @unchecked Sendable {
         self.recognition = recognition
         self.onSegment = onSegment
         self.liveSpeakers = target == .none ? nil : liveSpeakers
+        self.microphoneSpeakers = target == .none ? nil : microphoneSpeakers
         self.onEvent = onEvent
         self.onProblem = onProblem
         info = MeetingSessionInfo(title: title, source: source, target: target.description, startedAt: now)
@@ -205,8 +209,15 @@ public final class MeetingSession: @unchecked Sendable {
         // An in-person conversation has no call audio: no tap and no system track.
         let inPerson = target == .none
         let submit: @Sendable (SpeechChunk) -> Void = { transcriber.submit($0) }
-        let echo = cancelsEchoLive && !inPerson ? LiveEchoCanceller(load: LiveEchoCanceller.localVQE, log: event, onChunk: submit) : nil
-        let microphoneSamples: @Sendable ([Float]) -> Void = { echo?.microphone($0) }
+        // The microphone's voices are told apart from what the live transcript hears: without the call's sound when
+        // that's being taken out, so the call's own voices on the loudspeakers aren't taken for people in the room.
+        var toSpeakers: (@Sendable ([Float]) -> Void)?
+        if let microphoneSpeakers { toSpeakers = { samples in microphoneSpeakers.append(samples) } }
+        let echo = cancelsEchoLive && !inPerson
+            ? LiveEchoCanceller(load: LiveEchoCanceller.localVQE, log: event, onSamples: toSpeakers, onChunk: submit) : nil
+        let microphoneSamples: @Sendable ([Float]) -> Void = { [toSpeakers] samples in
+            if let echo { echo.microphone(samples) } else { toSpeakers?(samples) }
+        }
         let microphone = try TrackRecorder(track: .microphone, directory: directory, sessionStart: hostStart,
                                            onChunk: echo == nil ? submit : nil, onSamples: microphoneSamples,
                                            onEvent: event, onWriteFailure: writeFailed)
@@ -293,6 +304,7 @@ public final class MeetingSession: @unchecked Sendable {
         }
         // The last lines have their captions; the after-call pass decides who said them, with its own model.
         liveSpeakers?.stop()
+        microphoneSpeakers?.stop()
         saveInfo()
         lock.withLock {
             closed = true

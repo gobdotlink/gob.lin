@@ -56,6 +56,8 @@ public enum MeetingStorage {
     public static let transcriptMarkdownFile = "transcript.md"
     public static let reportFile = "postprocess.json"
     public static let diarizationFile = "diarization.json"
+    /// The speaker model's spans on a call's microphone, written only when more than one person was heard on it.
+    public static let microphoneDiarizationFile = "diarization-microphone.json"
     /// Diarized label → the name a person gave that speaker.
     public static let speakersFile = "speakers.json"
     /// Voiceprints of the meeting's voices and what People matched them to, kept only while Remember voices is on.

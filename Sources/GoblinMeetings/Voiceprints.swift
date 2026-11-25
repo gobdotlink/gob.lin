@@ -310,10 +310,12 @@ public enum VoiceStretches {
         return result
     }
 
+    /// `spans` are the speaker model's, for each track it listened to: the call's, in the room the microphone, and a
+    /// call's microphone too when it was shared.
     public static func voices(in turns: [TranscriptTurn], audio: [MeetingTrack: [Float]], inPerson: Bool,
-                              spans: [DiarizedSpan] = [], microphoneExcluded: [ClosedRange<Double>] = [],
+                              spans: [MeetingTrack: [DiarizedSpan]] = [:], microphoneExcluded: [ClosedRange<Double>] = [],
                               embed: VoiceprintEmbed) async throws -> [MeetingVoice] {
-        let overlapping = overlaps(spans)
+        let overlapping = spans.mapValues(overlaps)
         var seen: [(String, MeetingTrack)] = []
         for turn in turns where !seen.contains(where: { $0.0 == (turn.label ?? turn.speaker) && $0.1 == turn.track }) {
             seen.append((turn.label ?? turn.speaker, turn.track))
@@ -324,10 +326,8 @@ public enum VoiceStretches {
             try Task.checkCancellation()
             guard let samples = audio[track], !samples.isEmpty else { continue }
             // The mic hears the call's playback; the call's track never hears the mic.
-            // The diarizer listened to the call's track, or in the room to the mic.
-            let diarized: MeetingTrack = inPerson ? .microphone : .system
             let pieces = pieces(of: label, in: turns, track: track, crossTrack: !inPerson && track == .microphone,
-                                overlaps: (track == diarized ? overlapping : []) + (track == .microphone ? microphoneExcluded : []))
+                                overlaps: (overlapping[track] ?? []) + (track == .microphone ? microphoneExcluded : []))
             let seconds = pieces.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
             guard seconds >= minimumSeconds, let longest = pieces.max(by: { ($0.upperBound - $0.lowerBound) < ($1.upperBound - $1.lowerBound) }) else {
                 continue
@@ -357,8 +357,13 @@ extension VoiceStretches {
             let file = directory.appendingPathComponent(MeetingStorage.audioFile(track))
             if FileManager.default.fileExists(atPath: file.path) { audio[track] = try WAVFile.readSamples(file) }
         }
-        let spans = (try? Data(contentsOf: directory.appendingPathComponent(MeetingStorage.diarizationFile)))
-            .flatMap { try? JSONDecoder().decode([DiarizedSpan].self, from: $0) } ?? []
+        let inPerson = session?.kind == .inPerson
+        func saved(_ file: String) -> [DiarizedSpan]? {
+            (try? Data(contentsOf: directory.appendingPathComponent(file))).flatMap { try? JSONDecoder().decode([DiarizedSpan].self, from: $0) }
+        }
+        var spans: [MeetingTrack: [DiarizedSpan]] = [:]
+        spans[inPerson ? .microphone : .system] = saved(MeetingStorage.diarizationFile)
+        if !inPerson { spans[.microphone] = saved(MeetingStorage.microphoneDiarizationFile) }
         // What the mic heard while muted or dictating never went to the meeting, so it's not this voice talking to it.
         let end = Double(audio.values.map(\.count).max() ?? 0) / MeetingAudio.sampleRate
         var dictations = MeetingPostProcessor.readDictations(directory)
@@ -367,7 +372,7 @@ extension VoiceStretches {
         }
         let excluded = MeetingPostProcessor.mutedSpans(directory.appendingPathComponent(MeetingStorage.muteFile), end: end)
             + (dictations ?? [])
-        return try await voices(in: turns, audio: audio, inPerson: session?.kind == .inPerson, spans: spans,
+        return try await voices(in: turns, audio: audio, inPerson: inPerson, spans: spans,
                                 microphoneExcluded: excluded, embed: embed)
     }
 }

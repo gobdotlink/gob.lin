@@ -173,9 +173,12 @@ public final class PeopleStore: Sendable {
             for index in people.indices { people[index].samples.removeAll { $0.meetingID == meetingID } }
             for voice in voices where !declined.contains(Self.key(meetingID, voice.label)) {
                 let shown = names[voice.label] ?? voice.label
-                // On a call the mic is the person at this Mac, whatever its lane is called ("Will", a nickname); in the
-                // room it's whichever voice someone named You.
-                let isMe = (!inPerson && voice.track == .microphone) || shown == MeetingPostProcessor.microphoneLabel
+                // On a call the mic's own voice is the person at this Mac, whatever its lane is called ("Will", a
+                // nickname), unless that's someone else already in People: the mic was theirs that day. Anyone else
+                // heard on a shared mic, and every voice in the room, is whoever they were named, You included.
+                let yours = !inPerson && voice.track == .microphone && voice.label == MeetingPostProcessor.microphoneLabel
+                    && !people.contains { !$0.isMe && Self.sameName($0.name, shown) }
+                let isMe = yours || shown == MeetingPostProcessor.microphoneLabel
                 guard isMe || Self.isPersonName(shown) else { continue }
                 var sample = VoiceSample(meetingID: meetingID, meetingTitle: title, label: voice.label, track: voice.track,
                                          heardAt: startedAt, seconds: voice.seconds, clipStart: voice.clipStart, clipEnd: voice.clipEnd,
@@ -210,7 +213,8 @@ public final class PeopleStore: Sendable {
                 }
                 // Your voice is learned from every call's mic without anyone confirming it, so a mic track that sounds
                 // like none of your samples (someone else at the Mac, audio played into the mic) isn't taken as you.
-                if isMe, !Self.fitsYourVoice(sample, people[index]) { continue }
+                // A voice someone named You is taken at their word.
+                if yours, !Self.fitsYourVoice(sample, people[index]) { continue }
                 people[index].samples.append(sample)
                 if people[index].samples.count > Self.samplesPerPerson {
                     let sorted = people[index].samples.sorted { $0.heardAt > $1.heardAt }
@@ -340,7 +344,7 @@ public enum VoiceMatching {
     public static let sameVoiceThreshold: Float = 0.77
 
     /// The best person for each voice, by its closest sample. `candidates` limits who a call's voices can be: on a call
-    /// with a participant list only those people, never you for a remote voice. Each person names at most one voice
+    /// with a participant list only those people for a remote voice, and never you. Each person names at most one voice
     /// per track unless two voices both clear the bar: the diarizer splitting someone in two is more common than two
     /// people sounding alike.
     public static func match(_ voices: [MeetingVoice], people: [Person], participants: MeetingParticipants,
@@ -348,13 +352,17 @@ public enum VoiceMatching {
         let invited = Set(participants.all.map { $0.lowercased() })
         var result: [String: MeetingVoices.Match] = [:]
         for voice in voices {
-            // On a call the mic is you already; only remote voices and voices in the room are matched.
-            guard inPerson || voice.track == .system else { continue }
+            // On a call the mic's own voice is you already; remote voices, voices in the room and anyone else heard on
+            // a shared mic are matched.
+            let besideYou = !inPerson && voice.track == .microphone
+            guard !besideYou || voice.label != MeetingPostProcessor.microphoneLabel else { continue }
             let candidates = people.filter { person in
                 guard !person.samples.isEmpty else { return false }
                 if inPerson { return true }
+                // Which of a call's voices is you was settled from the whole microphone, not one closest sample.
                 if person.isMe { return false }
-                return invited.isEmpty || invited.contains(person.name.lowercased())
+                // Someone beside you needn't have joined the call themselves.
+                return besideYou || invited.isEmpty || invited.contains(person.name.lowercased())
             }
             let scored = candidates.map { person in
                 (person, person.samples.map { Voiceprint.similarity($0.embedding, voice.embedding) }.max() ?? -1)

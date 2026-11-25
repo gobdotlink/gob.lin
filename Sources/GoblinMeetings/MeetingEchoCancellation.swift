@@ -132,9 +132,37 @@ extension MeetingPostProcessor {
     /// Only the live lines are used when it's off, or has no canceller or speech model, or the meeting was in person,
     /// or it fails (which is logged; cancellation still throws). With either track's audio deleted after an earlier run,
     /// the lines that run wrote are used again.
+    ///
+    /// With `tellingVoicesApart`, the speaker model also listens to the microphone with the call's sound taken out, while
+    /// it's transcribed, so the call's own voices coming out of the loudspeakers aren't taken for people in the room.
+    /// `voices` is nil when it didn't, or couldn't.
     static func echoCancelledMicrophone(directory: URL, microphone: [Float], system: [Float], session: MeetingSessionInfo?,
-                                        options: MeetingPostProcessOptions,
-                                        log: @Sendable (String) -> Void) async throws -> EchoCancelledMicrophone {
+                                        options: MeetingPostProcessOptions, tellingVoicesApart: Bool = false,
+                                        log: @Sendable (String) -> Void) async throws -> (lines: EchoCancelledMicrophone, voices: [DiarizedSpan]?) {
+        var voices: [DiarizedSpan]?
+        let lines = try await echoCancelledMicrophone(directory: directory, microphone: microphone, system: system, session: session,
+                                                      options: options, tellingVoicesApart: tellingVoicesApart, voices: &voices, log: log)
+        return (lines, voices)
+    }
+
+    /// The speaker model's spans on a call's microphone; nil when it can't run, which only leaves the microphone one
+    /// voice, as it always was.
+    static func microphoneVoices(_ samples: [Float], options: MeetingPostProcessOptions,
+                                 log: @Sendable (String) -> Void) async throws -> [DiarizedSpan]? {
+        guard samples.count > Int(MeetingAudio.sampleRate) else { return nil }
+        do {
+            return try await options.diarizer(samples, log).spans.sorted { $0.start < $1.start }
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw error }
+            log("microphone voices: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func echoCancelledMicrophone(directory: URL, microphone: [Float], system: [Float], session: MeetingSessionInfo?,
+                                                options: MeetingPostProcessOptions, tellingVoicesApart: Bool,
+                                                voices: inout [DiarizedSpan]?,
+                                                log: @Sendable (String) -> Void) async throws -> EchoCancelledMicrophone {
         let url = directory.appendingPathComponent(MeetingStorage.echoCancelledSegmentsFile)
         guard options.cancelsEcho, session?.kind != .inPerson else { return .notRun }
         guard !microphone.isEmpty, !system.isEmpty else {
@@ -162,7 +190,10 @@ extension MeetingPostProcessor {
             }
             let chunks = SpeechChunker.chunks(of: cleaned, track: .microphone)
             let transcribing = Date()
+            let audio = cleaned
+            async let heard = tellingVoicesApart ? microphoneVoices(audio, options: options, log: log) : nil
             let segments = try await transcribe(chunks, RecognitionOptions(language: session?.language)).sorted { $0.start < $1.start }
+            voices = try await heard
             let transcribeSeconds = Date().timeIntervalSince(transcribing)
             let encoder = JSONEncoder()
             try segments.map { String(decoding: try encoder.encode($0), as: UTF8.self) + "\n" }.joined()
@@ -208,13 +239,15 @@ final class LiveEchoCanceller: @unchecked Sendable {
     /// When the call's track last handed over audio, and how many of its pieces the worker hasn't read yet.
     private let system = OSAllocatedUnfairLock(initialState: (arrived: ContinuousClock.now, queued: 0))
 
+    /// `onSamples` hears the microphone as the live transcript gets it, in order from the session's first sample: with
+    /// the call's sound taken out, or as heard when it can't be.
     init(load: @escaping @Sendable () async throws -> LiveEchoStream?, log: @escaping @Sendable (String) -> Void,
-         onChunk: @escaping @Sendable (SpeechChunk) -> Void) {
+         onSamples: (@Sendable ([Float]) -> Void)? = nil, onChunk: @escaping @Sendable (SpeechChunk) -> Void) {
         let (stream, inputs) = AsyncStream.makeStream(of: Input.self)
         self.inputs = inputs
         let system = system
         worker = Task {
-            var work = Work(log: log, onChunk: onChunk)
+            var work = Work(log: log, onChunk: onChunk, onSamples: onSamples)
             do {
                 work.stream = try await load()
                 log(work.stream == nil ? "live echo cancellation off: the echo canceller isn't downloaded yet" : "live echo cancellation on")
@@ -257,6 +290,7 @@ final class LiveEchoCanceller: @unchecked Sendable {
     private struct Work {
         let log: @Sendable (String) -> Void
         let onChunk: @Sendable (SpeechChunk) -> Void
+        let onSamples: (@Sendable ([Float]) -> Void)?
         var stream: LiveEchoStream?
         var pairing = EchoPairing()
         var chunker = SpeechChunker(track: .microphone)
@@ -295,7 +329,9 @@ final class LiveEchoCanceller: @unchecked Sendable {
 
         /// Clamped as the recorder clamps what it writes: the speech model rejects samples past ±1.
         mutating func emit(_ samples: [Float]) {
-            for chunk in chunker.feed(samples.map { $0.isFinite ? max(-1, min(1, $0)) : 0 }) { onChunk(chunk) }
+            let clamped = samples.map { $0.isFinite ? max(-1, min(1, $0)) : 0 }
+            onSamples?(clamped)
+            for chunk in chunker.feed(clamped) { onChunk(chunk) }
         }
     }
 

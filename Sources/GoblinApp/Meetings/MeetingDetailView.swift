@@ -343,7 +343,9 @@ struct MeetingDetailView: View {
     /// Two voices become one. When someone on the call has no voice yet, the line saying so offers them instead:
     /// two voices the diarizer kept apart are more likely that person than the same one twice.
     private func merge(_ lane: MeetingLane, into other: MeetingLane) {
-        let unmatched = inPerson ? [] : SpeakerSuggestions.unmatched(lanes: lanes, participants: detail?.participants ?? MeetingParticipants())
+        // A voice heard beside you didn't come through the call, so it isn't anyone the call listed.
+        let unmatched = inPerson || lane.isOnMicrophoneOnly ? []
+            : SpeakerSuggestions.unmatched(lanes: lanes, participants: detail?.participants ?? MeetingParticipants())
         let warning = SpeakerSuggestions.mergeWarning(unmatched: unmatched)
         change("Merged \(lane.name) into \(other.name).", missing: unmatched.count == 1 ? unmatched[0] : nil,
                mergedFrom: warning == nil ? nil : lane.name, warning: warning) {

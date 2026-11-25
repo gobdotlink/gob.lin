@@ -57,11 +57,15 @@ struct LiveSpanBuilder {
     private func time(_ frame: Int) -> Double { origin + Double(frame) * Self.frameSeconds }
 }
 
-/// Who's talking on a call's track as it records. The streaming speaker model runs on the call audio; each voice is
-/// named from People once it has said enough, otherwise it's "Speaker N" in the order the voices came in, as after the
-/// call. The after-call pass decides the names that are kept; these are only shown while recording.
+/// Who's talking on one of a call's tracks as it records. The streaming speaker model runs on the track's audio; each
+/// voice is named from People once it has said enough, otherwise it's "Speaker N" in the order the voices came in, as
+/// after the call. The after-call pass decides the names that are kept; these are only shown while recording.
+///
+/// On the call's track every voice is someone else. On the microphone's every voice is the person at this Mac until
+/// its voiceprint says otherwise (`MicrophoneVoices`), so a call taken alone never shows anyone but You.
 public final class LiveSpeakers: @unchecked Sendable {
     public struct Snapshot: Sendable, Equatable {
+        public var track: MeetingTrack = .system
         /// The model's first second: the audio before it was let go while the model loaded, so it's never placed.
         public var placedFrom: Double
         /// A line ending after this isn't placed yet.
@@ -72,6 +76,17 @@ public final class LiveSpeakers: @unchecked Sendable {
         /// Each voice's "Speaker N", for showing while Remember voices is off: the switch can turn off after a snapshot
         /// with names from People is sent, and whoever shows it checks the switch then.
         public var numbered: [Int: String] = [:]
+        /// The voices in the order they came in, for numbering both tracks' voices together.
+        public var arrival: [Int] = []
+        /// The names People gave, without the numbered ones.
+        public var known: [Int: String] = [:]
+        /// On the microphone's track: the voices that aren't the person at this Mac, each with the first voice of
+        /// whoever it is (one person can be heard as two voices). Every other voice of the track is you. Empty on the
+        /// call's track, where nobody is.
+        public var besideYou: [Int: Int] = [:]
+        /// On the microphone's track: the voices whose voiceprint says they're the person at this Mac. Empty while
+        /// nobody on a shared microphone is known to be.
+        public var you: Set<Int> = []
     }
 
     /// Where a line stands with the speaker model.
@@ -98,6 +113,7 @@ public final class LiveSpeakers: @unchecked Sendable {
     static let behindSeconds = 10.0
 
     private let queue = DispatchQueue(label: "gob.lin.meetings.live-speakers", qos: .utility)
+    private let track: MeetingTrack
     private let voices: MeetingVoiceOptions?
     private let log: @Sendable (String) -> Void
     private let onUpdate: @Sendable (Snapshot) -> Void
@@ -125,10 +141,16 @@ public final class LiveSpeakers: @unchecked Sendable {
     /// one mustn't undo a newer one.
     private var appliedSeconds: [Int: Double] = [:]
     private var namingNow = 0
+    /// The microphone's track: each voice's newest voiceprint, and what they say about who isn't you.
+    private var prints: [Int: [Float]] = [:]
+    private var besideYou: [Int: Int] = [:]
+    private var yourVoices: Set<Int> = []
 
-    /// `voices` names voices from People while its switch is on; without it they stay "Speaker N".
-    public init(voices: MeetingVoiceOptions?, log: @escaping @Sendable (String) -> Void,
+    /// `voices` names voices from People while its switch is on; without it they stay "Speaker N", and on the
+    /// microphone's track everyone stays you.
+    public init(track: MeetingTrack = .system, voices: MeetingVoiceOptions?, log: @escaping @Sendable (String) -> Void,
                 onUpdate: @escaping @Sendable (Snapshot) -> Void) {
+        self.track = track
         self.voices = voices
         self.log = log
         self.onUpdate = onUpdate
@@ -155,7 +177,7 @@ public final class LiveSpeakers: @unchecked Sendable {
         queue.async { self.folder = folder }
     }
 
-    /// The call's track at 16 kHz from the session's start, gaps already filled with silence.
+    /// The track at 16 kHz from the session's start, gaps already filled with silence.
     public func append(_ samples: [Float]) {
         queue.async { [self] in
             guard !stopped, !failed else { return }
@@ -212,6 +234,7 @@ public final class LiveSpeakers: @unchecked Sendable {
         waiting = []
         recent = []
         speech = [:]
+        prints = [:]
     }
 
     private func run() {
@@ -290,15 +313,17 @@ public final class LiveSpeakers: @unchecked Sendable {
     /// Matches a voice against People with the after-call rules; a name, once given, stays unless someone else wins.
     private func name(_ slot: Int, from samples: [Float], seconds: Double, heardBy: Double) {
         guard let voices else { return }
-        let folder = folder
+        let folder = folder, track = track
         namingNow += 1
         Task.detached(priority: .utility) { [self] in
             var match: MeetingVoices.Match?
+            var print: [Float]?, yours: [[Float]] = []
             do {
                 let embedding = try await voices.embed(samples)
                 // Remember voices may have been turned off, and every voice forgotten, while that ran.
                 if voices.enabled() {
-                    let voice = MeetingVoice(label: "\(slot)", track: .system, seconds: seconds, clipStart: 0, clipEnd: 0,
+                    // The label is only a key here: no voice of the microphone's track is taken for you by it.
+                    let voice = MeetingVoice(label: "\(slot)", track: track, seconds: seconds, clipStart: 0, clipEnd: 0,
                                              embedding: embedding)
                     let people = voices.people.people().map { person in
                         var person = person
@@ -307,26 +332,55 @@ public final class LiveSpeakers: @unchecked Sendable {
                     }
                     let participants = folder.map(MeetingParticipants.read) ?? MeetingParticipants()
                     match = VoiceMatching.match([voice], people: people, participants: participants, inPerson: false)["\(slot)"]
+                    print = embedding
+                    yours = people.first(where: \.isMe)?.samples.map(\.embedding) ?? []
                     // Without the person's name: a log line outlives Turn Off and Forget.
-                    log(String(format: "live voiceprint: voice %d, %.0f s of speech by %.0f s: %@", slot, seconds, heardBy,
-                               match.map { String(format: "a person at %.2f%@", $0.similarity, $0.named ? "" : " (not named)") } ?? "nobody close"))
+                    let you = track == .microphone
+                        ? MicrophoneVoices.similarityToYou(embedding, samples: yours).map { String(format: ", you at %.2f", $0) } ?? "" : ""
+                    log(String(format: "live voiceprint: %@ voice %d, %.0f s of speech by %.0f s: %@%@", track.rawValue, slot, seconds, heardBy,
+                               match.map { String(format: "a person at %.2f%@", $0.similarity, $0.named ? "" : " (not named)") } ?? "nobody close",
+                               you))
                 }
             } catch {
                 log("live voiceprint: \(error.localizedDescription)")
             }
-            let found = match
+            let found = match, embedding = print, yourSamples = yours
             queue.async { [self] in
                 namingNow -= 1
+                guard !stopped, voices.enabled() else { return }
                 // A contact renamed "Them", "You" or "Speaker 2" in People would read as a side or a placeholder.
-                guard !stopped, voices.enabled(), let match = found, match.named, PeopleStore.isPersonName(match.name) else { return }
-                namedFrom[match.name] = min(namedFrom[match.name] ?? heardBy, heardBy)
-                guard seconds >= appliedSeconds[slot] ?? 0 else { return }
+                let name = found.flatMap { $0.named && PeopleStore.isPersonName($0.name) ? $0.name : nil }
+                if let name { namedFrom[name] = min(namedFrom[name] ?? heardBy, heardBy) }
+                guard seconds >= appliedSeconds[slot] ?? 0, name != nil || (track == .microphone && embedding != nil) else { return }
                 appliedSeconds[slot] = seconds
-                guard named[slot] != match.name else { return }
-                named[slot] = match.name
-                emit()
+                var changed = false
+                if let name, named[slot] != name {
+                    named[slot] = name
+                    changed = true
+                }
+                if track == .microphone, let embedding {
+                    prints[slot] = embedding
+                    changed = sortMicrophone(yourSamples) || changed
+                }
+                if changed { emit() }
             }
         }
+    }
+
+    /// Which of the microphone's voices aren't you, from the voiceprints so far. Returns whether that changed.
+    private func sortMicrophone(_ yourSamples: [[Float]]) -> Bool {
+        let sorted = MicrophoneVoices.sort(prints.keys.sorted().map { .init(id: $0, embedding: prints[$0] ?? []) }, yourSamples: yourSamples,
+                                           live: true)
+        var beside: [Int: Int] = [:]
+        for group in sorted.others { for voice in group { beside[voice] = group[0] } }
+        guard beside != besideYou || sorted.you != yourVoices else { return false }
+        yourVoices = sorted.you
+        if Set(beside.values) != Set(besideYou.values) {
+            log("live microphone: \(Set(beside.values).count) \(Set(beside.values).count == 1 ? "person" : "people") beside "
+                + (sorted.you.isEmpty ? "nobody known to be you" : "you"))
+        }
+        besideYou = beside
+        return true
     }
 
     private func emit() {
@@ -334,12 +388,23 @@ public final class LiveSpeakers: @unchecked Sendable {
         // With Remember voices off, names from People aren't shown, including ones given before it was turned off.
         let fromPeople = voices?.enabled() == true ? named : [:]
         var names: [Int: String] = [:], numbered: [Int: String] = [:]
-        for (index, slot) in builder.arrival.enumerated() {
-            numbered[slot] = "Speaker \(index + 1)"
-            names[slot] = fromPeople[slot] ?? numbered[slot]
+        guard track == .microphone else {
+            for (index, slot) in builder.arrival.enumerated() {
+                numbered[slot] = "Speaker \(index + 1)"
+                names[slot] = fromPeople[slot] ?? numbered[slot]
+            }
+            onUpdate(Snapshot(placedFrom: builder.origin, placedUntil: builder.decidedUntil, spans: builder.spans, names: names,
+                              numbered: numbered, arrival: builder.arrival, known: fromPeople))
+            return
         }
-        onUpdate(Snapshot(placedFrom: builder.origin, placedUntil: builder.decidedUntil, spans: builder.spans, names: names,
-                          numbered: numbered))
+        // Someone beside you is whoever any of their voices was named; whoever shows them numbers the rest.
+        let beside = voices?.enabled() == true ? besideYou : [:]
+        for (voice, person) in beside {
+            names[voice] = beside.filter { $0.value == person }.keys.sorted().compactMap { fromPeople[$0] }.first
+        }
+        onUpdate(Snapshot(track: .microphone, placedFrom: builder.origin, placedUntil: builder.decidedUntil, spans: builder.spans,
+                          names: names, arrival: builder.arrival, known: names, besideYou: beside,
+                          you: beside.isEmpty ? [] : yourVoices))
     }
 
     /// Appends to a rolling buffer, letting the oldest go in steps so it isn't copied on every append.
@@ -353,10 +418,77 @@ public final class LiveSpeakers: @unchecked Sendable {
     }
 }
 
+/// What the live lines call each voice the speaker models have placed, on both of a call's tracks: a name People gave,
+/// or "Speaker N" in the order the voices were first told apart across the two, so the call's voices and the people
+/// beside you never share a number. The microphone's own voice has no name here: it's You.
+public struct LiveVoiceNames: Sendable {
+    public struct Voice: Hashable, Sendable {
+        public var track: MeetingTrack
+        public var voice: Int
+
+        public init(track: MeetingTrack, voice: Int) {
+            self.track = track
+            self.voice = voice
+        }
+    }
+
+    private var snapshots: [MeetingTrack: LiveSpeakers.Snapshot] = [:]
+    private var numbers: [Voice: Int] = [:]
+    /// The microphone's voices that are the call's own sound coming out of the loudspeakers, not someone in the room:
+    /// they stay with You, as every microphone line was before its voices were told apart.
+    private var callSound: Set<Int> = []
+
+    public init() {}
+
+    public func snapshot(_ track: MeetingTrack) -> LiveSpeakers.Snapshot? { snapshots[track] }
+
+    /// A track's newest snapshot. Its voices take the next numbers as they're first told apart: the call's as they
+    /// come in, someone beside you once they're known not to be you. A number, once given, is never given again.
+    public mutating func take(_ snapshot: LiveSpeakers.Snapshot) {
+        snapshots[snapshot.track] = snapshot
+        if let microphone = snapshots[.microphone], !microphone.besideYou.isEmpty {
+            callSound = MeetingPostProcessor.callSoundVoices(microphone.spans, system: snapshots[.system]?.spans ?? [])
+        }
+        var arrived = snapshot.arrival
+        if snapshot.track == .microphone {
+            // A person is numbered by their first voice, once any voice of theirs is really in the room.
+            let beside = Set(beside(snapshot).values)
+            arrived = arrived.filter(beside.contains)
+        }
+        for voice in arrived.map({ Voice(track: snapshot.track, voice: $0) }) where numbers[voice] == nil {
+            numbers[voice] = numbers.count + 1
+        }
+    }
+
+    /// The microphone's voices that are someone beside you, each with the first voice of whoever it is: the snapshot's,
+    /// without the call's own sound. When that leaves one person, no voice known to be you and nobody People knows,
+    /// the call was taken alone before any sample of you existed, and that person is you.
+    private func beside(_ snapshot: LiveSpeakers.Snapshot) -> [Int: Int] {
+        let beside = snapshot.besideYou.filter { !callSound.contains($0.key) }
+        let alone = Set(beside.values).count == 1 && snapshot.you.isSubset(of: callSound)
+            && !beside.keys.contains { snapshot.known[$0] != nil }
+        return alone ? [:] : beside
+    }
+
+    /// The name of a placed voice, or nil for the microphone's own voice (and a voice with no snapshot yet). With
+    /// Remember voices turned off since the snapshot was sent, the call's voices are only "Speaker N" and everyone on
+    /// the microphone is you again.
+    public func name(_ voice: Voice, remembersVoices: Bool) -> String? {
+        guard let snapshot = snapshots[voice.track] else { return nil }
+        var numbered = voice
+        if voice.track == .microphone {
+            guard remembersVoices, let person = beside(snapshot)[voice.voice] else { return nil }
+            numbered.voice = person
+        }
+        if remembersVoices, let name = snapshot.known[voice.voice] { return name }
+        return numbers[numbered].map { "Speaker \($0)" }
+    }
+}
+
 // MARK: Replaying a recorded call
 
 extension LiveSpeakers {
-    /// The live speakers' final attribution of a recorded call's saved call-track lines, next to the names the
+    /// The live speakers' final attribution of a recorded call's saved lines on one track, next to the names the
     /// after-call pass gave them. It's the end state, after every voiceprint has finished, not a moment of the call.
     public struct Replay: Codable, Sendable {
         public struct Line: Codable, Sendable {
@@ -382,16 +514,24 @@ extension LiveSpeakers {
     }
 
     /// Plays a processed call's track through the live speakers as fast as they run, then places its saved lines.
-    public static func replay(_ directory: URL, voices: MeetingVoiceOptions?,
+    /// The microphone's track is played with the call's sound taken out by `echoCanceller`, as the live transcript
+    /// hears it, when there is one.
+    public static func replay(_ directory: URL, track: MeetingTrack = .system, voices: MeetingVoiceOptions?,
+                              echoCanceller: MeetingEchoCanceller? = nil,
                               log: @escaping @Sendable (String) -> Void = { _ in }) async throws -> Replay {
-        let samples = try WAVFile.readSamples(directory.appendingPathComponent("\(MeetingTrack.system.fileStem).wav"))
+        var samples = try WAVFile.readSamples(directory.appendingPathComponent(MeetingStorage.audioFile(track)))
+        if track == .microphone, let echoCanceller {
+            var reference = try WAVFile.readSamples(directory.appendingPathComponent(MeetingStorage.audioFile(.system)))
+            reference = Array(reference.prefix(samples.count)) + [Float](repeating: 0, count: max(0, samples.count - reference.count))
+            samples = try await echoCanceller(samples, reference, log).map { $0.isFinite ? max(-1, min(1, $0)) : 0 }
+        }
         let segments = try MeetingPostProcessor.loadSegments(directory.appendingPathComponent(MeetingStorage.segmentsFile))
-            .filter { $0.track == .system }
+            .filter { $0.track == track }
         let turns = try JSONDecoder.meeting.decode([TranscriptTurn].self,
                                                    from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.transcriptFile)))
-            .filter { $0.track == .system }
+            .filter { $0.track == track }
         let latest = Mutex<Snapshot?>(nil)
-        let live = LiveSpeakers(voices: voices, log: log) { snapshot in latest.withLock { $0 = snapshot } }
+        let live = LiveSpeakers(track: track, voices: voices, log: log) { snapshot in latest.withLock { $0 = snapshot } }
         defer { live.stop() }
         live.record(in: directory)
         let began = Date()
@@ -411,12 +551,27 @@ extension LiveSpeakers {
         let namedAt = await live.onQueue { $0.namedFrom }
 
         guard let snapshot = latest.withLock({ $0 }) else { throw ReplayError("The live speaker model placed nothing.") }
-        let lines = segments.map { segment in
+        // Every voice of the microphone that isn't someone beside you is one voice, You. The call's own voices are
+        // known by when the after-call pass heard them talk, standing in for the call's live speaker model.
+        var names = LiveVoiceNames()
+        if track == .microphone,
+           let data = try? Data(contentsOf: directory.appendingPathComponent(MeetingStorage.diarizationFile)),
+           let call = try? JSONDecoder().decode([DiarizedSpan].self, from: data) {
+            names.take(Snapshot(placedFrom: 0, placedUntil: .infinity, spans: call, names: [:]))
+        }
+        names.take(snapshot)
+        let you = -1
+        let lines = segments.map { segment -> (Int?, Replay.Line) in
             let placement = placement(of: segment, in: snapshot)
-            let voice: Int? = if case .voice(let voice) = placement { voice } else { nil }
+            var voice: Int? = if case .voice(let voice) = placement { voice } else { nil }
+            var name = voice.flatMap { names.name(.init(track: track, voice: $0), remembersVoices: true) } ?? "Them"
+            if track == .microphone {
+                let beside = voice.flatMap { names.name(.init(track: track, voice: $0), remembersVoices: true) }
+                name = beside ?? MeetingPostProcessor.microphoneLabel
+                voice = beside == nil ? you : voice.flatMap { snapshot.besideYou[$0] }
+            }
             let afterCall = turns.filter { overlap($0, segment) > 0 }.max { overlap($0, segment) < overlap($1, segment) }?.speaker
-            return (voice, Replay.Line(start: segment.start, live: voice.flatMap { snapshot.names[$0] } ?? "Them",
-                                       afterCall: afterCall, text: segment.text))
+            return (voice, Replay.Line(start: segment.start, live: name, afterCall: afterCall, text: segment.text))
         }
         let scored = lines.filter { $0.1.afterCall != nil }
         // Each live voice paired with one after-call voice, most shared lines first.
@@ -430,7 +585,9 @@ extension LiveSpeakers {
             pairedNames.insert(pair.afterCall)
             same += count
         }
-        let named = scored.map { $0.1 }.filter { !MeetingTimeline.isUnnamed($0.live) && $0.live != "Them" }
+        let named = scored.map { $0.1 }.filter {
+            !MeetingTimeline.isUnnamed($0.live) && $0.live != "Them" && $0.live != MeetingPostProcessor.microphoneLabel
+        }
         return Replay(callSeconds: Double(samples.count) / MeetingAudio.sampleRate, replaySeconds: replaySeconds,
                       namedAt: namedAt, sameVoiceShare: scored.isEmpty ? 0 : Double(same) / Double(scored.count),
                       namedRight: named.filter { $0.live == $0.afterCall }.count,

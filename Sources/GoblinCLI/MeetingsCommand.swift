@@ -9,10 +9,11 @@ enum MeetingsCommand {
     static let usage = """
     Usage: goblin meetings list [--root <dir>]
            goblin meetings show <id> [--markdown] [--root <dir>]
-           goblin meetings process <folder> [--preset offline|fast32|fast128] [--no-echo-cancel] [--verbose]
+           goblin meetings process <folder> [--preset offline|fast32|fast128] [--no-echo-cancel] [--remember-voices]
+             [--verbose]
            goblin meetings export-fixture <id> <destination> [--root <dir>]
            goblin meetings voices <folder>
-           goblin meetings live-names <folder>
+           goblin meetings live-names <folder> [--microphone]
            goblin meetings learn-voices [--root <dir>]
            goblin meetings notes <id> [--tool codex|claude] [--notes-model <id>] [--thinking <level>] [--template <id>]
              [--style concise|detailed] [--out <file>] [--print-prompt] [--dictionary <file>] [--root <dir>] [--verbose]
@@ -20,6 +21,8 @@ enum MeetingsCommand {
       notes writes notes.json into the meeting, or only to --out when given; --print-prompt sends nothing.
            goblin meetings simulate --system <audio> [--mic <audio>] [--echo <gain>] [--title <text>]
              [--preset offline|fast32|fast128] [--no-echo-cancel] [--root <dir>] [--verbose]
+      process --remember-voices does what the app does with Remember voices on: voiceprints, names from the People
+      beside the meetings folder, which then learns from the meeting, and a shared microphone told apart by voice.
       simulate writes to a new temporary folder unless --root is given. --no-echo-cancel keeps the call's sound in the
       microphone the live transcript hears, and keeps a call's live microphone lines rather than transcribing its
       microphone again with the call's sound taken out.
@@ -77,7 +80,10 @@ enum MeetingsCommand {
         case "process":
             let preset = try options.preset()
             let cancelsEcho = !options.flag("--no-echo-cancel")
+            let remembersVoices = options.flag("--remember-voices")
+            // The folder itself, not a link to it: People sits beside the meetings folder and keeps samples by its name.
             let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
+                .resolvingSymlinksInPath()
             guard FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingStorage.segmentsFile).path)
                     || FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingStorage.audioFile(.system)).path) else {
                 throw CommandError.usage("\(folder.path) is not a meeting folder (no segments.jsonl or system.wav).")
@@ -86,6 +92,10 @@ enum MeetingsCommand {
             var processOptions = MeetingPostProcessOptions(preset: preset)
             processOptions.cancelsEcho = cancelsEcho
             if let engine { processOptions.transcribeLater = Self.transcribeLater(engine) }
+            if remembersVoices {
+                processOptions.voices = MeetingVoiceOptions(enabled: { true }, embed: VoiceprintEmbedder.lazy(),
+                                                            people: PeopleStore(meetingsRoot: folder.deletingLastPathComponent()))
+            }
             let store = MeetingStore(root: folder.deletingLastPathComponent(), options: processOptions)
             let id = folder.lastPathComponent
             let started = Date()
@@ -110,10 +120,13 @@ enum MeetingsCommand {
         case "live-names":
             // The live speakers' final attribution of a processed call's saved lines, next to the after-call names.
             // Reads People and the call's participant list, and keeps nothing.
+            // With --microphone, the people the live speakers heard beside you on the call's microphone instead.
+            let microphone = options.flag("--microphone")
             let folder = URL(fileURLWithPath: try options.finish(positional: 1)[0], isDirectory: true).standardizedFileURL
             let voices = MeetingVoiceOptions(enabled: { true }, embed: VoiceprintEmbedder.lazy(),
                                              people: PeopleStore(meetingsRoot: folder.deletingLastPathComponent()))
-            try write(try await LiveSpeakers.replay(folder, voices: voices, log: log))
+            try write(try await LiveSpeakers.replay(folder, track: microphone ? .microphone : .system, voices: voices,
+                                                    echoCanceller: microphone ? MeetingPostProcessOptions.localVQE() : nil, log: log))
         case "export-fixture":
             let values = try options.finish(positional: 2)
             let destination = URL(fileURLWithPath: values[1], isDirectory: true).standardizedFileURL

@@ -347,6 +347,30 @@ private func sameChunks(_ got: [SpeechChunk], _ expected: [SpeechChunk]) -> Bool
     #expect(sameChunks(chunks.value, SpeechChunker.chunks(of: own, track: .microphone)))
 }
 
+@Test func theMicrophonesSpeakerModelGetsTheCleanedAudioWholeAndInOrderOrTheMicAsHeard() async {
+    let own = tone([1.0...2.0, 4.0...5.0], seconds: 6, frequency: 330)
+    let call = tone([2.5...3.5], seconds: 6)
+    let heard = zip(own, call).map { $0 + $1 }
+    // With the call taken out, whole and in order from the session's first sample, so its voices land on the lines.
+    let cleaned = Heard<[Float]>()
+    let canceller = LiveEchoCanceller(load: { DelayedSubtraction().stream }, log: { _ in }, onSamples: cleaned.add, onChunk: { _ in })
+    for start in stride(from: 0, to: heard.count, by: 1_600) {
+        canceller.microphone(Array(heard[start..<min(start + 1_600, heard.count)]))
+        canceller.system(Array(call[start..<min(start + 1_600, call.count)]))
+    }
+    await canceller.finish()
+    let samples = cleaned.value.flatMap { $0 }
+    #expect(samples.count == own.count)
+    #expect(zip(samples, own).allSatisfy { abs($0 - $1) < 1e-5 })
+
+    // As heard when the canceller isn't there, still every sample once.
+    let raw = Heard<[Float]>()
+    let without = LiveEchoCanceller(load: { nil }, log: { _ in }, onSamples: raw.add, onChunk: { _ in })
+    without.microphone(heard)
+    await without.finish()
+    #expect(raw.value.flatMap { $0 } == heard)
+}
+
 @Test func aStalledCallTrackPairsWithSilenceAndAMissingOrBrokenCancellerPassesTheMicrophoneThrough() async {
     // The microphone waits for the call's sound as far as it has come, and goes on against silence when told it stalled.
     var pairing = EchoPairing()

@@ -26,7 +26,7 @@ public struct TranscriptTurn: Codable, Sendable, Identifiable, Hashable {
     /// The name shown: speakers.json's name for `label`, or the label itself.
     public var speaker: String
     /// What the post-processor called this voice ("You", "Speaker 2", or a 1:1 participant's name).
-    /// Nil on a rendered turn that joined two labels a person merged into one name.
+    /// Nil on a rendered turn that joined two labels a person merged into one name, unless one of them is "You".
     public var label: String? = nil
     public var track: MeetingTrack
     public var start: Double
