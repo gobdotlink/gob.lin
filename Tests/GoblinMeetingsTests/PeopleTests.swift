@@ -116,6 +116,34 @@ private func store(_ root: URL) -> PeopleStore { PeopleStore(meetingsRoot: root.
     #expect(matches["Speaker 2"]?.name == "Mira")
 }
 
+@Test func oneStraySampleAmongAPersonsOthersNamesNobody() {
+    func sample(_ meeting: String, _ embedding: [Float], inPerson: Bool = false) -> VoiceSample {
+        VoiceSample(meetingID: meeting, meetingTitle: meeting, label: "You", track: .microphone, heardAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    seconds: 20, clipStart: 0, clipEnd: 5, inPerson: inPerson, embedding: embedding)
+    }
+    // Three calls of Ana's own voice, and one where a colleague did most of the talking into her microphone.
+    let calls = [sample("m1", Voices.print(5)), sample("m2", Voices.print(5)), sample("m3", Voices.print(5)), sample("m4", Voices.print(1))]
+    let colleague = [Voices.voice("Speaker 1", Voices.print(1), track: .microphone)]
+    let ana = Person(name: "Ana Ruiz", isMe: true, samples: calls)
+    #expect(VoiceMatching.match(colleague, people: [ana], participants: MeetingParticipants(), inPerson: true).isEmpty)
+    // The colleague is still found when People knows them, however close the stray sample is.
+    let mira = Voices.person("Mira Patel", Voices.print(1, blend: 9, share: 0.1))
+    let known = VoiceMatching.match(colleague, people: [ana, mira], participants: MeetingParticipants(), inPerson: true)
+    #expect(known["Speaker 1"]?.name == "Mira Patel")
+    #expect(known["Speaker 1"]?.named == true)
+    let own = VoiceMatching.match([Voices.voice("Speaker 2", Voices.print(5), track: .microphone)], people: [ana],
+                                  participants: MeetingParticipants(), inPerson: true)
+    #expect(own["Speaker 2"]?.named == true)
+
+    // With too few to compare, the closest sample stands, as it does for someone heard once.
+    let few = Person(name: "Ana Ruiz", isMe: true, samples: [calls[0], calls[3]])
+    #expect(VoiceMatching.match(colleague, people: [few], participants: MeetingParticipants(), inPerson: true)["Speaker 1"]?.named == true)
+
+    // The room's microphone hears a voice differently from a call's, so one room sample isn't held against the calls.
+    let room = Person(name: "Ana Ruiz", isMe: true, samples: Array(calls[0...2]) + [sample("m5", Voices.print(1), inPerson: true)])
+    #expect(VoiceMatching.match(colleague, people: [room], participants: MeetingParticipants(), inPerson: true)["Speaker 1"]?.named == true)
+}
+
 @Test func twoVoicesOfOneMeetingThatSoundAlikeAreOfferedAsOne() {
     let voices = [Voices.voice("Speaker 2", Voices.print(1)), Voices.voice("Speaker 5", Voices.print(1, blend: 9, share: 0.2)),
                   Voices.voice("Speaker 1", Voices.print(3))]

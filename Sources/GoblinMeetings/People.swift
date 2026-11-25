@@ -342,11 +342,16 @@ public enum VoiceMatching {
     public static let suggestThreshold: Float = 0.66
     /// Two voices of one meeting this alike are probably one person the diarizer split (a mic change mid-call).
     public static let sameVoiceThreshold: Float = 0.77
+    /// What a second sample must score for the closest one to count, once the person has `backingSettled` samples of
+    /// that kind. Where the closest sample was the right person a second one scored 0.82 or more; the one sample that
+    /// named a colleague You (two people on one call's mic) had 18 others, the nearest at 0.61.
+    public static let backingThreshold: Float = 0.70
+    static let backingSettled = 3
 
-    /// The best person for each voice, by its closest sample. `candidates` limits who a call's voices can be: on a call
-    /// with a participant list only those people for a remote voice, and never you. Each person names at most one voice
-    /// per track unless two voices both clear the bar: the diarizer splitting someone in two is more common than two
-    /// people sounding alike.
+    /// The best person for each voice, by the closest sample their others bear out. `candidates` limits who a call's
+    /// voices can be: on a call with a participant list only those people for a remote voice, and never you. Each
+    /// person names at most one voice per track unless two voices both clear the bar: the diarizer splitting someone
+    /// in two is more common than two people sounding alike.
     public static func match(_ voices: [MeetingVoice], people: [Person], participants: MeetingParticipants,
                              inPerson: Bool) -> [String: MeetingVoices.Match] {
         let invited = Set(participants.all.map { $0.lowercased() })
@@ -364,9 +369,7 @@ public enum VoiceMatching {
                 // Someone beside you needn't have joined the call themselves.
                 return besideYou || invited.isEmpty || invited.contains(person.name.lowercased())
             }
-            let scored = candidates.map { person in
-                (person, person.samples.map { Voiceprint.similarity($0.embedding, voice.embedding) }.max() ?? -1)
-            }.sorted { $0.1 > $1.1 }
+            let scored = candidates.map { person in (person, similarity(voice, person)) }.sorted { $0.1 > $1.1 }
             guard let best = scored.first, best.1 >= suggestThreshold else { continue }
             let runnerUp = scored.dropFirst().first?.1 ?? -1
             let named = best.1 >= nameThreshold && best.1 - runnerUp >= margin
@@ -374,6 +377,26 @@ public enum VoiceMatching {
                                                       similarity: best.1, named: named)
         }
         return result
+    }
+
+    /// How alike a voice and a person are: the closest of their samples, unless the others say that one is a stray.
+    /// One sample can be someone else (two people on one microphone, a voice named by mistake), and a name it gave
+    /// would be learned and stick. So among samples of one kind, call or room and which track, a second has to come
+    /// near the voice too, or the closest is set aside. One voice sounds too different between a call and the room to
+    /// ask that across kinds, and with too few of a kind to compare the closest stands.
+    static func similarity(_ voice: MeetingVoice, _ person: Person) -> Float {
+        struct Kind: Hashable {
+            var inPerson: Bool
+            var track: MeetingTrack
+        }
+        var kinds: [Kind: [Float]] = [:]
+        for sample in person.samples {
+            kinds[Kind(inPerson: sample.inPerson, track: sample.track), default: []].append(Voiceprint.similarity(sample.embedding, voice.embedding))
+        }
+        return kinds.values.map { kind in
+            let closest = kind.sorted(by: >)
+            return closest.count < backingSettled || closest[1] >= backingThreshold ? closest[0] : closest[1]
+        }.max() ?? -1
     }
 
     /// Whether the lane a voice is shown in still waits for a name: "Speaker 2", "Them", or merged into one of those.
