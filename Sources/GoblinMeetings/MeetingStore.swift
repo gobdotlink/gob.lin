@@ -201,6 +201,20 @@ public actor MeetingStore {
         MeetingMarkdown.export(try detail(id))
     }
 
+    /// The whole meeting as Markdown: the front matter, the notes and what was typed during the call, then the
+    /// transcript under its own heading. Without either kind of notes it's `markdown(_:)`.
+    public func fullMarkdown(_ id: String) throws -> String {
+        let detail = try detail(id)
+        let directory = try directory(for: id)
+        let notes: String? = if let written = MeetingNotesFile.read(directory) {
+            MeetingNotesFile.markdown(written, title: detail.summary.title, names: MeetingNotesFile.names(for: written, directory: directory),
+                                      typedNotes: detail.typedNotes)
+        } else if let typed = detail.typedNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty {
+            "## Your notes\n\n" + typed
+        } else { nil }
+        return MeetingMarkdown.export(detail, notes: notes)
+    }
+
     // MARK: Editing
 
     /// Marks a meeting as being recorded by this process, so nothing repairs, processes or deletes it.

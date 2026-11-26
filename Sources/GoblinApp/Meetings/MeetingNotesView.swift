@@ -2,9 +2,9 @@ import AppKit
 import GoblinMeetings
 import SwiftUI
 
-/// The Notes part of a meeting's page: the summary, decisions, action items, the template's sections and a line per
-/// mark, each with the moment it came from; the spelling fixes made to the transcript; and while there are no notes,
-/// what it takes to get them.
+/// The Notes tab of a meeting's page: the summary, decisions, action items, the template's sections and a line per
+/// mark, each with the moment it came from; and while there are no notes, what it takes to get them. Misheard names
+/// are asked about in `MeetingNeedsYou`, and the ones fixed are listed over the transcript (`MeetingFixedNamesLine`).
 struct MeetingNotesSection: View {
     let meeting: StoredMeeting
     let notes: MeetingNotes?
@@ -16,12 +16,11 @@ struct MeetingNotesSection: View {
     var typedNotes: String? = nil
     @ObservedObject var model: MeetingNotesModel
     @ObservedObject var player: MeetingPlayer
+    /// The page's Notes / Transcript switch, which takes the place of the Notes label.
+    var tabs: AnyView? = nil
     let onChanged: () -> Void
 
     @State private var editFailure: String?
-    /// Fixes being applied, turned down or put back, by what was heard, as they were when clicked. Each stays until
-    /// the reloaded notes show it changed, since respelling the transcript can take several seconds.
-    @State private var settling: [String: MeetingNotes.SpellingFix] = [:]
 
     private var writing: Bool { model.writing.contains(meeting.id) }
 
@@ -32,14 +31,21 @@ struct MeetingNotesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                CapsHeader("Notes")
-                if let notes {
-                    Text("· " + byline(notes)).font(.meta).foregroundStyle(.secondary).lineLimit(1)
+                if let tabs {
+                    tabs
+                    Spacer(minLength: 8)
+                    if let notes { Text(byline(notes)).font(.meta).foregroundStyle(.secondary).lineLimit(1) }
+                } else {
+                    CapsHeader("Notes")
+                    if let notes { Text("· " + byline(notes)).font(.meta).foregroundStyle(.secondary).lineLimit(1) }
+                    Spacer(minLength: 8)
                 }
-                Spacer(minLength: 8)
+                if notes != nil {
+                    CopyIconButton(title: "Copy Notes") { markdown }
+                }
                 if notes != nil, meeting.state == .ready { menu }
             }
-            .padding(.leading, 6)
+            .padding(.leading, tabs == nil ? 6 : 0)
             if let editFailure {
                 notice { StatusRow(.problem, Text(editFailure)) { Button("Dismiss") { self.editFailure = nil } } }
             }
@@ -62,16 +68,11 @@ struct MeetingNotesSection: View {
             }
             if let notes {
                 content(notes)
-                fixes(notes)
             } else if !writing, failure == nil {
                 empty
             }
         }
         .task { if model.tools.isEmpty { model.refresh() } }
-        .onChange(of: notes?.fixes ?? []) { _, fixes in
-            settling = settling.filter { heard, clicked in fixes.contains { $0.heard == heard && $0 == clicked } }
-        }
-        .onChange(of: meeting.id) { settling = [:] }
     }
 
     private var writingLine: String {
@@ -210,72 +211,6 @@ struct MeetingNotesSection: View {
         player.play(max(0, at - 1)...(at + 30))
     }
 
-    // MARK: Fixes
-
-    @ViewBuilder private func fixes(_ notes: MeetingNotes) -> some View {
-        let active = notes.fixes.filter(\.isActive)
-        let suggested = notes.fixes.filter { $0.kind == .suggested && !$0.dismissed }
-        if !active.isEmpty {
-            HStack(spacing: 8) {
-                Image(systemName: "character.cursor.ibeam").foregroundStyle(GoblinBrand.mossText).accessibilityHidden(true)
-                Text(fixedLine(active)).font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if active.contains(where: { settling[$0.heard] != nil }) {
-                    ProgressView().controlSize(.small).accessibilityLabel("Putting words back")
-                }
-                Menu("Undo") {
-                    ForEach(active, id: \.heard) { fix in
-                        Button("Put Back “\(fix.heard)”") { settle(fix) { try await model.dismissFix(meeting.id, heard: fix.heard) } }
-                            .disabled(settling[fix.heard] != nil)
-                    }
-                }
-                .menuStyle(.button).fixedSize().font(.status)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
-            .padding(.top, 6)
-        }
-        if !suggested.isEmpty {
-            notice {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(suggested.count == 1 ? "One more word may be a misheard name:" : "These may be misheard names too:")
-                        .font(.status).foregroundStyle(.secondary)
-                    ForEach(suggested, id: \.heard) { fix in
-                        HStack(spacing: 8) {
-                            Text("“\(fix.heard)” → \(fix.meant)").font(.row)
-                            if fix.count > 1 { Text("\(fix.count) lines").font(.meta).foregroundStyle(.secondary) }
-                            Spacer(minLength: 8)
-                            if settling[fix.heard] != nil {
-                                ProgressView().controlSize(.small).accessibilityLabel("Fixing “\(fix.heard)”")
-                            }
-                            Button("Not Now") { settle(fix) { try await model.dismissFix(meeting.id, heard: fix.heard) } }
-                            Button("Fix") { settle(fix) { try await model.applyFix(meeting.id, heard: fix.heard) } }
-                        }
-                        .disabled(settling[fix.heard] != nil)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Fix, Not Now and Put Back show a spinner at once and can't be pressed again while the change lands.
-    private func settle(_ fix: MeetingNotes.SpellingFix, _ edit: @escaping () async throws -> Void) {
-        guard settling[fix.heard] == nil else { return }
-        settling[fix.heard] = fix
-        change {
-            do { try await edit() } catch {
-                settling[fix.heard] = nil
-                throw error
-            }
-        }
-    }
-
-    private func fixedLine(_ fixes: [MeetingNotes.SpellingFix]) -> String {
-        let shown = fixes.prefix(3).map { "\($0.heard) → \($0.meant)" }.joined(separator: ", ")
-        let more = fixes.count > 3 ? " and \(fixes.count - 3) more" : ""
-        return "I fixed \(fixes.count == 1 ? "a misheard name" : "\(fixes.count) misheard names") in the transcript: \(shown)\(more)."
-    }
-
     // MARK: Menu
 
     private var menu: some View {
@@ -319,10 +254,14 @@ struct MeetingNotesSection: View {
         model.write(meeting.id, override: settings) { onChanged() }
     }
 
+    private var markdown: String? {
+        notes.map { MeetingNotesFile.markdown($0, title: meeting.title, names: shown, typedNotes: typedNotes) }
+    }
+
     private func copy() {
-        guard let notes else { return }
+        guard let markdown else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(MeetingNotesFile.markdown(notes, title: meeting.title, names: shown, typedNotes: typedNotes), forType: .string)
+        NSPasteboard.general.setString(markdown, forType: .string)
     }
 
     private func change(_ edit: @escaping () async throws -> Void) {
@@ -344,5 +283,229 @@ struct MeetingNotesSection: View {
             .background(GoblinBrand.caseBackground.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
             .padding(.top, 6)
+    }
+}
+
+// MARK: Misheard names
+
+/// What on a meeting's page waits for the person: voices with no name yet, and words the notes model thinks are
+/// misheard names, each with Fix or Not Now, or all at once with Fix All. Gone once nothing waits; after Fix All a
+/// moss line says so, with Undo.
+struct MeetingNeedsYou: View {
+    let meeting: StoredMeeting
+    let notes: MeetingNotes?
+    /// Voices that need a name, in the order the page lists them.
+    let unnamed: [MeetingLane]
+    @ObservedObject var model: MeetingNotesModel
+    let onWho: (MeetingLane) -> Void
+    let onChanged: () -> Void
+
+    @State private var reviewing = false
+    /// What Fix All fixed, for its Undo.
+    @State private var fixedAll: [String] = []
+    @State private var failure: String?
+    @State private var settling = FixSettling()
+
+    private var suggested: [MeetingNotes.SpellingFix] {
+        guard meeting.state == .ready else { return [] }
+        return notes?.fixes.filter { $0.kind == .suggested && !$0.dismissed } ?? []
+    }
+
+    var body: some View {
+        let words = suggested
+        // Put back one by one over the transcript, they're no longer Fix All's to undo.
+        let undoable = fixedAll.filter { heard in notes?.fixes.contains { $0.heard == heard && $0.isActive } ?? false }
+        VStack(alignment: .leading, spacing: 0) {
+            if !unnamed.isEmpty || !words.isEmpty || failure != nil {
+                card(words).padding(.top, 12)
+            }
+            if !undoable.isEmpty {
+                MeetingChangeLine(message: undoable.count == 1 ? "Fixed a misheard name." : "Fixed \(undoable.count) misheard names.") {
+                    undo(undoable)
+                }
+                .padding(.top, 12)
+            }
+        }
+        .onChange(of: notes?.fixes ?? []) { _, fixes in settling.settle(fixes) }
+    }
+
+    private func card(_ words: [MeetingNotes.SpellingFix]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CapsHeader("Needs you")
+            if let failure {
+                StatusRow(.problem, Text(failure)) { Button("Dismiss") { self.failure = nil } }
+            }
+            if let first = unnamed.first {
+                StatusRow(.waiting, Text(unnamed.count == 1 ? "I need a name for \(first.name)." : "I need names for \(unnamed.count) voices.")) {
+                    Button("Who's This?") { onWho(first) }.prominent()
+                }
+            }
+            if !unnamed.isEmpty, !words.isEmpty { Hairline().padding(.vertical, 2) }
+            if words.count == 1, let fix = words.first {
+                StatusRow(.waiting, Text("“\(fix.heard)” may be a misheard name: \(fix.meant).")) {
+                    HStack(spacing: 8) {
+                        if settling.contains(fix) { ProgressView().controlSize(.small).accessibilityLabel("Fixing “\(fix.heard)”") }
+                        Button("Not Now") { settle([fix]) { try await model.dismissFix(meeting.id, heard: fix.heard) } }
+                        Button("Fix") { settle([fix]) { try await model.applyFix(meeting.id, heard: fix.heard) } }.prominent()
+                    }
+                    .disabled(settling.contains(fix))
+                }
+            } else if words.count > 1 {
+                StatusRow(.waiting, Text(reviewing ? "\(words.count) words may be misheard names." : summary(words))) {
+                    HStack(spacing: 8) {
+                        if !reviewing, words.contains(where: settling.contains) {
+                            ProgressView().controlSize(.small).accessibilityLabel("Fixing names")
+                        }
+                        Button(reviewing ? "Done" : "Review…") { reviewing.toggle() }
+                        Button("Fix All") { fixAll(words) }.prominent()
+                            .disabled(words.contains(where: settling.contains))
+                    }
+                }
+                if reviewing {
+                    ForEach(words, id: \.heard) { fix in
+                        HStack(spacing: 8) {
+                            Text("“\(fix.heard)” → \(fix.meant)").font(.row)
+                            Text(fix.count == 1 ? "1 line" : "\(fix.count) lines").font(.meta).foregroundStyle(.secondary)
+                            Spacer(minLength: 8)
+                            if settling.contains(fix) { ProgressView().controlSize(.small).accessibilityLabel("Fixing “\(fix.heard)”") }
+                            Button("Not Now") { settle([fix]) { try await model.dismissFix(meeting.id, heard: fix.heard) } }
+                            Button("Fix") { settle([fix]) { try await model.applyFix(meeting.id, heard: fix.heard) } }
+                        }
+                        .font(.status)
+                        .disabled(settling.contains(fix))
+                        .padding(.leading, 17)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(LightState.waiting.color.opacity(0.45), lineWidth: 0.5))
+    }
+
+    /// “Myra Saul” → Mira Sol, “Oak offer” → Okafor and 2 more.
+    private func summary(_ words: [MeetingNotes.SpellingFix]) -> String {
+        let shown = words.prefix(3).map { "“\($0.heard)” → \($0.meant)" }.joined(separator: ", ")
+        let more = words.count > 3 ? " and \(words.count - 3) more" : ""
+        return "\(words.count) words may be misheard names: \(shown)\(more)."
+    }
+
+    private func fixAll(_ words: [MeetingNotes.SpellingFix]) {
+        let heard = words.map(\.heard)
+        settle(words) {
+            try await model.applyFixes(meeting.id, heard: heard)
+            fixedAll = heard
+            reviewing = false
+        }
+    }
+
+    private func undo(_ heard: [String]) {
+        fixedAll = []
+        Task {
+            do { try await model.suggestFixes(meeting.id, heard: heard) } catch {
+                failure = "I couldn't put those words back: \(error.localizedDescription)"
+            }
+            onChanged()
+        }
+    }
+
+    private func settle(_ fixes: [MeetingNotes.SpellingFix], _ edit: @escaping () async throws -> Void) {
+        guard settling.begin(fixes) else { return }
+        Task {
+            do {
+                try await edit()
+                failure = nil
+            } catch {
+                settling.cancel(fixes)
+                failure = "I couldn't save that change: \(error.localizedDescription)"
+            }
+            onChanged()
+        }
+    }
+}
+
+/// Over the transcript: the misheard names fixed in it, with an Undo menu that puts each word back.
+struct MeetingFixedNamesLine: View {
+    let meetingID: String
+    let notes: MeetingNotes
+    @ObservedObject var model: MeetingNotesModel
+    let onChanged: () -> Void
+
+    @State private var settling = FixSettling()
+    @State private var failure: String?
+
+    var body: some View {
+        let active = notes.fixes.filter(\.isActive)
+        VStack(alignment: .leading, spacing: 6) {
+            if let failure {
+                StatusRow(.problem, Text(failure)) { Button("Dismiss") { self.failure = nil } }
+                    .padding(.horizontal, 12)
+            }
+            if !active.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "character.cursor.ibeam").foregroundStyle(GoblinBrand.mossText).accessibilityHidden(true)
+                    Text(Self.line(active)).font(.status).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if active.contains(where: settling.contains) {
+                        ProgressView().controlSize(.small).accessibilityLabel("Putting words back")
+                    }
+                    Menu("Undo") {
+                        ForEach(active, id: \.heard) { fix in
+                            Button("Put Back “\(fix.heard)”") { putBack(fix) }.disabled(settling.contains(fix))
+                        }
+                    }
+                    .menuStyle(.button).fixedSize().font(.status)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+            }
+        }
+        .onChange(of: notes.fixes) { _, fixes in settling.settle(fixes) }
+    }
+
+    private func putBack(_ fix: MeetingNotes.SpellingFix) {
+        guard settling.begin([fix]) else { return }
+        Task {
+            do {
+                try await model.dismissFix(meetingID, heard: fix.heard)
+                failure = nil
+            } catch {
+                settling.cancel([fix])
+                failure = "I couldn't save that change: \(error.localizedDescription)"
+            }
+            onChanged()
+        }
+    }
+
+    static func line(_ fixes: [MeetingNotes.SpellingFix]) -> String {
+        let shown = fixes.prefix(3).map { "\($0.heard) → \($0.meant)" }.joined(separator: ", ")
+        let more = fixes.count > 3 ? " and \(fixes.count - 3) more" : ""
+        return "I fixed \(fixes.count == 1 ? "a misheard name" : "\(fixes.count) misheard names") in the transcript: \(shown)\(more)."
+    }
+}
+
+/// Fixes being applied, turned down or put back, by what was heard, as they were when clicked. Each stays until the
+/// reloaded notes show it changed, since respelling the transcript can take several seconds, and can't be clicked
+/// again meanwhile.
+struct FixSettling {
+    private var clicked: [String: MeetingNotes.SpellingFix] = [:]
+
+    func contains(_ fix: MeetingNotes.SpellingFix) -> Bool { clicked[fix.heard] != nil }
+
+    /// False when any of them is already on its way.
+    mutating func begin(_ fixes: [MeetingNotes.SpellingFix]) -> Bool {
+        guard !fixes.contains(where: contains) else { return false }
+        for fix in fixes { clicked[fix.heard] = fix }
+        return true
+    }
+
+    mutating func cancel(_ fixes: [MeetingNotes.SpellingFix]) {
+        for fix in fixes { clicked[fix.heard] = nil }
+    }
+
+    /// Drops each fix the reloaded notes show changed.
+    mutating func settle(_ fixes: [MeetingNotes.SpellingFix]) {
+        clicked = clicked.filter { heard, was in fixes.contains { $0.heard == heard && $0 == was } }
     }
 }
