@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GoblinCore
 
-private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted"]
+private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted", "light", "lite"]
 private func isKnown(_ word: String) -> Bool { known.contains(word.lowercased()) }
 private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry] = [], dismissed: Set<String> = []) -> [TermSuggestion] {
     TermSuggestions.review(candidates, entries: entries, dismissed: dismissed, isKnownWord: isKnown)
@@ -118,6 +118,28 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     #expect(corrected("better then that", "better than that").isEmpty)
     #expect(corrected("there going", "they're going").isEmpty)
     #expect(corrected("we want to go", "we wanted go").isEmpty)
+}
+
+@Test func correctionsBetweenHomophonesAreTerms() {
+    let acme = DictionaryScope(application: "com.t3tools.t3code", project: "acme-app")
+    // Spelled too far apart for soundsAlike, but said the same.
+    let fixes = TermSuggestions.fromCorrection(dictated: "Check the role I'm about to add in Acme Light",
+                                               edited: "Check the role I'm about to add in Acme Lite", scope: acme)
+        + TermSuggestions.fromCorrection(dictated: "In Acme Light, there's a count next to the Settings tab.",
+                                         edited: "In Acme Lite, there's a count next to the Settings tab.", scope: acme)
+    let kept = review(fixes)
+    #expect(kept.map { ($0.spelling, $0.aliases, $0.context, $0.projects, $0.timesFixed) }.first ?? ("", [], [], [], 0)
+            == ("Lite", ["Light"], ["Acme"], ["acme-app"], 2))
+    // Learned from two fixes, the alias applies only near its context.
+    let entries = [DictionaryEntry]().accepting(kept[0])
+    #expect(DictionaryCorrector.correct("open Acme light now", entries: entries).text == "open Acme Lite now")
+    #expect(DictionaryCorrector.correct("turn the light off", entries: entries).text == "turn the light off")
+    // Everyday homophones stay grammar.
+    #expect(review(TermSuggestions.fromCorrection(dictated: "better then that", edited: "better than that", scope: acme)).isEmpty)
+    #expect(TermSuggestions.soundsTheSame("light", "lite") && TermSuggestions.soundsTheSame("reign", "rain") && TermSuggestions.soundsTheSame("knight", "night"))
+    #expect(TermSuggestions.soundsTheSame("then", "than"))
+    #expect(!TermSuggestions.soundsTheSame("candidate", "candidates") && !TermSuggestions.soundsTheSame("use", "used"))
+    #expect(!TermSuggestions.soundsTheSame("light", "like") && !TermSuggestions.soundsTheSame("they're", "there"))
 }
 
 @Test func aDroppedFinalEIsAnotherWordNotAnotherForm() {

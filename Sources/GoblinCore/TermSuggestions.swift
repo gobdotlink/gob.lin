@@ -411,7 +411,8 @@ public enum TermSuggestions {
     }
 
     /// A correction to a different single word that the recognizer got wrong: from a word the spell checker doesn't
-    /// know ("anasia" → "panacea"), or from a real word that sounds like an uncommon one ("clawed" → "claude"). A known
+    /// know ("anasia" → "panacea"), or from a real word that sounds like an uncommon one ("clawed" → "claude", "light"
+    /// → "lite"). A known
     /// word fixed into an unrelated or everyday one ("the" → "a", "then" → "than"), a phrase ("wanna" → "going to"),
     /// another form of the word ("candidate" → "candidates") or a punctuation fix ("dont" → "don't") isn't.
     static func fixesMishearing(_ candidate: TermSuggestion, isKnownWord: (String) -> Bool) -> Bool {
@@ -422,7 +423,62 @@ public enum TermSuggestions {
         let words = heard.split(whereSeparator: \.isWhitespace)
         if words.contains(where: { word in word.contains(where: \.isLetter) && !isKnownWord(String(word)) }) { return true }
         return words.count == 1 && candidate.spelling.allSatisfy(\.isLetter) && !DictionaryCorrector.commonEnglish.contains(to)
-            && soundsAlike(from, to)
+            && (soundsAlike(from, to) || soundsTheSame(from, to))
+    }
+
+    /// Two words spelled apart but said the same, such as "light" and "lite". Everyday homophones like "then" and
+    /// "than" also match; callers keep those out with the common-word list.
+    static func soundsTheSame(_ first: String, _ second: String) -> Bool {
+        guard first != second, let key = phoneticKey(first), key.count >= 2 else { return false }
+        return phoneticKey(second) == key
+    }
+
+    /// A rough key for how an English word is said, after Metaphone: silent letters dropped, letters that sound alike
+    /// merged and vowels kept only at the start. "light" and "lite" are both "LT". Nil unless the word is ASCII letters.
+    static func phoneticKey(_ word: String) -> String? {
+        var w = Array(word.lowercased())
+        guard !w.isEmpty, w.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        if w.count > 1, ["kn", "gn", "pn", "wr", "ae"].contains(String(w[0...1])) { w.removeFirst() }
+        if w[0] == "x" { w[0] = "s" }
+        if w.count > 1, w[0] == "w", w[1] == "h" { w.remove(at: 1) }
+        func at(_ index: Int) -> Character? { w.indices.contains(index) ? w[index] : nil }
+        func isVowel(_ index: Int) -> Bool { at(index).map { "aeiou".contains($0) } ?? false }
+        func isFront(_ index: Int) -> Bool { at(index).map { "eiy".contains($0) } ?? false }
+        var key = ""
+        for (index, letter) in w.enumerated() {
+            if letter != "c", index > 0, w[index - 1] == letter { continue }
+            let next = at(index + 1), last = index == w.count - 1
+            switch letter {
+            case "a", "e", "i", "o", "u": if index == 0 { key.append("A") }
+            case "b": if !(last && at(index - 1) == "m") { key.append("B") }
+            case "c":
+                if next == "h" { key.append(at(index - 1) == "s" ? "K" : "X") }
+                else if next == "i", at(index + 2) == "a" { key.append("X") }
+                else if isFront(index + 1) { if at(index - 1) != "s" { key.append("S") } }
+                else { key.append("K") }
+            case "d": key.append(next == "g" && isFront(index + 2) ? "J" : "T")
+            case "g":
+                // "light", "sign", "signed": silent.
+                if next == "h", !isVowel(index + 2) { break }
+                if next == "n", index + 2 == w.count || String(w[(index + 2)...]) == "ed" { break }
+                key.append(isFront(index + 1) ? "J" : "K")
+            case "h": if isVowel(index + 1), !(at(index - 1).map { "csptg".contains($0) } ?? false) { key.append("H") }
+            case "k": if at(index - 1) != "c" { key.append("K") }
+            case "p": key.append(next == "h" ? "F" : "P")
+            case "q": key.append("K")
+            case "s": key.append(next == "h" || (next == "i" && (at(index + 2) == "o" || at(index + 2) == "a")) ? "X" : "S")
+            case "t":
+                if next == "i", at(index + 2) == "o" || at(index + 2) == "a" { key.append("X") }
+                else if next == "h" { key.append("0") }
+                else if !(next == "c" && at(index + 2) == "h") { key.append("T") }
+            case "v": key.append("F")
+            case "w", "y": if isVowel(index + 1) { key.append(Character(letter.uppercased())) }
+            case "x": key.append("KS")
+            case "z": key.append("S")
+            default: key.append(Character(letter.uppercased()))
+            }
+        }
+        return key
     }
 
     private static let wordEndings: Set<String> = ["", "e", "s", "es", "d", "ed", "ing", "er", "ly", "y", "ies", "ied", "ion"]

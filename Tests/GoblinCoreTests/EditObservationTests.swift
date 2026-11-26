@@ -91,3 +91,12 @@ import Testing
                                               maximumEditDistance: 0, editedText: nil)
     }
 }
+
+@Test func aSpanEmptiedJustAfterAClickWasSent() {
+    // A Send button empties the field with no submit key; a deletion long after a click, or with no click, is the user's.
+    #expect(EditObservation.submittedByClick(clickedAt: 100, deletedAt: 100.5))
+    #expect(EditObservation.submittedByClick(clickedAt: 100, deletedAt: 100 + EditObservation.clickSubmitWindow))
+    #expect(!EditObservation.submittedByClick(clickedAt: 100, deletedAt: 102))
+    #expect(!EditObservation.submittedByClick(clickedAt: nil, deletedAt: 100))
+    #expect(!EditObservation.submittedByClick(clickedAt: 100, deletedAt: 99))
+}
