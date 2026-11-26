@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GoblinCore
 
-private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted"]
+private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted", "light", "lite", "he's", "haze", "flake", "flaky", "surveying", "should", "de-ice", "dice", "first", "onions"]
 private func isKnown(_ word: String) -> Bool { known.contains(word.lowercased()) }
 private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry] = [], dismissed: Set<String> = []) -> [TermSuggestion] {
     TermSuggestions.review(candidates, entries: entries, dismissed: dismissed, isKnownWord: isKnown)
@@ -118,6 +118,31 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     #expect(corrected("better then that", "better than that").isEmpty)
     #expect(corrected("there going", "they're going").isEmpty)
     #expect(corrected("we want to go", "we wanted go").isEmpty)
+}
+
+@Test func correctionsBetweenHomophonesAreTerms() throws {
+    let acme = DictionaryScope(application: "com.t3tools.t3code", project: "acme-app")
+    // Spelled too far apart for soundsAlike, but said the same.
+    let fixes = TermSuggestions.fromCorrection(dictated: "Check the role I'm about to add in Acme Light",
+                                               edited: "Check the role I'm about to add in Acme Lite", scope: acme)
+        + TermSuggestions.fromCorrection(dictated: "In Acme Light, there's a count next to the Settings tab.",
+                                         edited: "In Acme Lite, there's a count next to the Settings tab.", scope: acme)
+    let lite = try #require(review(fixes).first)
+    #expect((lite.spelling, lite.aliases, lite.context, lite.projects, lite.timesFixed) == ("Lite", ["Light"], ["Acme"], ["acme-app"], 2))
+    // Learned from two fixes, the alias applies only near its context.
+    let entries = [DictionaryEntry]().accepting(lite)
+    #expect(DictionaryCorrector.correct("open Acme light now", entries: entries).text == "open Acme Lite now")
+    #expect(DictionaryCorrector.correct("turn the light off", entries: entries).text == "turn the light off")
+    // A contraction heard, or another form of the word, is grammar even when it sounds the same.
+    #expect(review(TermSuggestions.fromCorrection(dictated: "He's surveying", edited: "Haze surveying", scope: acme)).isEmpty)
+    #expect(review(TermSuggestions.fromCorrection(dictated: "should flake", edited: "should flaky", scope: acme)).isEmpty)
+    #expect(review(TermSuggestions.fromCorrection(dictated: "First de-ice the onions", edited: "First dice the onions", scope: acme))
+            .map(\.spelling) == ["dice"])
+    #expect(!TermSuggestions.soundsTheSame("flake", "flaky") && TermSuggestions.soundsTheSame("sole", "soul"))
+    #expect(TermSuggestions.soundsTheSame("light", "lite") && TermSuggestions.soundsTheSame("reign", "rain") && TermSuggestions.soundsTheSame("knight", "night"))
+    #expect(TermSuggestions.soundsTheSame("then", "than"))
+    #expect(!TermSuggestions.soundsTheSame("candidate", "candidates") && !TermSuggestions.soundsTheSame("use", "used"))
+    #expect(!TermSuggestions.soundsTheSame("light", "like") && !TermSuggestions.soundsTheSame("they're", "there"))
 }
 
 @Test func aDroppedFinalEIsAnotherWordNotAnotherForm() {

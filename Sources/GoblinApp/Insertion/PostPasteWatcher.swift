@@ -45,11 +45,14 @@ final class PostPasteWatcher {
         var maximumDistance = 0
         var regionDeleted = false
         var finishing = false
+        /// The last left click with no key typed since: a span emptied soon after was sent with a Send button.
+        var clickedAt: TimeInterval?
     }
 
     private var session: Session?
     private var task: Task<Void, Never>?
     private var keyMonitor: Any?
+    private var clickMonitor: Any?
 
     /// Start watching the span pasted into `anchor`. Finalizes any running
     /// session first, so there is never more than one watched span.
@@ -59,6 +62,7 @@ final class PostPasteWatcher {
                               deadline: ProcessInfo.processInfo.systemUptime + 30)
         self.session = session
         installKeyMonitor(sessionID: session.id)
+        installClickMonitor(sessionID: session.id)
         let id = session.id
         task = Task { @MainActor [weak self] in
             while let self, self.session?.id == id {
@@ -86,17 +90,18 @@ final class PostPasteWatcher {
     // MARK: - Sampling
 
     /// Returns false when the session ended inside this sample.
-    /// Final key samples may see a field already cleared by submission;
-    /// preserve the previous observation when the span is gone.
-    private func sampleOnce(sessionID: UUID, isFinalKeySample: Bool = false) -> Bool {
+    /// Preserving samples, taken on a submit key or a click, may see a field
+    /// already cleared by submission; they keep the previous observation when
+    /// the span is gone and never end the session.
+    private func sampleOnce(sessionID: UUID, preserving: Bool = false) -> Bool {
         guard var current = session, current.id == sessionID else { return false }
         guard !SecureInput.guards(current.anchor.pid) else {
-            if isFinalKeySample { return true }
+            if preserving { return true }
             finish(report: true); return false
         }
         let probe = FocusedText.read(pid: current.anchor.pid, element: current.anchor.element)
         guard !probe.secure, let value = probe.value, probe.isStillFocused() else {
-            if isFinalKeySample { return true }
+            if preserving { return true }
             finish(report: true); return false
         }
         let observedValue = current.anchor.normalizesEmptyLineBreak && value == "\n" ? "" : value
@@ -110,7 +115,13 @@ final class PostPasteWatcher {
             session = current
             return true
         case .deleted:
-            if isFinalKeySample { return true }
+            // Sent with a Send button, seen by the click's own sample or a later poll: what the field held before it
+            // emptied is the outcome. Ending now keeps a follow-up typed into the empty field from counting as an edit.
+            if EditObservation.submittedByClick(clickedAt: current.clickedAt, deletedAt: ProcessInfo.processInfo.systemUptime) {
+                finish(report: true)
+                return false
+            }
+            if preserving { return true }
             current.regionDeleted = true
             current.lastDistance = current.anchor.inserted.count
             current.maximumDistance = max(current.maximumDistance, current.anchor.inserted.count)
@@ -119,7 +130,7 @@ final class PostPasteWatcher {
             finish(report: true)
             return false
         case .anchorLost, .tooLong:
-            if isFinalKeySample { return true }
+            if preserving { return true }
             finish(report: true)
             return false
         }
@@ -134,6 +145,8 @@ final class PostPasteWatcher {
         task = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
         guard report else { return }
         let fresh = finished.lastSampleAt.map { ProcessInfo.processInfo.systemUptime - $0 <= 1.5 } ?? false
         let outcome = EditObservation.classify(finalDistance: finished.lastDistance,
@@ -155,12 +168,33 @@ final class PostPasteWatcher {
             let exits = [36, 76, 48, 53].contains(Int(event.keyCode))
                 || (event.modifierFlags.contains(.command)
                     && event.charactersIgnoringModifiers?.lowercased() == "v")
-            guard exits else { return }
+            guard exits else {
+                // Typed after a click, so a deletion that follows is the user's, not a Send button's.
+                Task { @MainActor [weak self] in
+                    guard let self, self.session?.id == sessionID else { return }
+                    self.session?.clickedAt = nil
+                }
+                return
+            }
             Task { @MainActor [weak self] in
                 guard let self, self.session?.id == sessionID, !(self.session?.finishing ?? true) else { return }
                 self.session?.finishing = true
-                _ = self.sampleOnce(sessionID: sessionID, isFinalKeySample: true)
+                _ = self.sampleOnce(sessionID: sessionID, preserving: true)
                 if self.session?.id == sessionID { self.finish(report: true) }
+            }
+        }
+    }
+
+    /// A left click may be the Send button, which empties the field without a
+    /// submit key. Note when it came and sample right away, while the field
+    /// usually still holds the sent text; the session keeps running, since a
+    /// click is also how a word gets selected to fix it.
+    private func installClickMonitor(sessionID: UUID) {
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.session?.id == sessionID, !(self.session?.finishing ?? true) else { return }
+                self.session?.clickedAt = ProcessInfo.processInfo.systemUptime
+                _ = self.sampleOnce(sessionID: sessionID, preserving: true)
             }
         }
     }

@@ -60,6 +60,16 @@ public enum EditObservation {
         return distance <= editCap(insertedCount: insertedCount) ? .edited : .rewritten
     }
 
+    /// How soon after a mouse click an emptied span still reads as sent by a Send button rather than deleted.
+    public static let clickSubmitWindow: TimeInterval = 1.5
+
+    /// Whether a span found deleted at `deletedAt` was sent with a click instead: a left click came at `clickedAt`,
+    /// within the window, and no key was typed since (the watcher clears `clickedAt` on a key).
+    public static func submittedByClick(clickedAt: TimeInterval?, deletedAt: TimeInterval) -> Bool {
+        guard let clickedAt else { return false }
+        return deletedAt >= clickedAt && deletedAt - clickedAt <= clickSubmitWindow
+    }
+
     /// Levenshtein distance over grapheme clusters, common ends trimmed first.
     /// Returns nil when the changed stretch exceeds the cell budget.
     public static func graphemeDistance(_ a: String, _ b: String) -> Int? {
