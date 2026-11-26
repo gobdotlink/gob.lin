@@ -213,7 +213,7 @@ struct SettingsCapture {
                     }
                     // Back to the ordinary fixture, without the failure, for the captures after this.
                     model.meetings.aiApps.usePreview([.claudeCode: .connected, .codex: .notConnected, .claudeDesktop: .notInstalled])
-                    // The notes on their own, and a meeting without them, as the page shows them below the transcript.
+                    // The notes on their own, and a meeting without them, as the Notes tab shows them.
                     for (name, id) in [("meetings-notes", sampleMeetings.weekly), ("meetings-notes-offer", sampleMeetings.design)] {
                         let detail = try await store.detail(id)
                         let notes = try await store.notes(id)
@@ -792,7 +792,8 @@ private enum SampleMeetings {
             marks: [MeetingNotes.MarkNote(t: 4 * 60 + 26, label: "Ship CSV first", note: "[S3] suggested shipping CSV alone and moving PDF to the next sprint."),
                     MeetingNotes.MarkNote(t: 12 * 60 + 6, label: nil, note: "You agreed to the Thursday freeze and to send the field list tonight.")],
             fixes: [MeetingNotes.SpellingFix(heard: "Post grass", meant: "Postgres", count: 2, kind: .applied),
-                    MeetingNotes.SpellingFix(heard: "Okafur", meant: "Okafor", count: 1, kind: .suggested)],
+                    MeetingNotes.SpellingFix(heard: "Okafur", meant: "Okafor", count: 1, kind: .suggested),
+                    MeetingNotes.SpellingFix(heard: "Pria", meant: "Priya", count: 2, kind: .suggested)],
             speakers: ["S1": "You", "S2": "Speaker 1", "S3": "Speaker 2", "S4": "Speaker 3"],
             written: MeetingNotes.Provenance(tool: .codex, model: "gpt-6.2-sol", effort: "medium", template: .auto, style: .concise,
                                              createdAt: Date(), seconds: 18, transcriptHash: MeetingNotesFile.sourceHash(directory),

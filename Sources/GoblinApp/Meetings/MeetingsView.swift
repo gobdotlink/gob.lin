@@ -53,9 +53,9 @@ struct MeetingsView: View {
                 if let meeting = selected, list.contains(where: { $0.id == meeting.id }) {
                     ToolbarSpacer(.flexible)
                     ToolbarItemGroup {
-                        Button(copied ? "Copied" : "Copy as Markdown", systemImage: copied ? "checkmark" : "doc.on.doc") { copy(meeting) }
+                        Button(copied ? "Copied" : "Copy All", systemImage: copied ? "checkmark" : "doc.on.doc") { copy(meeting) }
                             .disabled(meeting.state != .ready && meeting.state != .failed)
-                            .help("Copy the transcript as Markdown")
+                            .help("Copy the notes and transcript as Markdown")
                         Menu("Delete", systemImage: "trash") {
                             Button("Delete Audio Only…") { deleting = .audio(meeting) }.disabled(!meeting.hasAudio)
                             Button("Delete Meeting…", role: .destructive) { deleting = .meeting(meeting) }
@@ -226,7 +226,7 @@ struct MeetingsView: View {
                                 .onTapGesture { selectedID = meeting.id }
                                 .accessibilityAction { selectedID = meeting.id }
                                 .contextMenu {
-                                    Button("Copy as Markdown") { copy(meeting) }.disabled(meeting.state != .ready)
+                                    Button("Copy All") { copy(meeting) }.disabled(meeting.state != .ready)
                                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([meeting.directory]) }
                                     Divider()
                                     // As the toolbar's Delete: the store refuses either while the meeting is busy.
@@ -273,7 +273,7 @@ struct MeetingsView: View {
 
     private func copy(_ meeting: StoredMeeting) {
         Task {
-            guard let markdown = try? await store.markdown(meeting.id) else { return }
+            guard let markdown = try? await store.fullMarkdown(meeting.id) else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(markdown, forType: .string)
             copied = true

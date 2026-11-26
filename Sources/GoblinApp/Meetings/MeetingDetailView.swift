@@ -2,8 +2,9 @@ import AppKit
 import GoblinMeetings
 import SwiftUI
 
-/// One meeting: who was there, a timeline with a lane per voice and the marks above it, the named transcript,
-/// the notes, when a notes model wrote them. Names change through `MeetingStore.renameSpeaker`, each with Undo.
+/// One meeting: who was there, what needs the person (voices to name, misheard names), a timeline with a lane per
+/// voice and the marks above it, then a switch between the notes, the named transcript and what the person typed.
+/// Names change through `MeetingStore.renameSpeaker`, each with Undo.
 struct MeetingDetailView: View {
     let meeting: StoredMeeting
     let store: MeetingStore
@@ -30,6 +31,10 @@ struct MeetingDetailView: View {
     @State private var reloads = 0
     @State private var savedNotes: MeetingNotes?
     @State private var notesStale = false
+    /// The tab picked by hand. Until then: Notes once there are notes or they're being written, else Transcript.
+    @State private var pickedTab: Tab?
+
+    enum Tab: Hashable { case notes, transcript, typed }
 
     struct Undo: Equatable {
         var message: String
@@ -54,6 +59,11 @@ struct MeetingDetailView: View {
                 if !lanes.isEmpty { people(colors).padding(.top, 14) }
                 if let undo { undoBar(undo).padding(.top, 12) }
                 notices
+                MeetingNeedsYou(meeting: meeting, notes: savedNotes, unnamed: meeting.state == .ready ? lanes.filter(\.needsName) : [],
+                                model: notesModel, onWho: { who = $0 }) {
+                    reloads += 1
+                    onEdited()
+                }
                 // Without voices (nothing transcribed, or processing failed) the kept audio can still be played.
                 if !lanes.isEmpty || (meeting.state != .recording && player.hasAudio) {
                     MeetingTimelineView(meeting: meeting, lanes: lanes, marks: detail?.marks ?? [], colors: colors, player: player,
@@ -61,9 +71,17 @@ struct MeetingDetailView: View {
                                         onName: { who = $0 }, onRename: startRename, onMerge: merge)
                         .padding(.top, 16)
                 }
-                transcript(colors).padding(.top, 20)
-                notes.padding(.top, 20)
-                if let typed = detail?.typedNotes { yourNotes(typed).padding(.top, 20) }
+                // Once loaded, so a meeting with notes doesn't open on its transcript for a moment.
+                if detail != nil {
+                    Group {
+                        switch tab {
+                        case .notes: notes
+                        case .transcript: transcript(colors)
+                        case .typed: yourNotes(detail?.typedNotes ?? "")
+                        }
+                    }
+                    .padding(.top, 20)
+                }
             }
             .padding(28)
         }
@@ -147,7 +165,6 @@ struct MeetingDetailView: View {
 
     @ViewBuilder private var notices: some View {
         let badges = MeetingBadge.badges(meeting)
-        let unnamed = lanes.filter(\.needsName)
         Group {
             if let failure {
                 notice { StatusRow(.problem, Text(failure)) }
@@ -172,13 +189,6 @@ struct MeetingDetailView: View {
                         : "I sorted the voices out again and couldn't match \(cleared.count) names, so they're gone."))
                 }
             }
-            if let first = unnamed.first, meeting.state == .ready {
-                notice {
-                    StatusRow(.waiting, Text(unnamed.count == 1 ? "I need a name for one voice." : "I need names for \(unnamed.count) voices.")) {
-                        Button("Who's This?") { who = first }
-                    }
-                }
-            }
             if badges.contains(.stoppedEarly), let sentence = MeetingBadge.stoppedEarlySentence(meeting) {
                 notice {
                     Label(sentence, systemImage: meeting.stopReason == "sleep" ? "moon.zzz" : "stop.circle")
@@ -197,16 +207,44 @@ struct MeetingDetailView: View {
             .padding(.top, 12)
     }
 
+    // MARK: Tabs
+
+    private var tab: Tab {
+        if let pickedTab, pickedTab != .typed || detail?.typedNotes != nil { return pickedTab }
+        // A first write that failed stays on Notes too, where its failure and Try Again are.
+        let notes = savedNotes != nil || notesModel.writing.contains(meeting.id) || notesModel.failures[meeting.id] != nil
+        return notes ? .notes : .transcript
+    }
+
+    private var tabs: some View {
+        Picker("Show", selection: Binding(get: { tab }, set: { pickedTab = $0 })) {
+            Text("Notes").tag(Tab.notes)
+            Text("Transcript").tag(Tab.transcript)
+            if detail?.typedNotes != nil { Text("Your notes").tag(Tab.typed) }
+        }
+        .pickerStyle(.segmented).labelsHidden().fixedSize()
+        .tint(GoblinBrand.moss)
+    }
+
     // MARK: Transcript
 
     private func transcript(_ colors: VoiceColors) -> some View {
         let you = Set(lanes.filter(\.isYou).map(\.name))
         return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                CapsHeader("Transcript")
-                if let kept = audioKeptLine { Text("· " + kept).font(.meta).foregroundStyle(.secondary) }
+            HStack(spacing: 6) {
+                tabs
+                Spacer(minLength: 8)
+                if let line = transcriptLine { Text(line).font(.meta).foregroundStyle(.secondary).lineLimit(1) }
+                if !turns.isEmpty {
+                    CopyIconButton(title: "Copy Transcript") { try? await store.markdown(meeting.id) }
+                }
             }
-            .padding(.leading, 6)
+            if let savedNotes, meeting.state == .ready {
+                MeetingFixedNamesLine(meetingID: meeting.id, notes: savedNotes, model: notesModel) {
+                    reloads += 1
+                    onEdited()
+                }
+            }
             if turns.isEmpty {
                 Text(detail == nil ? " " : meeting.state == .ready ? "Nobody said anything I could make out." : "The transcript comes once I've sorted out who said what.")
                     .font(.status).foregroundStyle(.secondary).padding(.leading, 6)
@@ -278,6 +316,13 @@ struct MeetingDetailView: View {
         .accessibilityLabel("Mark at \(MeetingTimeline.clock(mark.t)): \(mark.label ?? "no label")")
     }
 
+    /// How many lines, and how long the audio is kept.
+    private var transcriptLine: String? {
+        let lines = turns.isEmpty ? nil : turns.count == 1 ? "1 line" : "\(turns.count) lines"
+        let parts = [lines, audioKeptLine].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     private var audioKeptLine: String? {
         guard detail != nil else { return nil }
         guard meeting.hasAudio else { return "audio deleted" }
@@ -288,7 +333,7 @@ struct MeetingDetailView: View {
 
     private var notes: some View {
         MeetingNotesSection(meeting: meeting, notes: savedNotes, stale: notesStale, names: detail?.speakerNames ?? [:],
-                            typedNotes: detail?.typedNotes, model: notesModel, player: player) {
+                            typedNotes: detail?.typedNotes, model: notesModel, player: player, tabs: AnyView(tabs)) {
             reloads += 1
             onEdited()
         }
@@ -297,7 +342,11 @@ struct MeetingDetailView: View {
     /// What the person typed in the Sidekick during the call, as typed.
     private func yourNotes(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            CapsHeader("Your notes").padding(.leading, 6)
+            HStack(spacing: 6) {
+                tabs
+                Spacer(minLength: 8)
+                CopyIconButton(title: "Copy Your Notes") { text }
+            }
             Plate {
                 Text(text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.row).lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -310,13 +359,16 @@ struct MeetingDetailView: View {
 
     private func load() async {
         guard let next = try? await store.detail(meeting.id) else { return }
+        let notes = try? await store.notes(meeting.id)
+        let stale = (try? await store.notesAreStale(meeting.id)) ?? false
         if detail?.microphoneAudio != next.microphoneAudio || detail?.systemAudio != next.systemAudio || detail == nil {
             player.load(microphone: next.microphoneAudio, system: next.systemAudio)
         }
+        // All at once, so the page picks its first tab knowing whether there are notes.
         detail = next
         lanes = MeetingTimeline.lanes(next.turns, kind: meeting.kind)
-        savedNotes = try? await store.notes(meeting.id)
-        notesStale = (try? await store.notesAreStale(meeting.id)) ?? false
+        savedNotes = notes
+        notesStale = stale
         // Named meanwhile (learning voices in the background): Who's this? for a voice that's gone would name nothing.
         if let asking = who, !lanes.contains(where: { $0.name == asking.name && $0.needsName == asking.needsName }) { who = nil }
     }
@@ -575,5 +627,30 @@ struct MeetingChangeLine: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+    }
+}
+
+/// An icon-only copy button for part of a page: the copy glyph, then a check for a moment once it's copied.
+struct CopyIconButton: View {
+    let title: String
+    let text: () async -> String?
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            Task {
+                guard let text = await text() else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                copied = true
+                try? await Task.sleep(for: .seconds(1.6))
+                copied = false
+            }
+        } label: {
+            IconButtonLabel(symbol: copied ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(copied ? "Copied" : title)
     }
 }

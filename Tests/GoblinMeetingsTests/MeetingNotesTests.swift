@@ -572,3 +572,54 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     #expect(markdown.contains("## Your notes\ncheck pricing w/ Priya\n"))
     #expect(!MeetingNotesFile.markdown(notes, title: nil, names: [:]).contains("Your notes"))
 }
+
+@Test func fixAllRespellsTheTranscriptAndUndoAsksAgain() async throws {
+    let root = try Fixtures.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (store, id, directory) = try await planningMeeting(in: root)
+    // No dictionary: "Kestral" → "Kestrel" waits as a suggestion.
+    var answer = try JSONSerialization.jsonObject(with: planningAnswer()) as! [String: Any]
+    answer["fixes"] = [["heard": "Kestral", "meant": "Kestrel"]]
+    try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(try JSONSerialization.data(withJSONObject: answer)))
+    try await store.applyFixes(id, heard: ["Kestral"])
+    #expect(MeetingNotesFile.read(directory)?.fixes.first?.isActive == true)
+    #expect(try transcript(directory)[0].text.contains("ship the Kestrel release"))
+    // Undo puts the word back and asks about it again, rather than turning it down.
+    try await store.suggestFixes(id, heard: ["Kestral"])
+    let fix = try #require(MeetingNotesFile.read(directory)?.fixes.first)
+    #expect(fix.kind == .suggested && !fix.dismissed)
+    #expect(try transcript(directory)[0].text.contains("ship the Kestral release"))
+}
+
+@Test func copyAllPutsTheNotesBeforeTheTranscript() async throws {
+    let root = try Fixtures.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (store, id, _) = try await planningMeeting(in: root)
+    let transcriptOnly = try await store.fullMarkdown(id)
+    #expect(transcriptOnly == (try await store.markdown(id)))
+    try await store.writeNotes(id, settings: settings, vocabulary: ["Kestrel"], runner: runner(planningAnswer()))
+    let all = try await store.fullMarkdown(id)
+    let decisions = try #require(all.range(of: "## Decisions"))
+    let transcript = try #require(all.range(of: "## Transcript"))
+    let firstTurn = try #require(all.range(of: "ship the Kestrel release"))
+    #expect(all.hasPrefix("---\ntitle: "))
+    #expect(decisions.lowerBound < transcript.lowerBound && transcript.lowerBound < firstTurn.lowerBound)
+}
+
+@Test func undoAfterFixAllLeavesAWordPutBackMeanwhile() async throws {
+    let root = try Fixtures.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (store, id, directory) = try await planningMeeting(in: root)
+    var answer = try JSONSerialization.jsonObject(with: planningAnswer()) as! [String: Any]
+    answer["fixes"] = [["heard": "Kestral", "meant": "Kestrel"]]
+    try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(try JSONSerialization.data(withJSONObject: answer)))
+    try await store.applyFixes(id, heard: ["Kestral"])
+    try await store.dismissFix(id, heard: "Kestral")
+    // Fix All's Undo arrives after Put Back: the word stays put back, and isn't asked about again.
+    try await store.suggestFixes(id, heard: ["Kestral"])
+    let fix = try #require(MeetingNotesFile.read(directory)?.fixes.first)
+    #expect(fix.kind == .applied && fix.dismissed)
+    // Nor does a later Fix All override it.
+    try await store.applyFixes(id, heard: ["Kestral"])
+    #expect(MeetingNotesFile.read(directory)?.fixes.first?.dismissed == true)
+}

@@ -202,11 +202,35 @@ public enum MeetingNotesWriter {
         }
     }
 
+    /// Applies several suggestions at once (Fix All), respelling the transcript once. Only words still waiting as
+    /// suggestions change: one turned down or fixed meanwhile keeps that decision.
+    public static func applyFixes(_ heard: [String], directory: URL) throws {
+        try updateFixes(Set(heard), directory: directory, where: { $0.kind == .suggested && !$0.dismissed }) { fix in
+            fix.kind = .applied
+            fix.dismissed = false
+        }
+    }
+
+    /// Turns applied fixes back into suggestions waiting for the person: Undo after Fix All. Only fixes still applied
+    /// change: a word put back meanwhile stays put back.
+    public static func suggestFixes(_ heard: [String], directory: URL) throws {
+        try updateFixes(Set(heard), directory: directory, where: \.isActive) { fix in
+            fix.kind = .suggested
+            fix.dismissed = false
+        }
+    }
+
     static func updateFix(_ heard: String, directory: URL, _ change: (inout MeetingNotes.SpellingFix) -> Void) throws {
-        // Only the fix changes; the notes' text is respelled from the model's own each time it's read.
-        guard var notes = MeetingNotesFile.stored(directory),
-              let index = notes.fixes.firstIndex(where: { $0.heard == heard }) else { return }
-        change(&notes.fixes[index])
+        try updateFixes([heard], directory: directory, change)
+    }
+
+    static func updateFixes(_ heard: Set<String>, directory: URL, where eligible: (MeetingNotes.SpellingFix) -> Bool = { _ in true },
+                            _ change: (inout MeetingNotes.SpellingFix) -> Void) throws {
+        // Only the fixes change; the notes' text is respelled from the model's own each time it's read.
+        guard var notes = MeetingNotesFile.stored(directory) else { return }
+        let indices = notes.fixes.indices.filter { heard.contains(notes.fixes[$0].heard) && eligible(notes.fixes[$0]) }
+        guard !indices.isEmpty else { return }
+        for index in indices { change(&notes.fixes[index]) }
         try MeetingNotesFile.write(notes, to: directory)
         try MeetingPostProcessor.render(directory: directory)
     }

@@ -318,6 +318,8 @@ final class MeetingNotesModel: ObservableObject {
 
     func dismissFix(_ meetingID: String, heard: String) async throws { try await store.dismissFix(meetingID, heard: heard) }
     func applyFix(_ meetingID: String, heard: String) async throws { try await store.applyFix(meetingID, heard: heard) }
+    func applyFixes(_ meetingID: String, heard: [String]) async throws { try await store.applyFixes(meetingID, heard: heard) }
+    func suggestFixes(_ meetingID: String, heard: [String]) async throws { try await store.suggestFixes(meetingID, heard: heard) }
 
     func deleteNotes(_ meetingID: String) async throws {
         try await store.deleteNotes(meetingID)

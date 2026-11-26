@@ -34,6 +34,14 @@ extension MeetingStore {
         try MeetingNotesWriter.applyFix(heard, directory: try directory(for: id))
     }
 
+    public func applyFixes(_ id: String, heard: [String]) throws {
+        try MeetingNotesWriter.applyFixes(heard, directory: try directory(for: id))
+    }
+
+    public func suggestFixes(_ id: String, heard: [String]) throws {
+        try MeetingNotesWriter.suggestFixes(heard, directory: try directory(for: id))
+    }
+
     public func deleteNotes(_ id: String) throws {
         let directory = try directory(for: id)
         try MeetingNotesFile.delete(in: directory)
