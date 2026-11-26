@@ -142,6 +142,7 @@ struct MeetingRecordingSettingsView: View {
         } header: { CapsHeader("Speakers") }
         MeetingNotesSettingsSection(model: meetings.notes)
             .disabled(!meetings.enabled)
+        AIAppsSettingsSection(model: meetings.aiApps)
         Section {
             LabeledContent {
                 Text("1 week").foregroundStyle(.secondary)

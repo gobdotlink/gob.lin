@@ -2,6 +2,7 @@ import Foundation
 import FluidAudio
 import GoblinCore
 import GoblinEngines
+import GoblinMeetings
 
 @main
 struct GoblinCLI {
@@ -42,6 +43,13 @@ struct GoblinCLI {
                 // Text-only: runs the saved AI cleanup over existing results without loading a speech model.
                 try await RewriteEvaluation.run(Array(arguments.dropFirst()))
                 return
+            }
+            if arguments.first == "mcp" {
+                // The meetings MCP server on stdio, as the app runs it; --root reads another meetings folder.
+                guard arguments.count == 1 || (arguments.count == 3 && arguments[1] == "--root" && !arguments[2].hasPrefix("--")) else {
+                    throw CommandError.usage("Usage: goblin mcp [--root <dir>]")
+                }
+                MeetingsMCPServer.serveStandardIO(root: arguments.count == 3 ? URL(fileURLWithPath: arguments[2], isDirectory: true) : MeetingStorage.root)
             }
             if arguments.first == "meetings", !MeetingsCommand.needsSpeechModel(arguments) {
                 // Meeting folders only; no speech model is loaded.
@@ -318,6 +326,7 @@ private struct GoblinCommands {
       goblin rewrite-eval <dictionary-eval.jsonl> --glossary <terms> | --no-glossary
                                                    Saved AI cleanup over those results; sends transcripts to the provider
         [--source raw|text] [--concurrency 4]
+      goblin mcp [--root <dir>]                   Meetings MCP server on stdio, as GoblinApp mcp runs it
       goblin meetings list | show <id> [--markdown]  Meetings as JSON (or a Markdown note) [--root <dir>]
       goblin meetings process <folder> [--preset offline|fast32|fast128]
                                                    Diarize and write the transcript; downloads the diarizer on first use

@@ -69,6 +69,7 @@
 		AB9882D083604FA48F3689A2 /* MeetingMarkHotkey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72FCC47E38BA84A861FD863D /* MeetingMarkHotkey.swift */; };
 		F3658465E197ACCE149FF02B /* MeetingNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E79F278851092F181DB923 /* MeetingNotifications.swift */; };
 		981B411618B2C26EA309805B /* MeetingNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DADFD92892A952A8AA9BF3BF /* MeetingNotesView.swift */; };
+		B5F9FA37177CB4AAFFD73079 /* AIAppsSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B7A6B7049B6932499AC459 /* AIAppsSettingsSection.swift */; };
 		685D189CBC2BB0FDB46F1A15 /* MeetingNotesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20373D43D660020E4454579E /* MeetingNotesSettingsView.swift */; };
 		A1D0D3806874580620DC9746 /* MeetingNotesModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30C442A581CEF4564A30F33B /* MeetingNotesModel.swift */; };
 		88A2B235618A6D3F26B27305 /* MeetingPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761AF9D731FC5A9B35065149 /* MeetingPlayer.swift */; };
@@ -150,6 +151,7 @@
 		72FCC47E38BA84A861FD863D /* MeetingMarkHotkey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingMarkHotkey.swift; sourceTree = "<group>"; };
 		28E79F278851092F181DB923 /* MeetingNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotifications.swift; sourceTree = "<group>"; };
 		DADFD92892A952A8AA9BF3BF /* MeetingNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotesView.swift; sourceTree = "<group>"; };
+		88B7A6B7049B6932499AC459 /* AIAppsSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAppsSettingsSection.swift; sourceTree = "<group>"; };
 		20373D43D660020E4454579E /* MeetingNotesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotesSettingsView.swift; sourceTree = "<group>"; };
 		30C442A581CEF4564A30F33B /* MeetingNotesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotesModel.swift; sourceTree = "<group>"; };
 		761AF9D731FC5A9B35065149 /* MeetingPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPlayer.swift; sourceTree = "<group>"; };
@@ -287,6 +289,7 @@
 				72FCC47E38BA84A861FD863D /* MeetingMarkHotkey.swift */,
 				28E79F278851092F181DB923 /* MeetingNotifications.swift */,
 				DADFD92892A952A8AA9BF3BF /* MeetingNotesView.swift */,
+				88B7A6B7049B6932499AC459 /* AIAppsSettingsSection.swift */,
 				20373D43D660020E4454579E /* MeetingNotesSettingsView.swift */,
 				30C442A581CEF4564A30F33B /* MeetingNotesModel.swift */,
 				761AF9D731FC5A9B35065149 /* MeetingPlayer.swift */,
@@ -521,6 +524,7 @@
 				AB9882D083604FA48F3689A2 /* MeetingMarkHotkey.swift in Sources */,
 				F3658465E197ACCE149FF02B /* MeetingNotifications.swift in Sources */,
 				981B411618B2C26EA309805B /* MeetingNotesView.swift in Sources */,
+				B5F9FA37177CB4AAFFD73079 /* AIAppsSettingsSection.swift in Sources */,
 				685D189CBC2BB0FDB46F1A15 /* MeetingNotesSettingsView.swift in Sources */,
 				A1D0D3806874580620DC9746 /* MeetingNotesModel.swift in Sources */,
 				88A2B235618A6D3F26B27305 /* MeetingPlayer.swift in Sources */,

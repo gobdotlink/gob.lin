@@ -201,6 +201,24 @@ after a week unless the meeting is starred. It needs System Audio Recording and
 Notifications; see [permissions](docs/permissions.md#meetings) and
 [privacy](PRIVACY.md#meetings).
 
+Claude, Claude Code, Codex and ChatGPT for Mac can search and read your meetings
+through gob.lin's read-only MCP server. With Record meetings on, connect them in
+Settings → Meeting Recording → AI apps; if Claude is open when you connect it, quit and
+reopen it so it loads the server. Codex, the Codex app and ChatGPT for Mac share
+Codex's settings, so connecting one needs a `codex` executable, on your PATH or inside
+ChatGPT or the Codex app. Any other app that takes local stdio MCP servers can start it
+too: Copy Command there gives the shell command for your copy of gob.lin, and an app
+that asks for the command and its arguments separately takes them like this:
+
+```json
+{ "command": "/Applications/gob.lin.app/Contents/MacOS/GoblinApp", "args": ["mcp"] }
+```
+
+The server gives out no meeting data while Record meetings is off. Its tools are
+`list_meetings`, `search_meetings`, `get_transcript` and `get_notes`. For development,
+`goblin mcp [--root <dir>]` serves the same tools from the CLI for whatever meetings
+folder it's given, like `goblin meetings show`.
+
 ## CLI evaluation
 
 ```sh

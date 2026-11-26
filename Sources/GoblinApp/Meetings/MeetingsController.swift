@@ -226,6 +226,8 @@ final class MeetingsController: ObservableObject {
     let library: MeetingLibrary
     /// Notes after each call, and the settings for them.
     private(set) var notes: MeetingNotesModel!
+    /// Which AI apps can read meetings through gob.lin's MCP server.
+    let aiApps = AIAppsModel()
     /// The dictionary's spellings, which notes may correct a misheard name to. Set by the app model.
     var vocabulary: @MainActor () -> [String] = { [] }
     let defaults: UserDefaults

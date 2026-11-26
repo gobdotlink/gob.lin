@@ -42,6 +42,7 @@ struct SettingsCapture {
                 microphoneNames: ["Preview microphone"], defaultMicrophoneName: "Preview microphone"))
         precondition(model.overlay.position == .top, "Saved overlay position must apply before Settings or Preview opens")
         model.meetings.notes.usePreview(tools: SampleMeetings.notesTools, models: SampleMeetings.notesModels)
+        model.meetings.aiApps.usePreview([.claudeCode: .connected, .codex: .notConnected, .claudeDesktop: .notInstalled])
         let emptyDirectory = directory.appendingPathComponent("empty", isDirectory: true)
         let empty = AppModel(dataDirectory: emptyDirectory, defaults: defaults, servicesEnabled: false)
         let lifecycle = GoblinApplicationDelegate()
@@ -199,6 +200,19 @@ struct SettingsCapture {
                             try await shoot("meetings-who-beside-you" + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: 330), dark: dark)
                         }
                     }
+                    // Settings › Meeting Recording › AI apps, below the fold of the page shot: connected, not connected, not
+                    // installed, then a failure.
+                    for failed in [false, true] {
+                        if failed { model.meetings.aiApps.usePreview([.claudeCode: .connected, .codex: .disabled, .claudeDesktop: .connectedElsewhere("/old/GoblinApp")],
+                                                                     failure: .init(app: .claudeDesktop, connecting: true, message: "claude_desktop_config.json isn't valid JSON, so I left it alone.")) }
+                        let section = Form { AIAppsSettingsSection(model: model.meetings.aiApps) }.formStyle(PlateFormStyle())
+                            .frame(width: 760).background(GoblinBrand.caseBackground)
+                        for dark in [false, true] {
+                            try await shoot("settings-ai-apps" + (failed ? "-failed" : "") + (dark ? "-dark" : ""), section, size: NSSize(width: 760, height: 250), dark: dark)
+                        }
+                    }
+                    // Back to the ordinary fixture, without the failure, for the captures after this.
+                    model.meetings.aiApps.usePreview([.claudeCode: .connected, .codex: .notConnected, .claudeDesktop: .notInstalled])
                     // The notes on their own, and a meeting without them, as the page shows them below the transcript.
                     for (name, id) in [("meetings-notes", sampleMeetings.weekly), ("meetings-notes-offer", sampleMeetings.design)] {
                         let detail = try await store.detail(id)

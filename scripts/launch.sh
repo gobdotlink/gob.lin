@@ -30,7 +30,9 @@ fi
 codesign --verify --strict --test-requirement '=identifier "app.goblin.dictation"' "$app"
 printf 'Verified bundle: %s\nExecutable: %s/Contents/MacOS/%s\n%s\n' "$app" "$app" "$executable" "$requirement"
 if "$check_only"; then exit 0; fi
-if running=$(pgrep -x GoblinApp); then
+# An AI app's meetings server (`GoblinApp mcp`) shares the process name but isn't the app.
+running=$(for pid in $(pgrep -x GoblinApp); do ps -o args= -p "$pid" | grep -qE ' mcp$' || printf '%s\n' "$pid"; done)
+if [ -n "$running" ]; then
     printf 'gob.lin is already running (PID %s). Quit it before launching this exact bundle.\n' "$running" >&2
     exit 1
 fi

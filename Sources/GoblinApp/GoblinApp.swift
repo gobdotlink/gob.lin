@@ -1,5 +1,6 @@
 import AppKit
 import GoblinCore
+import GoblinMeetings
 import SwiftUI
 
 @main
@@ -7,6 +8,19 @@ enum GoblinEntryPoint {
     @MainActor static func main() {
         if CommandLine.arguments.dropFirst() == ["--mute-output-while-dictating"] {
             runOutputMuteHelper()
+        } else if CommandLine.arguments.dropFirst().first == "mcp" {
+            // Only the app's own meetings: an option meant for `goblin mcp` (--root) mustn't quietly serve them instead.
+            guard CommandLine.arguments.count == 2 else {
+                FileHandle.standardError.write(Data("Usage: GoblinApp mcp\n".utf8))
+                exit(2)
+            }
+            // Claude, Codex and ChatGPT start this to read meetings: no window, no menu bar, stdio only.
+            // It reads only while Meetings is on, as the app records only then; asked again on every call.
+            let enabledKey = MeetingsController.enabledKey
+            MeetingsMCPServer.serveStandardIO(unavailable: {
+                UserDefaults.standard.bool(forKey: enabledKey) ? nil
+                    : "Meetings is off in gob.lin, so I can't read meetings. Turn on Record meetings in gob.lin's Settings → General."
+            })
         } else {
             GoblinApp.main()
         }

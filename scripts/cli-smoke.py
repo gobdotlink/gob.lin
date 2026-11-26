@@ -103,4 +103,22 @@ with tempfile.TemporaryDirectory(prefix="goblin-cli-smoke-") as temporary:
     assert "line 1" in failure["error"]["message"]
 
 assert json.loads(run("--unknown", status=2).stderr)["error"]["code"] == "usage"
-print("CLI smoke passed: JSON/JSONL, recorded replay, isolated history export, ID-aligned eval, structured failures, local-only missing-model result.")
+
+# The meetings MCP server: every stdout line is one JSON-RPC answer, and a notification gets none.
+with tempfile.TemporaryDirectory(prefix="goblin-mcp-smoke-") as temporary:
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_meetings", "arguments": {}}},
+    ]
+    result = subprocess.run([str(binary), "mcp", "--root", temporary], input="".join(json.dumps(r) + "\n" for r in requests),
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    answers = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [answer["id"] for answer in answers] == [1, 2, 3], result.stdout
+    assert answers[0]["result"]["serverInfo"]["name"] == "goblin"
+    assert {tool["name"] for tool in answers[1]["result"]["tools"]} == {"list_meetings", "search_meetings", "get_transcript", "get_notes"}
+    assert answers[2]["result"]["content"][0]["text"] == "No meetings match."
+
+print("CLI smoke passed: JSON/JSONL, recorded replay, isolated history export, ID-aligned eval, structured failures, local-only missing-model result, MCP stdio.")
