@@ -42,10 +42,11 @@ public struct MeetingVocabulary: Sendable {
     /// Scoped terms still lend their exact spelling to the capitalised near-miss check, which can't touch ordinary words.
     /// Phrases left exactly as heard: the notes' spelling fixes decide those, applied, suggested or put back by the
     /// person, so correcting them first would override that decision or leave a fix nothing to match.
-    private let protectedPhrases: [String]
+    /// Compiled once: a long meeting has hundreds of paragraphs, and compiling every phrase for each took seconds.
+    private let protectedPatterns: [NSRegularExpression]
 
     public init(dictionary: [DictionaryEntry], names: [String], protecting phrases: [String] = []) {
-        protectedPhrases = phrases.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        protectedPatterns = phrases.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.map(MeetingNotesFixer.pattern)
         entries = dictionary.filter { $0.apps.isEmpty && $0.projects.isEmpty }
         var targets: [String: String] = [:]
         let nameWords = names.flatMap { $0.split(whereSeparator: { !$0.isLetter && $0 != "'" && $0 != "-" }).map(String.init) }
@@ -66,8 +67,8 @@ public struct MeetingVocabulary: Sendable {
         // The notes' own matcher, so protection finds exactly what the notes will (any run of spaces, whole words).
         var ranges: [Range<String.Index>] = []
         let whole = NSRange(text.startIndex..., in: text)
-        for phrase in protectedPhrases {
-            for match in MeetingNotesFixer.pattern(for: phrase).matches(in: text, range: whole) {
+        for pattern in protectedPatterns {
+            for match in pattern.matches(in: text, range: whole) {
                 if let found = Range(match.range, in: text) { ranges.append(found) }
             }
         }

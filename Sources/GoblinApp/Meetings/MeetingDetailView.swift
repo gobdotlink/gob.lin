@@ -387,7 +387,7 @@ struct MeetingDetailView: View {
         let trimmed = other?.name ?? typed
         guard trimmed != lane.name else { return }
         if let other { return merge(lane, into: other) }
-        change(lane.needsName ? "Named \(lane.name) \(trimmed)." : "Renamed \(lane.name) to \(trimmed).") {
+        change(lane.needsName ? "Named \(lane.name) \(trimmed)." : "Renamed \(lane.name) to \(trimmed).", showing: [lane.name: trimmed]) {
             try await store.renameSpeaker(meeting.id, from: lane.name, to: trimmed)
         }
     }
@@ -400,13 +400,16 @@ struct MeetingDetailView: View {
             : SpeakerSuggestions.unmatched(lanes: lanes, participants: detail?.participants ?? MeetingParticipants())
         let warning = SpeakerSuggestions.mergeWarning(unmatched: unmatched)
         change("Merged \(lane.name) into \(other.name).", missing: unmatched.count == 1 ? unmatched[0] : nil,
-               mergedFrom: warning == nil ? nil : lane.name, warning: warning) {
+               mergedFrom: warning == nil ? nil : lane.name, warning: warning, showing: [lane.name: other.name]) {
             try await store.renameSpeaker(meeting.id, from: lane.name, to: other.name)
         }
     }
 
+    /// `renamed` (shown name → new name) shows on the page at once; the reload after saving replaces it, or puts the
+    /// old names back if saving failed.
     private func change(_ message: String, missing: String? = nil, mergedFrom: String? = nil, warning: String? = nil,
-                        _ edit: @escaping () async throws -> [TranscriptTurn]) {
+                        showing renamed: [String: String] = [:], _ edit: @escaping () async throws -> [TranscriptTurn]) {
+        show(renamed)
         Task {
             do {
                 let before = try await store.speakerNames(meeting.id)
@@ -417,6 +420,16 @@ struct MeetingDetailView: View {
             reloads += 1
             onEdited()
         }
+    }
+
+    /// The chips, timeline and transcript under the new names before they're saved, so a name given takes at once.
+    private func show(_ renamed: [String: String]) {
+        guard !renamed.isEmpty, var shown = detail else { return }
+        for index in shown.turns.indices {
+            if let name = renamed[shown.turns[index].speaker] { shown.turns[index].speaker = name }
+        }
+        detail = shown
+        lanes = MeetingTimeline.lanes(shown.turns, kind: meeting.kind)
     }
 
     /// Undoes a merge and names the voice that was merged in after the person who had no voice.
