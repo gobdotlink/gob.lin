@@ -209,7 +209,7 @@ public actor MeetingStore {
         let notes: String? = if let written = MeetingNotesFile.read(directory) {
             MeetingNotesFile.markdown(written, title: detail.summary.title, names: MeetingNotesFile.names(for: written, directory: directory),
                                       typedNotes: detail.typedNotes)
-        } else if let typed = detail.typedNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty {
+        } else if let typed = detail.typedNotes, !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             "## Your notes\n\n" + typed
         } else { nil }
         return MeetingMarkdown.export(detail, notes: notes)

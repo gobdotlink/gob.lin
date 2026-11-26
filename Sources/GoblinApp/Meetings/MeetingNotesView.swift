@@ -40,8 +40,9 @@ struct MeetingNotesSection: View {
                     if let notes { Text("· " + byline(notes)).font(.meta).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer(minLength: 8)
                 }
-                if notes != nil {
-                    CopyIconButton(title: "Copy Notes") { markdown }
+                // What was typed has its own tab and copy button, so this copies the written notes alone.
+                if let notes {
+                    CopyIconButton(title: "Copy Notes") { MeetingNotesFile.markdown(notes, title: meeting.title, names: shown) }
                 }
                 if notes != nil, meeting.state == .ready { menu }
             }
@@ -254,14 +255,10 @@ struct MeetingNotesSection: View {
         model.write(meeting.id, override: settings) { onChanged() }
     }
 
-    private var markdown: String? {
-        notes.map { MeetingNotesFile.markdown($0, title: meeting.title, names: shown, typedNotes: typedNotes) }
-    }
-
     private func copy() {
-        guard let markdown else { return }
+        guard let notes else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(markdown, forType: .string)
+        NSPasteboard.general.setString(MeetingNotesFile.markdown(notes, title: meeting.title, names: shown, typedNotes: typedNotes), forType: .string)
     }
 
     private func change(_ edit: @escaping () async throws -> Void) {
@@ -327,6 +324,8 @@ struct MeetingNeedsYou: View {
             }
         }
         .onChange(of: notes?.fixes ?? []) { _, fixes in settling.settle(fixes) }
+        // Notes deleted: what Fix All fixed went with them, and the Undo mustn't come back for notes written later.
+        .onChange(of: notes == nil) { _, gone in if gone { fixedAll = [] } }
     }
 
     private func card(_ words: [MeetingNotes.SpellingFix]) -> some View {

@@ -211,7 +211,9 @@ struct MeetingDetailView: View {
 
     private var tab: Tab {
         if let pickedTab, pickedTab != .typed || detail?.typedNotes != nil { return pickedTab }
-        return savedNotes != nil || notesModel.writing.contains(meeting.id) ? .notes : .transcript
+        // A first write that failed stays on Notes too, where its failure and Try Again are.
+        let notes = savedNotes != nil || notesModel.writing.contains(meeting.id) || notesModel.failures[meeting.id] != nil
+        return notes ? .notes : .transcript
     }
 
     private var tabs: some View {
@@ -343,7 +345,7 @@ struct MeetingDetailView: View {
             HStack(spacing: 6) {
                 tabs
                 Spacer(minLength: 8)
-                CopyIconButton(title: "Copy Your Notes") { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                CopyIconButton(title: "Copy Your Notes") { text }
             }
             Plate {
                 Text(text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.row).lineSpacing(2)

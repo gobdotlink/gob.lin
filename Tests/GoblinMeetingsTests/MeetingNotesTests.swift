@@ -605,3 +605,21 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     #expect(all.hasPrefix("---\ntitle: "))
     #expect(decisions.lowerBound < transcript.lowerBound && transcript.lowerBound < firstTurn.lowerBound)
 }
+
+@Test func undoAfterFixAllLeavesAWordPutBackMeanwhile() async throws {
+    let root = try Fixtures.temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (store, id, directory) = try await planningMeeting(in: root)
+    var answer = try JSONSerialization.jsonObject(with: planningAnswer()) as! [String: Any]
+    answer["fixes"] = [["heard": "Kestral", "meant": "Kestrel"]]
+    try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(try JSONSerialization.data(withJSONObject: answer)))
+    try await store.applyFixes(id, heard: ["Kestral"])
+    try await store.dismissFix(id, heard: "Kestral")
+    // Fix All's Undo arrives after Put Back: the word stays put back, and isn't asked about again.
+    try await store.suggestFixes(id, heard: ["Kestral"])
+    let fix = try #require(MeetingNotesFile.read(directory)?.fixes.first)
+    #expect(fix.kind == .applied && fix.dismissed)
+    // Nor does a later Fix All override it.
+    try await store.applyFixes(id, heard: ["Kestral"])
+    #expect(MeetingNotesFile.read(directory)?.fixes.first?.dismissed == true)
+}
