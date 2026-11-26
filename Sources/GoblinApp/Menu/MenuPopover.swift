@@ -3,6 +3,7 @@ import GoblinCore
 import SwiftUI
 
 /// The popover behind the menu-bar icon: everything used daily, one click deep.
+/// Top to bottom: what's happening, what you said, what you recorded, then the settings.
 /// Each module observes only the models it shows, so a meter tick or a hovered row redraws
 /// that module rather than the whole popover.
 struct MenuPopover: View {
@@ -16,10 +17,15 @@ struct MenuPopover: View {
             PopoverNotices(model: model)
             PopoverMeeting(meetings: model.meetings)
             PopoverReadyMeeting(model: model)
-            PopoverMicrophone(preview: model.audioPreview, microphones: model.microphones) { dismiss.then { model.openSettings(.audio) } }
-            HStack(spacing: 8) { PopoverCleanup(model: model); PopoverTone() }
             PopoverRecents(model: model)
             PopoverMeetingsList(model: model)
+            VStack(spacing: 2) {
+                PopoverMicrophone(preview: model.audioPreview, microphones: model.microphones) { dismiss.then { model.openSettings(.audio) } }
+                PopoverCleanup(model: model)
+                PopoverTone()
+            }
+            .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.vertical, 6)
+            .moduleBackground(padded: false)
             PopoverFooter(model: model)
         }
         .padding(8)
@@ -189,84 +195,91 @@ private struct PopoverNotices: View {
 
 // MARK: Microphone
 
-/// Always the same height: the meter shows flat until the button is held, so the popover never resizes.
+/// One row: the microphone in use opens the picker, and Hold to Test swaps its name for the level while held.
+/// A line appears under it only while there is something to say about the mic.
 private struct PopoverMicrophone: View {
     @ObservedObject var preview: AudioPreviewModel
     @ObservedObject var microphones: MicrophonesModel
     let editRanking: () -> Void
-    @State private var levels = Array(repeating: 0.0, count: 28)
+    @State private var levels = Array(repeating: 0.0, count: 16)
     @State private var testing = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                circle("mic", on: testing)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Microphone").font(.meta).foregroundStyle(.secondary)
-                    Menu {
-                        // In ranked order, the line included; picking one moves it above everything connected now.
-                        Picker("Microphone", selection: Binding(get: { selection }, set: { microphones.pick($0) })) {
-                            ForEach(microphones.ranking.entries) { entry in
-                                if entry.isSystemDefault {
-                                    Text("Follow System Default").tag("")
-                                } else if let device = microphones.device(entry.uid), device.kind != .virtual {
-                                    Text(device.silencedByLid ? "\(device.name) · Lid Closed" : device.name).tag(device.uid)
-                                        .disabled(device.silencedByLid)
-                                }
+                Menu {
+                    // In ranked order, the line included; picking one moves it above everything connected now.
+                    Picker("Microphone", selection: Binding(get: { selection }, set: { microphones.pick($0) })) {
+                        ForEach(microphones.ranking.entries) { entry in
+                            if entry.isSystemDefault {
+                                Text("Follow System Default").tag("")
+                            } else if let device = microphones.device(entry.uid), device.kind != .virtual {
+                                Text(device.silencedByLid ? "\(device.name) · Lid Closed" : device.name).tag(device.uid)
+                                    .disabled(device.silencedByLid)
                             }
                         }
-                        .pickerStyle(.inline).labelsHidden()
-                        let others = ranked.filter { $0.kind == .virtual }
-                        if !others.isEmpty {
-                            Menu("Other Devices") {
-                                ForEach(others) { device in Button(device.name) { microphones.pick(device.uid) } }
-                            }
-                        }
-                        Divider()
-                        Button("Edit Ranking…", action: editRanking)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(deviceName).font(.row.weight(.semibold)).lineLimit(1)
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
-                            Spacer(minLength: 0)
-                        }
-                        .contentShape(Rectangle())
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Microphone, \(deviceName)")
                     }
-                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+                    .pickerStyle(.inline).labelsHidden()
+                    let others = ranked.filter { $0.kind == .virtual }
+                    if !others.isEmpty {
+                        Menu("Other Devices") {
+                            ForEach(others) { device in Button(device.name) { microphones.pick(device.uid) } }
+                        }
+                    }
+                    Divider()
+                    Button("Edit Ranking…", action: editRanking)
+                } label: {
+                    HStack(spacing: 10) {
+                        circle("mic", on: testing, size: SettingRow.circle)
+                        Text("Microphone").fixedSize()
+                        // A muted or zero-volume mic has no level to show, and the warning under the row doesn't name it.
+                        if testing, preview.silenceNotice == nil { meter } else { settingValue(deviceName) }
+                    }
+                    .padding(.leading, PopoverModule.bleed).frame(maxHeight: .infinity).contentShape(Rectangle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Microphone, \(deviceName)")
                 }
-                Spacer(minLength: 6)
-                Text(testing ? "Testing" : "Hold to Test")
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+                // As wide as its longer title, so the row doesn't shift when the test starts.
+                Text("Hold to Test").hidden().overlay { Text(testing ? "Testing" : "Hold to Test") }
                     .font(.status.weight(.semibold))
                     .foregroundStyle(testing ? .white : .primary)
-                    .padding(.horizontal, 11).frame(height: 26)
+                    .padding(.horizontal, 9).frame(height: 24)
                     .background(testing ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.quaternary), in: Capsule())
                     .contentShape(Capsule())
                     // The mic opens only while the button is held, so the system's orange dot stays honest.
                     .onLongPressGesture(minimumDuration: 0, maximumDistance: 60, perform: {}) { pressing in
                         if pressing { startTest() } else { stopTest() }
                     }
+                    .help("Hold to check your mic. Nothing is recorded or saved.")
+                    .accessibilityElement(children: .ignore)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Hold to test the microphone")
+                    .accessibilityValue(testing ? "Level only. Nothing is recorded or saved." : "")
             }
-            HStack(alignment: .center, spacing: 0) {
-                ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
-                    Capsule().fill(testing && level > 0.02 ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.tertiary))
-                        .frame(width: 3, height: 3 + (testing ? level : 0) * 22)
-                        .frame(maxWidth: .infinity)
-                }
+            .padding(.trailing, PopoverModule.bleed).frame(height: SettingRow.height)
+            if let line = preview.silenceNotice ?? preview.error ?? standIn {
+                Text(line).font(.meta).lineLimit(1)
+                    .foregroundStyle(preview.silenceNotice == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                    .padding(.leading, PopoverModule.bleed + SettingRow.circle + 10).padding(.trailing, PopoverModule.bleed).padding(.bottom, 7)
             }
-            .frame(height: 26)
-            .accessibilityHidden(true)
-            Text(preview.silenceNotice ?? preview.error ?? (testing ? "Level only. Nothing is recorded or saved." : note))
-                .font(.meta).foregroundStyle(preview.silenceNotice == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red)).lineLimit(1)
         }
-        .moduleBackground()
-        .onChange(of: preview.level) { _, level in levels = Array((levels + [level]).suffix(28)) }
+        .modifier(SettingRow())
+        .onChange(of: preview.level) { _, level in levels = Array((levels + [level]).suffix(levels.count)) }
         // A microphone arriving or leaving mid-test moves the test with it.
         .onChange(of: microphones.choice) { if testing { preview.start(ranking: microphones.ranking) } }
         .onDisappear { if testing { stopTest() } }
+    }
+
+    private var meter: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+                Capsule().fill(level > 0.02 ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.tertiary))
+                    .frame(width: 3, height: 3 + level * 17)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing).frame(height: 20)
+        .accessibilityHidden(true)
     }
 
     private var deviceName: String { microphones.inUse?.name ?? "No Microphone" }
@@ -279,8 +292,10 @@ private struct PopoverMicrophone: View {
     }
 
     /// Why the microphone in use isn't the favourite, so a stand-in is never a mystery.
-    private var note: String {
-        guard let passed = microphones.passedOver else { return "Hold the button to check your mic. Nothing is saved." }
+    /// During a test the line names the mic instead, because the level has taken the name's place.
+    private var standIn: String? {
+        guard let passed = microphones.passedOver else { return nil }
+        if testing { return "Testing \(deviceName)." }
         return passed.lidClosed ? "Using this while the lid is closed." : "Using this until \(passed.entry.name) connects."
     }
 
@@ -299,7 +314,7 @@ private struct PopoverMicrophone: View {
 
 // MARK: Cleanup and tone
 
-/// The circle switches cleanup on or off; the rest of the tile opens the level menu.
+/// The circle switches cleanup on or off; the rest of the row opens the level menu.
 private struct PopoverCleanup: View {
     /// Observed for refreshConfiguration, which announces saved cleanup settings.
     @ObservedObject var model: AppModel
@@ -310,8 +325,8 @@ private struct PopoverCleanup: View {
         let on = settings.enabled && settings.cleanup != .none
         return HStack(spacing: 0) {
             Button { toggleCleanup(settings) } label: {
-                circle("wand.and.stars", on: on)
-                    .padding(.leading, 12).padding(.trailing, 10).frame(maxHeight: .infinity)
+                circle("wand.and.stars", on: on, size: SettingRow.circle)
+                    .padding(.leading, PopoverModule.bleed).padding(.trailing, 10).frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain).accessibilityLabel(on ? "Turn cleanup off" : "Turn cleanup on")
@@ -327,26 +342,18 @@ private struct PopoverCleanup: View {
                 Divider()
                 Button("Cleanup Settings…") { dismiss.then { model.openSettings(.cleanup) } }
             } label: {
-                HStack(spacing: 4) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Cleanup").font(.row.weight(.semibold))
-                        ViewThatFits(in: .horizontal) {
-                            Text(on ? "\(settings.cleanup.title) · \(settings.provider.title)" : "Off")
-                            Text(on ? settings.cleanup.title : "Off")
-                        }
-                        .font(.meta).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Text("Cleanup").fixedSize()
+                    settingValue(on ? "\(settings.cleanup.title) · \(settings.provider.title)" : "Off")
                 }
-                .padding(.trailing, 12).frame(maxHeight: .infinity)
+                .padding(.trailing, PopoverModule.bleed).frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
         }
-        .frame(height: 52)
-        .moduleBackground(padded: false)
+        .frame(height: SettingRow.height)
+        .modifier(SettingRow())
     }
 
     private func toggleCleanup(_ settings: RewriteSettings) {
@@ -372,7 +379,7 @@ private struct PopoverCleanup: View {
     }
 }
 
-/// The whole tile opens the tone menu.
+/// The whole row opens the tone menu.
 private struct PopoverTone: View {
     @AppStorage(DictationTone.preferenceKey) private var toneRaw = DictationTone.formal.rawValue
 
@@ -385,20 +392,16 @@ private struct PopoverTone: View {
             .pickerStyle(.inline).labelsHidden()
         } label: {
             HStack(spacing: 10) {
-                circle("textformat", on: false)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Tone").font(.row.weight(.semibold))
-                    Text(selected.title).font(.meta).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                circle("textformat", on: false, size: SettingRow.circle)
+                Text("Tone").fixedSize()
+                settingValue(selected.title)
             }
-            .padding(.horizontal, 12).frame(height: 52)
-            .moduleBackground(padded: false)
-            .contentShape(RoundedRectangle(cornerRadius: Radius.module, style: .continuous))
+            .padding(.horizontal, PopoverModule.bleed).frame(height: SettingRow.height)
+            .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .modifier(SettingRow())
     }
 }
 
@@ -422,6 +425,12 @@ private struct PopoverRecents: View {
 
     var body: some View {
         VStack(spacing: 2) {
+            HStack(spacing: 8) {
+                CapsHeader("Dictations")
+                Spacer(minLength: 8)
+                PasteLastButton(model: model)
+            }
+            .padding(.horizontal, PopoverModule.bleed).frame(height: PopoverModule.header).padding(.bottom, 2)
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField(history.counts.total > 0 ? "Search \(history.counts.total.formatted()) dictations" : "Search dictations", text: $query)
@@ -446,10 +455,9 @@ private struct PopoverRecents: View {
             }
             .frame(height: 4 * 42, alignment: .top)
             menuItem("All History", chevron: true, inset: PopoverModule.bleed) { dismiss.then { model.openHistory() } }
-            PopoverInsights(history: history) { dismiss.then { model.openSettings(.insights) } }
         }
         // Every row's words start 12 pt in, like the other modules; hover fills bleed 6 pt past them.
-        .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.vertical, 10)
+        .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.top, 6).padding(.bottom, 8)
         .moduleBackground(padded: false)
         .task(id: RecentQuery(text: query, revision: history.revision)) { await reload() }
     }
@@ -459,7 +467,32 @@ private struct PopoverRecents: View {
     }
 }
 
-/// Local totals use retained history, independently of the recent-search query.
+/// The last dictation again, beside the list it comes from. The shortcut works from anywhere.
+private struct PasteLastButton: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Button(action: paste) {
+            HStack(spacing: 5) {
+                Text("Paste Last Dictation")
+                    .foregroundStyle(model.canPasteLastTranscript ? AnyShapeStyle(GoblinBrand.mossText) : AnyShapeStyle(.tertiary))
+                Text("⌥⇧⌘V").foregroundStyle(.tertiary)
+            }
+            .font(.status).frame(maxHeight: .infinity).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!model.canPasteLastTranscript)
+    }
+
+    /// Hands focus back to the app the person was in first, so the paste lands there rather than in gob.lin.
+    private func paste() {
+        dismiss()
+        NSApp.deactivate()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { model.pasteLastTranscript() }
+    }
+}
+
+/// One footer row. Local totals use retained history, independently of the recent-search query.
 private struct PopoverInsights: View {
     @ObservedObject var history: HistoryModel
     let open: () -> Void
@@ -471,26 +504,24 @@ private struct PopoverInsights: View {
 
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Insights").font(.status.weight(.medium)).foregroundStyle(.secondary)
-                    Text(summary).font(.row).monospacedDigit()
-                }
+            HStack(spacing: 8) {
+                Text("Insights")
                 Spacer(minLength: 4)
+                Text(summary).font(.status).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
                 if let insights {
-                    HStack(alignment: .bottom, spacing: 3) {
+                    HStack(alignment: .bottom, spacing: 2) {
                         ForEach(insights.days) { day in
                             RoundedRectangle(cornerRadius: Radius.tiny)
                                 .fill(GoblinBrand.moss.opacity(day.words > 0 ? 1 : 0.2))
-                                .frame(width: 5, height: max(3, 22 * Double(day.words) / Double(max(1, insights.days.map(\.words).max() ?? 0))))
+                                .frame(width: 4, height: max(3, 14 * Double(day.words) / Double(max(1, insights.days.map(\.words).max() ?? 0))))
                         }
                     }
-                    .frame(height: 22, alignment: .bottom)
+                    .frame(height: 14, alignment: .bottom)
                     .accessibilityHidden(true)
                 }
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, PopoverModule.bleed).padding(.vertical, 7)
+            .padding(.horizontal, PopoverModule.inset).frame(height: 28)
             .contentShape(Rectangle())
         }
         .buttonStyle(MenuRowStyle())
@@ -569,35 +600,15 @@ private struct RecentRow: View {
 // MARK: Footer
 
 private struct PopoverFooter: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject private var meetings: MeetingsController
+    let model: AppModel
     @Environment(\.dismiss) private var dismiss
-
-    init(model: AppModel) {
-        self.model = model
-        _meetings = ObservedObject(wrappedValue: model.meetings)
-    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // People talking in the room, with no call: the mic alone.
-            if meetings.enabled, !meetings.isRecording {
-                menuItem("Record Conversation", action: { dismiss.then(meetings.startConversation) })
-                    .disabled(!meetings.canStart)
-                    .help("Record the people talking around this Mac from your mic. \(MeetingsController.consentLine)")
-            }
-            menuItem("Paste Last Dictation", shortcut: "⌥⇧⌘V", action: paste)
-                .disabled(!model.canPasteLastTranscript)
+            PopoverInsights(history: model.history) { dismiss.then { model.openSettings(.insights) } }
             menuItem("Settings…", shortcut: "⌘,") { dismiss.then { model.openSettings(.general) } }
         }
         .padding(.top, 2)
-    }
-
-    /// Hands focus back to the app the person was in first, so the paste lands there rather than in gob.lin.
-    private func paste() {
-        dismiss()
-        NSApp.deactivate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { model.pasteLastTranscript() }
     }
 }
 
@@ -620,11 +631,38 @@ private func moduleRow<Action: View>(symbol: String, attention: Bool, title: Str
 }
 
 @MainActor
-func circle(_ symbol: String, on: Bool) -> some View {
-    Image(systemName: symbol).font(.system(size: 14))
+func circle(_ symbol: String, on: Bool, size: CGFloat = 30) -> some View {
+    Image(systemName: symbol).font(.system(size: size < 30 ? 11 : 14))
         .foregroundStyle(on ? .white : .primary)
-        .frame(width: 30, height: 30)
+        .frame(width: size, height: size)
         .background(on ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.quaternary), in: Circle())
+}
+
+/// What a settings row is set to, with the chevron that says it opens a menu.
+@MainActor
+private func settingValue(_ text: String) -> some View {
+    HStack(spacing: 4) {
+        Text(text).font(.status).foregroundStyle(.secondary).lineLimit(1)
+        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+    }
+    // Takes the row's spare width, so a long name truncates only when it has to.
+    .frame(maxWidth: .infinity, alignment: .trailing)
+}
+
+/// A row of the settings module: it takes the list rows' hover fill. Each row pads its own controls by the bleed, so
+/// their click targets reach the fill's edges and its words line up with the list rows above.
+private struct SettingRow: ViewModifier {
+    static let height: CGFloat = 36
+    /// The icon size of the dictation and meeting rows.
+    static let circle: CGFloat = 24
+    @State private var hovered = false
+
+    func body(content: Content) -> some View {
+        content.font(.row)
+            .background(hovered ? AnyShapeStyle(.quaternary.opacity(0.7)) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+            .onHover { hovered = $0 }
+    }
 }
 
 @MainActor
@@ -677,6 +715,8 @@ enum PopoverModule {
     static let inset: CGFloat = 12
     /// How far a row's hover fill reaches past its words.
     static let bleed: CGFloat = 6
+    /// The line that names a list, with the list's own action at its end.
+    static let header: CGFloat = 24
     /// Light glass in light mode, a faint lift in dark: modules sit on the panel rather than sinking into it.
     static let fill = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.075) : NSColor(white: 1, alpha: 0.62)

@@ -268,10 +268,13 @@ struct PopoverReadyMeeting: View {
 // MARK: Recent meetings
 
 /// The last week's meetings, one click from the menu bar, drawn like the dictation rows. A meeting with voices to name
-/// says how many, in amber. All Meetings opens the page; the plate is there whenever Meetings is on and has any.
+/// says how many, in amber. Record Conversation sits in the header and All Meetings opens the page; the plate is there
+/// whenever Meetings is on.
 struct PopoverMeetingsList: View {
     let model: AppModel
     @ObservedObject private var meetings: MeetingsController
+    /// A waiting update holds a module above the lists until it's installed.
+    @ObservedObject private var updates: UpdateChecker
     @Environment(\.dismiss) private var dismiss
 
     /// Up to three rows, as many as fit under the menu bar with everything else the popover shows. The popover doesn't
@@ -279,13 +282,15 @@ struct PopoverMeetingsList: View {
     private var rows: Int {
         let available = (NSScreen.main?.visibleFrame.height ?? 1_000) - Self.restOfPopover - Self.plateChrome
             - (meetings.visibleUnopenedMeeting == nil ? 0 : Self.readyCard)
+            - (updates.availableVersion == nil ? 0 : Self.updateNotice)
         return min(3, max(0, Int(available / Self.rowHeight)))
     }
-    /// Measured heights in points: the popover without this plate, the ready card, the plate with no rows (All Meetings
-    /// and padding), and one row. A little is kept spare for a problem module.
-    static let restOfPopover: CGFloat = 694
+    /// Measured heights in points: the popover without this plate, the ready card, the update module, the plate with no
+    /// rows (its header, All Meetings and padding), and one row. A little is kept spare for a problem module.
+    static let restOfPopover: CGFloat = 600
     static let readyCard: CGFloat = 104
-    static let plateChrome: CGFloat = 48
+    static let updateNotice: CGFloat = 58
+    static let plateChrome: CGFloat = 70
     static let rowHeight: CGFloat = 42
     /// Older meetings are on the page, not here.
     static let recent: TimeInterval = 7 * 86_400
@@ -293,6 +298,7 @@ struct PopoverMeetingsList: View {
     init(model: AppModel) {
         self.model = model
         _meetings = ObservedObject(wrappedValue: model.meetings)
+        _updates = ObservedObject(wrappedValue: model.updates)
     }
 
     private var shown: [StoredMeeting] {
@@ -305,14 +311,30 @@ struct PopoverMeetingsList: View {
     }
 
     var body: some View {
-        if meetings.enabled, !meetings.meetings.isEmpty {
+        if meetings.enabled {
             VStack(spacing: 2) {
+                HStack(spacing: 8) {
+                    CapsHeader("Meetings")
+                    Spacer(minLength: 8)
+                    // People talking in the room, with no call: the mic alone.
+                    if !meetings.isRecording {
+                        Button("Record Conversation") { dismiss.then(meetings.startConversation) }
+                            .buttonBorderShape(.capsule).controlSize(.small).disabled(!meetings.canStart)
+                            .help("Record the people talking around this Mac from your mic. \(MeetingsController.consentLine)")
+                    }
+                }
+                .padding(.horizontal, PopoverModule.bleed).frame(height: PopoverModule.header).padding(.bottom, 2)
                 ForEach(shown) { meeting in
                     PopoverMeetingRow(meeting: meeting) { dismiss.then { model.openMeeting(meeting.id) } }
                 }
-                menuItem("All Meetings", chevron: true, inset: PopoverModule.bleed) { dismiss.then { model.openMeeting() } }
+                if meetings.meetings.isEmpty {
+                    Text("Your meetings show up here.").font(.status).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).padding(.horizontal, PopoverModule.bleed)
+                } else {
+                    menuItem("All Meetings", chevron: true, inset: PopoverModule.bleed) { dismiss.then { model.openMeeting() } }
+                }
             }
-            .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.vertical, shown.isEmpty ? 4 : 10)
+            .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.top, 6).padding(.bottom, 8)
             .moduleBackground(padded: false)
         }
     }

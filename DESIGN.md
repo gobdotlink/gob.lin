@@ -139,7 +139,7 @@ The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a 
 - Hairlines provide structure: 0.5 pt at 8–14% black or white. Shadows provide elevation: layered and soft.
 - Motion animates transform and opacity only. Enter with ease-out in 120–200 ms, and exit faster than you enter. Scale from 0.94 or more, never from 0. Keyboard-triggered, high-frequency actions don't animate.
 - Under Reduce Motion, keep the fades, drop the movement, and keep the sprite frame swaps.
-- The whole visible shape of a control is its click target. Plain-styled buttons, menus and rows get a `contentShape` that covers their padding, and a popover tile that opens a menu is clickable edge to edge.
+- The whole visible shape of a control is its click target. Plain-styled buttons, menus and rows get a `contentShape` that covers their padding, and a popover row with one menu opens it from anywhere on the row, and in a row with two controls each reaches its own end of the row.
 
 ## Surfaces
 
@@ -184,17 +184,19 @@ Motion: in is opacity 0→1 and y +8→0 over 140 ms with ease-out; out is 120 m
 
 ### Menu-bar popover
 
-`GoblinApp.swift`. Use `MenuBarExtra` in window style: a 360 pt glass panel. Top to bottom:
+`GoblinApp.swift`. Use `MenuBarExtra` in window style: a 360 pt glass panel. What's happening comes first, then what you said, what you recorded, and the settings last. Top to bottom:
 
 1. **Header:** the goblin at 64 pt, whose eyes follow the pointer anywhere over the popover and look ahead when it leaves (side-eye while something needs attention), the wordmark, a status light with a sentence ("Ready · hold fn to talk"), and a ⋯ button. While the goblin has dictionary suggestions, one moss line under the status ("3 new words for gob.lin") opens the Dictionary page.
 2. **Meeting:** only while Meetings is on and there's something to say. After a meeting is processed and until it's opened or dismissed (×), a ready card: the moss check, "Weekly sync is ready", "42 min · Zoom · I knew Sam's voice", an amber "1 voice still needs a name." when one does, then Who's This? (moss, opening the meeting with Who's this? on its first unnamed voice) and Open, or a moss Open when every voice has a name, and Copy Transcript. It outlasts the overlay's ready chip and a relaunch. While recording: a moss headset circle (two people, in person), the title and "Recording Zoom", the elapsed time at 15 pt and Stop; You and Them level bars in moss (one Room row in person); then the line that matters now: the auto-stop countdown ("Zoom let go of the mic, so I'll stop in 0:47.") with Keep Recording and Stop Now, the quiet-room question with Keep Going, a lost mic or lost call sound, a silent mic, the mute line ("You're muted in Zoom, so I'm leaving your mic out."), the speech model's first download, or captions left for after the call. Under it Mark This, Show or Hide Sidekick, and the number of marks. After Stop: "Sorting out who said what…" with a small spinner. With a call on the mic that isn't recording: "Zoom is using your mic · Weekly sync · not recording" with a moss Record. With System Audio Recording off: an amber module, "I can only hear your side of calls until you turn it back on.", with Open System Settings.
 3. **Problems:** only while true. Each is an amber module with a plain title and sentence (`DiagnosticFailure.plainWords`) and the one button that fixes it (`AppModel.fix(for:)`).
 4. **Update:** only when an update is available, with a Restart button.
-5. **Microphone:** the microphone in use, a picker in ranked order ending with Edit Ranking…, and press-and-hold "Hold to Test". The mic opens only while it's held and shows the level; nothing is recorded or saved. While a higher-ranked mic is away or the lid has silenced it, the line under the meter says which one is standing in.
-6. **Cleanup and Tone** side by side. Clicking Cleanup's circle toggles it; its label opens the level menu.
-7. **Search:** a field plus the four latest dictations. Hovering a row shows copy and star. Then "All History".
-8. **Meetings:** while Meetings is on and has any meeting: the last week's meetings, three rows drawn like the dictation rows (the call app's icon, the title, "Zoom · 42 min · 1 hour ago", and an amber light with "2 to name" or "Processing"), as many as fit under the menu bar up to three (the popover doesn't scroll, so on a short screen with the ready card up it can be All Meetings alone), then All Meetings ›. A row opens its meeting. While the ready card is hidden (a recording or processing holds the module), its meeting is listed here.
-9. **Footer:** "Record Conversation" while Meetings is on and nothing records (people talking in the room, from the mic alone), "Paste Last Dictation ⌥⇧⌘V" and "Settings… ⌘,".
+5. **Dictations:** a small-caps label with "Paste Last Dictation ⌥⇧⌘V" at its end, in moss, or grey while there's nothing to paste, a search field and the four latest dictations. Hovering a row shows copy and star. Then "All History".
+6. **Meetings:** while Meetings is on. A small-caps label with a Record Conversation capsule at its end (people talking in the room, from the mic alone), hidden while a meeting records and disabled while one is starting or stopping, then the last week's meetings, three rows drawn like the dictation rows (the call app's icon, the title, "Zoom · 42 min · 1 hour ago", and an amber light with "2 to name" or "Processing"), as many as fit under the menu bar up to three (the popover doesn't scroll, so on a short screen with the ready card up it can be All Meetings alone), then All Meetings ›. A row opens its meeting. While the ready card is hidden (a recording or processing holds the module), its meeting is listed here. Before the first meeting, "Your meetings show up here." stands in for the rows and All Meetings.
+7. **Settings:** one module of three rows, each a 24 pt circle, the name, and what it's set to with a chevron, opening a menu.
+   - Microphone: the microphone in use, a picker in ranked order ending with Edit Ranking…, and press-and-hold "Hold to Test". The mic opens only while it's held, and the level takes the place of its name, unless the mic is silent and there's no level to show; nothing is recorded or saved. The picker and Hold to Test are separate targets. A line under the row appears only while there's something to say: which mic is standing in while a higher-ranked one is away or the lid has silenced it (during a test it names the mic being tested), a silent mic, or an error.
+   - Cleanup: clicking the circle toggles it; the rest of the row opens the level menu.
+   - Tone: the whole row opens the tone menu.
+8. **Footer:** "Insights" with this week's words and the last seven days as bars, and "Settings… ⌘,".
 
 The ⋯ menu is a plain menu: Permissions… (with the number that are off), Diagnostics…, Copy Diagnostics, Check for Updates…, About gob.lin, and Quit gob.lin ⌘Q.
 
