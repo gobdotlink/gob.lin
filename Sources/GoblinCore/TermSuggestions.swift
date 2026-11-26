@@ -422,14 +422,16 @@ public enum TermSuggestions {
         guard from != to else { return false }
         let words = heard.split(whereSeparator: \.isWhitespace)
         if words.contains(where: { word in word.contains(where: \.isLetter) && !isKnownWord(String(word)) }) { return true }
-        return words.count == 1 && candidate.spelling.allSatisfy(\.isLetter) && !DictionaryCorrector.commonEnglish.contains(to)
-            && (soundsAlike(from, to) || soundsTheSame(from, to))
+        // A contraction heard ("He's") is grammar, even when its letters sound like the fix ("Haze").
+        return words.count == 1 && heard.allSatisfy(\.isLetter) && candidate.spelling.allSatisfy(\.isLetter)
+            && !DictionaryCorrector.commonEnglish.contains(to) && (soundsAlike(from, to) || soundsTheSame(from, to))
     }
 
-    /// Two words spelled apart but said the same, such as "light" and "lite". Everyday homophones like "then" and
-    /// "than" also match; callers keep those out with the common-word list.
+    /// Two words spelled apart but said the same, such as "light" and "lite", and not two forms of one word ("flake"
+    /// and "flaky"). Everyday homophones like "then" and "than" also match; callers keep those out with the common-word
+    /// list.
     static func soundsTheSame(_ first: String, _ second: String) -> Bool {
-        guard first != second, let key = phoneticKey(first), key.count >= 2 else { return false }
+        guard first != second, !areForms(first, second), let key = phoneticKey(first), key.count >= 2 else { return false }
         return phoneticKey(second) == key
     }
 
@@ -488,10 +490,15 @@ public enum TermSuggestions {
     static func soundsAlike(_ first: String, _ second: String) -> Bool {
         guard first.first == second.first, let distance = EditObservation.graphemeDistance(first, second),
               distance * 2 <= max(first.count, second.count) else { return false }
+        return !areForms(first, second)
+    }
+
+    /// Whether two lowercased words differ only by an ending, such as "use" and "used". A dropped final "e" makes
+    /// another word, not another form: "sole" and "sol", "hope" and "hop".
+    static func areForms(_ first: String, _ second: String) -> Bool {
         let stem = first.commonPrefix(with: second).count
         let endings: Set<String> = [String(first.dropFirst(stem)), String(second.dropFirst(stem))]
-        // A dropped final "e" makes another word, not another form: "sole" and "sol", "hope" and "hop".
-        return endings == ["", "e"] || !wordEndings.isSuperset(of: endings)
+        return endings != ["", "e"] && wordEndings.isSuperset(of: endings)
     }
 
     static func looksLikeTerm(_ spelling: String, isKnownWord: (String) -> Bool) -> Bool {

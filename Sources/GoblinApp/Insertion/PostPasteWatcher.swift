@@ -115,12 +115,13 @@ final class PostPasteWatcher {
             session = current
             return true
         case .deleted:
-            if preserving { return true }
+            // Sent with a Send button, seen by the click's own sample or a later poll: what the field held before it
+            // emptied is the outcome. Ending now keeps a follow-up typed into the empty field from counting as an edit.
             if EditObservation.submittedByClick(clickedAt: current.clickedAt, deletedAt: ProcessInfo.processInfo.systemUptime) {
-                // Sent with a Send button: what the field held before it emptied is the outcome.
                 finish(report: true)
                 return false
             }
+            if preserving { return true }
             current.regionDeleted = true
             current.lastDistance = current.anchor.inserted.count
             current.maximumDistance = max(current.maximumDistance, current.anchor.inserted.count)
