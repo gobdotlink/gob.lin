@@ -422,8 +422,9 @@ public enum TermSuggestions {
         guard from != to else { return false }
         let words = heard.split(whereSeparator: \.isWhitespace)
         if words.contains(where: { word in word.contains(where: \.isLetter) && !isKnownWord(String(word)) }) { return true }
-        // A contraction heard ("He's") is grammar, even when its letters sound like the fix ("Haze").
-        return words.count == 1 && heard.allSatisfy(\.isLetter) && candidate.spelling.allSatisfy(\.isLetter)
+        // A contraction heard ("He's") is grammar, even when its letters sound like the fix ("Haze"). A hyphenated word
+        // ("de-ice" → "dice") is compared by its letters.
+        return words.count == 1 && !heard.contains(where: { "'’".contains($0) }) && candidate.spelling.allSatisfy(\.isLetter)
             && !DictionaryCorrector.commonEnglish.contains(to) && (soundsAlike(from, to) || soundsTheSame(from, to))
     }
 

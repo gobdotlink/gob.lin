@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import GoblinCore
 
-private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted", "light", "lite", "he's", "haze", "flake", "flaky", "surveying", "should"]
+private let known: Set<String> = ["window", "sources", "tests", "docs", "app", "the", "go", "post", "hog", "use", "we", "it", "daily", "feedback", "media", "panacea", "going", "to", "don't", "a", "codec", "codex", "clawed", "claude", "soul", "sol", "sole", "source", "sub", "agent", "music", "candidate", "candidates", "sourcing", "sourced", "there", "they're", "then", "than", "want", "wanted", "light", "lite", "he's", "haze", "flake", "flaky", "surveying", "should", "de-ice", "dice", "first", "onions"]
 private func isKnown(_ word: String) -> Bool { known.contains(word.lowercased()) }
 private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry] = [], dismissed: Set<String> = []) -> [TermSuggestion] {
     TermSuggestions.review(candidates, entries: entries, dismissed: dismissed, isKnownWord: isKnown)
@@ -136,6 +136,8 @@ private func review(_ candidates: [TermSuggestion], _ entries: [DictionaryEntry]
     // A contraction heard, or another form of the word, is grammar even when it sounds the same.
     #expect(review(TermSuggestions.fromCorrection(dictated: "He's surveying", edited: "Haze surveying", scope: acme)).isEmpty)
     #expect(review(TermSuggestions.fromCorrection(dictated: "should flake", edited: "should flaky", scope: acme)).isEmpty)
+    #expect(review(TermSuggestions.fromCorrection(dictated: "First de-ice the onions", edited: "First dice the onions", scope: acme))
+            .map(\.spelling) == ["dice"])
     #expect(!TermSuggestions.soundsTheSame("flake", "flaky") && TermSuggestions.soundsTheSame("sole", "soul"))
     #expect(TermSuggestions.soundsTheSame("light", "lite") && TermSuggestions.soundsTheSame("reign", "rain") && TermSuggestions.soundsTheSame("knight", "night"))
     #expect(TermSuggestions.soundsTheSame("then", "than"))
