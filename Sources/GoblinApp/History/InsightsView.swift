@@ -91,55 +91,38 @@ struct InsightsView: View {
                 activityRange(all, period: shown.period)
             }
         }
-        if detailWidth >= 1040 {
-            Section {
-                SplitColumns(leadingFraction: 0.58, spacing: 20) {
-                    PlateSection(title: "What you talked about", first: true) {
-                        cloudRow(shown)
-                    }
-                    VStack(alignment: .leading, spacing: 0) {
-                        // One device is the whole story, so the plate shows only when the period has more than one.
-                        if shown.insights.devices.count > 1 {
-                            PlateSection(title: "Where you talked", first: true) {
-                                ForEach(shown.insights.devices) { device in
-                                    shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
-                                             total: shown.insights.totalWords)
-                                }
-                            }
-                        }
-                        PlateSection(title: "Where I typed", first: shown.insights.devices.count <= 1) {
-                            if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
-                            ForEach(shown.insights.applications) { app in
-                                shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
-                                         words: app.words, total: shown.insights.totalWords)
+        // Keep one view subtree and switch placement via AnyLayout so PixelWordCloud preserves its packed layout
+        // and VoiceOver elements while resizing across the breakpoint.
+        let lowerLayout = detailWidth >= 1040
+            ? AnyLayout(SplitColumns(leadingFraction: 0.58, spacing: 20))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+        Section {
+            lowerLayout {
+                PlateSection(title: "What you talked about", first: true) {
+                    cloudRow(shown)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    // One device is the whole story, so the plate shows only when the period has more than one.
+                    if shown.insights.devices.count > 1 {
+                        PlateSection(title: "Where you talked", first: true) {
+                            ForEach(shown.insights.devices) { device in
+                                shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
+                                         total: shown.insights.totalWords)
                             }
                         }
                     }
-                }
-                .padding(.top, 2)
-            }
-            .containerValue(\.plateless, true)
-        } else {
-            Section("What you talked about") {
-                cloudRow(shown)
-            }
-            // One device is the whole story, so the plate shows only when the period has more than one.
-            if shown.insights.devices.count > 1 {
-                Section("Where you talked") {
-                    ForEach(shown.insights.devices) { device in
-                        shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
-                                 total: shown.insights.totalWords)
+                    PlateSection(title: "Where I typed", first: shown.insights.devices.count <= 1) {
+                        if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
+                        ForEach(shown.insights.applications) { app in
+                            shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
+                                     words: app.words, total: shown.insights.totalWords)
+                        }
                     }
                 }
             }
-            Section("Where I typed") {
-                if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
-                ForEach(shown.insights.applications) { app in
-                    shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
-                             words: app.words, total: shown.insights.totalWords)
-                }
-            }
+            .padding(.top, 2)
         }
+        .containerValue(\.plateless, true)
         Section {
             DisclosureGroup("How I count") {
                 let devices = all.devices.count > 1 ? " from \(all.devices.count.formatted()) devices" : ""
