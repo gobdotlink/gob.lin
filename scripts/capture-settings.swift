@@ -167,10 +167,10 @@ struct SettingsCapture {
                     for dark in [false, true] {
                         try await shoot("hoard-full\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
                                         size: NSSize(width: 1100, height: 3200), dark: dark, settle: .seconds(1))
+                        // A wide window, where the shelves should use the room.
+                        try await shoot("hoard-wide\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
+                                        size: NSSize(width: 1600, height: 1400), dark: dark, settle: .seconds(1))
                     }
-                    // A wide window, where the shelves should use the room.
-                    try await shoot("hoard-wide-dark", SettingsView(model: model, speechModels: model.speechModels),
-                                    size: NSSize(width: 1600, height: 1400), dark: true, settle: .seconds(1))
                     // One treasure up close: found, next on its shelf, and a secret not found yet.
                     for (name, id) in [("found", "words-100000"), ("next", "words-250000"), ("secret", "secret-lurker")] {
                         for dark in [false, true] {
