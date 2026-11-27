@@ -30,6 +30,8 @@ struct TreasureSprite: View {
 struct HoardView: View {
     @ObservedObject var hoard: HoardModel
     @ObservedObject var meetings: MeetingsController
+    /// The Settings window's pointer, so the goblin watches it like About's.
+    let eyes: GoblinEyes
     /// New since the Hoard was last open, marked for this visit.
     @State private var fresh: Set<String> = []
     @State private var inspected: Treasure?
@@ -63,7 +65,7 @@ struct HoardView: View {
                 Section { Text("Counting the hoard…").foregroundStyle(.secondary) }
             }
         }
-        .formStyle(PlateFormStyle(maxWidth: 1160))
+        .formStyle(PlateFormStyle(maxWidth: .infinity))
         .task { await hoard.refresh(meetings: true) }
         // Anything new while the Hoard is open is marked NEW for this visit, and stops being new when it closes.
         .onChange(of: hoard.ledger.unseen, initial: true) { _, unseen in fresh.formUnion(unseen) }
@@ -76,7 +78,7 @@ struct HoardView: View {
     private func hero(_ stats: HoardStats, closest: [Rung]) -> some View {
         let count = hoard.ledger.found.count, total = Hoard.treasures.count
         return HStack(alignment: .center, spacing: 22) {
-            PixelSprite(sprite: .cackle, scale: 2)
+            GazingGoblin(eyes: eyes, scale: 2)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(count.formatted()).font(.system(size: 48, weight: .semibold)).monospacedDigit()
@@ -146,7 +148,7 @@ struct HoardView: View {
         let next = all.first { !found($0) }
         let shown = shelf == .secrets ? all : all.filter { found($0) || $0.id == next?.id }
         let hidden = all.count - shown.count
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 92, maximum: 132), spacing: 0, alignment: .top)], alignment: .leading, spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 0, alignment: .top)], alignment: .leading, spacing: 12) {
             ForEach(shown) { treasure in
                 TreasureCell(treasure: treasure, find: hoard.ledger.found[treasure.id], isNew: fresh.contains(treasure.id),
                              progress: treasure.id == next?.id && measured(treasure) ? (fraction(treasure, stats), treasure.percent(stats)) : nil) { inspected = treasure }
@@ -154,7 +156,6 @@ struct HoardView: View {
             if hidden > 0 {
                 VStack(spacing: 0) {
                     Text("+\(hidden)").font(.cardTitle).foregroundStyle(.tertiary).frame(height: 84)
-                    Ledge()
                     Text("More to find").font(.meta.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 7)
                 }
                 .frame(maxWidth: .infinity)
@@ -218,12 +219,9 @@ private struct TreasureCell: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 0) {
-                ZStack {
-                    if find != nil { CandleGlow().frame(width: 104, height: 84) }
-                    TreasureSprite(treasure: treasure, scale: 3, silhouette: find == nil)
-                }
-                .frame(height: 84)
-                Ledge()
+                // The sprite's own size, so every name on a row lines up and no cell is wider than its column.
+                TreasureSprite(treasure: treasure, scale: 3, silhouette: find == nil)
+                    .frame(height: 84, alignment: .bottom)
                 Text(hiddenSecret ? "???" : treasure.name).font(.meta.weight(.semibold))
                     .foregroundStyle(find == nil ? .secondary : .primary)
                     .multilineTextAlignment(.center).lineLimit(2).fixedSize(horizontal: false, vertical: true).padding(.top, 7)
@@ -268,11 +266,8 @@ struct TreasureSheet: View {
         let find = hoard.ledger.found[treasure.id]
         let hiddenSecret = treasure.secret != nil && find == nil
         VStack(spacing: 0) {
-            ZStack {
-                if find != nil { CandleGlow().frame(width: 260, height: 220) }
-                TreasureSprite(treasure: treasure, scale: 8, silhouette: find == nil)
-            }
-            .frame(height: 224)
+            TreasureSprite(treasure: treasure, scale: 8, silhouette: find == nil)
+                .frame(height: 224)
             Text(hiddenSecret ? "A Secret" : treasure.name).font(.cardTitle)
             Text(hiddenSecret ? "I'll tell you when you find it." : "\(treasure.requirement) · \(treasure.shelf.title)")
                 .font(.status).foregroundStyle(.secondary).padding(.top, 2)
@@ -316,23 +311,6 @@ private struct Chip: View {
             .padding(.horizontal, 9).padding(.vertical, 3)
             .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
-    }
-}
-
-/// The shelf a treasure stands on.
-private struct Ledge: View {
-    var body: some View {
-        Rectangle().fill(.primary.opacity(0.08)).frame(height: 4)
-            .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.5)).frame(height: 0.5).blendMode(.plusLighter) }
-            .padding(.horizontal, -4)
-    }
-}
-
-/// Candlelight behind a found treasure.
-private struct CandleGlow: View {
-    var body: some View {
-        Ellipse().fill(RadialGradient(colors: [GoblinBrand.candle.opacity(0.26), GoblinBrand.candle.opacity(0)],
-                                      center: .center, startRadius: 0, endRadius: 52))
     }
 }
 

@@ -60,7 +60,8 @@ struct SettingsView: View {
                 case .history: HistoryView(model: model)
                 case .meetings: MeetingsView(model: model)
                 case .insights: InsightsView(history: model.history)
-                case .hoard: HoardView(hoard: model.hoard, meetings: model.meetings)
+                // The Hoard is a gallery, not a form: its shelves take the whole width, so a wider window fits more on each.
+                case .hoard: HoardView(hoard: model.hoard, meetings: model.meetings, eyes: eyes)
                 default:
                     Form { sectionContents }
                         .formStyle(PlateFormStyle(maxWidth: section == .dictionary ? 920 : 760))
