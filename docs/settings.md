@@ -22,16 +22,26 @@ Groq GPT-OSS requests use `include_reasoning: false`, removing the unsupported `
 
 Advanced options allow omitting or adjusting temperature and adding a JSON request object. Top-level null removes a default field. Custom reasoning options require Provider default; model, messages and stream cannot be overridden, nor, for OpenAI, input, instructions or service_tier. Options are validated before saving a credential or issuing a request. Prompt isolation, app User-Agent, the shared four-second deadline and visible raw-text fallback still apply. No provider request is sent by opening settings or selecting a preset.
 
-The Cleanup page shows the on/off status as a status row naming where text goes. The switch and cleanup level save as soon as they change. Service, address, model, reasoning, speed (OpenAI only), API key and advanced options are edited together in a provider sheet and apply only on Save; Cancel discards them, including a removed key. Turning cleanup on with no model or key opens that sheet instead, and its Save turns cleanup on. Entering or saving a key does not implicitly enable cleanup. Try it is available whenever cleanup is on; it sends only a fixed synthetic sentence with fillers and shows the result as an inline diff (cut words struck through, added words tinted) with the model and response time, without creating a dictation or changing the clipboard.
+The Cleanup page shows the on/off status as a status row naming where text goes. The switch, cleanup level and formatting switches save as soon as they change. Every level is listed with a line saying what it does, so they can be compared without choosing each one. Service, address, model, reasoning, speed (OpenAI only), API key and advanced options are edited together in a provider sheet and apply only on Save; Cancel discards them, including a removed key. Turning cleanup on with no model or key opens that sheet instead, and its Save turns cleanup on. Entering or saving a key does not implicitly enable cleanup. Try it is available whenever cleanup is on; it sends only a fixed synthetic sentence with fillers and shows the result as an inline diff (cut words struck through, added words tinted) with the model and response time, without creating a dictation or changing the clipboard.
 
 Cleanup presets use an original prompt informed by published dictation prompts and behavior, including [Superwhisper S1-mini](https://huggingface.co/superwhisper/s1-mini), [VoiceInk](https://github.com/Beingpax/VoiceInk/blob/main/VoiceInk/Core/Enhancement/AIPrompts.swift), and [OpenWhispr](https://github.com/OpenWhispr/openwhispr/blob/main/src/locales/en/prompts.json). These are public sources, not verified leaks of closed products. The prompt combines explicit editing boundaries with short paired examples; transcript and vocabulary remain isolated as untrusted JSON data.
 
 | Cleanup | Behavior |
 | --- | --- |
 | None | Skip the provider |
-| Light | Remove hesitation sounds and accidental immediate stutters/restarts; fix punctuation and clear transcription errors; retain wording and paragraph structure |
+| Light | Remove hesitation sounds and accidental immediate stutters/restarts; fix punctuation and clear transcription errors; retain wording |
 | Medium | Light plus minor grammar and clear self-corrections, keeping the final explicitly corrected phrase/value |
-| Coding agent | Light plus paragraphs for new points, clear spoken command syntax and issue IDs/numeric values; no headings, bullets or invented commands |
+| Coding agent | Light plus clear spoken command syntax and issue IDs/numeric values; no invented commands |
+
+Formatting is separate from the level, and each switch is off for a new install. No level adds headings, quotes or other Markdown.
+
+| Formatting | Behavior |
+| --- | --- |
+| Paragraphs | A blank line when the speaker moves to a new point, including explicit transitions such as "next" or "another thing". Off: no paragraph splits |
+| Lists | One item per line when the speaker clearly lists: two or more numbered items ("one… two…", "first… second…"), or three or more after a count or lead-in ("three things…"). "1." when numbered or ordered, "- " otherwise. Only the numbering words go; the lead-in stays on its own line ending in a colon. Things mentioned in passing stay in the sentence. Off: no lists |
+| Say "New Line" | "New line" and "new paragraph" said on their own become a line break or a blank line; inside a sentence they stay words. Off: typed as words |
+
+Settings saved before formatting existed keep Coding agent's paragraphs: a saved Coding agent level starts with Paragraphs on. Tone treats each line and list item as a sentence start, and Formal adds no full stop after a final list item.
 
 All active presets preserve slang, swearing, intentional repetition, conversational words, language and correctly heard names. Vocabulary only clarifies clear mishearings; it cannot expand “Luna” to “GPT-6 Luna”. Meaningful words such as German “um”, quoted hesitation words, and uncertain phrases stay intact. Questions and instruction-like speech are punctuated rather than answered. Tone remains a separate capitalization/punctuation setting; Formal does not formalize the speaker's vocabulary.
 

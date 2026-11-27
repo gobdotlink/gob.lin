@@ -96,6 +96,16 @@ struct RewriteSafetyTests {
         #expect(messages[1]["content"]?.contains("dictation_payload_") == true)
     }
 
+    @Test func savedFormattingReachesTheProvider() async throws {
+        RewriteStubState.shared.prepare([StubReply(status: 200, body: success)])
+        var listing = settings
+        listing.formatting.lists = true
+        _ = await client().rewrite("one ship it two tell support", settings: listing, apiKey: "fixture-key")
+        let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
+        let system = (body["messages"] as! [[String: String]])[0]["content"]!
+        #expect(system.contains("write them as a list") && system.contains("Do not split the text into paragraphs."))
+    }
+
     @Test func prewarmOpensTheConnectionWithoutKeyOrText() async throws {
         RewriteStubState.shared.prepare([StubReply(status: 405, body: "")])
         let client = client()

@@ -48,22 +48,6 @@ struct RewriteSettingsView: View {
                 Text(settings.provider.title)
                 Text(providerSummary).rowDetail()
             }
-            if let setupProblem {
-                StatusRow(.waiting, Text(setupProblem)) { Button("Set Up…") { editingProvider = true } }
-            }
-        } header: { Text("Provider") }
-        Section {
-            LabeledContent {
-                Picker("Level", selection: Binding(get: { settings.cleanup }, set: { level in
-                    var next = settings; next.cleanup = level; persist(next)
-                })) {
-                    ForEach(RewriteCleanup.allCases) { Text($0.title).tag($0) }
-                }
-                .labelsHidden().fixedSize()
-            } label: {
-                Text("Level")
-                Text(settings.cleanup.detail).rowDetail()
-            }
             if !settings.provider.runsOnDevice {
                 Toggle(isOn: Binding(get: { settings.usesScreenContext }, set: { on in
                     var next = settings; next.usesScreenContext = on; persist(next)
@@ -74,7 +58,51 @@ struct RewriteSettingsView: View {
                     Text("Text in password fields and password managers is never sent.")
                 }
             }
-        } header: { Text("Style") }
+            if let setupProblem {
+                StatusRow(.waiting, Text(setupProblem)) { Button("Set Up…") { editingProvider = true } }
+            }
+        } header: { Text("Provider") }
+        Section {
+            ForEach(RewriteCleanup.allCases) { level in
+                let selected = settings.cleanup == level
+                Button {
+                    var next = settings; next.cleanup = level; persist(next)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(level.title)
+                            Text(level.detail).font(.status).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 12)
+                        Image(systemName: "checkmark").font(.row.weight(.semibold))
+                            .foregroundStyle(GoblinBrand.mossText).opacity(selected ? 1 : 0)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(level.title + ", " + level.detail)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
+            }
+        } header: { Text("Level") }
+        Section {
+            formattingToggle(\.paragraphs) {
+                Text("Paragraphs")
+                Text("Starts a new paragraph when you move to a new point.").rowDetail()
+                Text("Saying “next” or “another thing” starts one too. Each point keeps its own words, in the order you said them.")
+            }
+            formattingToggle(\.lists) {
+                Text("Lists")
+                Text("Turns “one… two…” or “first… second…” into a numbered list.").rowDetail()
+                Text("Three or more things after “three things” or a similar lead-in become bullets. Things you mention in passing, like “milk, eggs and bread”, stay in the sentence.")
+                Text("Lists use plain “1.” and “-”, so they read the same in every app.")
+            }
+            formattingToggle(\.spokenBreaks) {
+                Text("Say “New Line”")
+                Text("Say “new line” or “new paragraph” to start one.").rowDetail()
+                Text("Only when you say it on its own, between thoughts. “Add a new line to the file” stays as words.")
+            }
+        } header: { Text("Formatting") }
         Section {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -82,13 +110,13 @@ struct RewriteSettingsView: View {
                         Text("What you said → what gets typed")
                         Spacer()
                         if let testOutput {
-                            Text("\(Self.sample.split(whereSeparator: \.isWhitespace).count) → \(testOutput.split(whereSeparator: \.isWhitespace).count) words").monospacedDigit()
+                            Text("\(sample.split(whereSeparator: \.isWhitespace).count) → \(testOutput.split(whereSeparator: \.isWhitespace).count) words").monospacedDigit()
                         }
                     }
                     .font(.meta).foregroundStyle(.secondary)
                     Group {
-                        if let testOutput { InlineDiff(from: Self.sample, to: testOutput) }
-                        else { Text(Self.sample).foregroundStyle(.secondary) }
+                        if let testOutput { InlineDiff(from: sample, to: testOutput) }
+                        else { Text(sample).foregroundStyle(.secondary) }
                     }
                     .font(.row)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -124,8 +152,23 @@ struct RewriteSettingsView: View {
 
     /// Fillers, a doubled word and missing punctuation, so the diff has something to show.
     static let sample = "um so i think we should uh ship the overlay fix tonight and and do onboarding tomorrow like the copy is basically done"
+    /// The same, plus a list and a new point, for when Paragraphs or Lists is on.
+    static let formattedSample = "um so this week there are three things the overlay fix the onboarding copy and and the docs another thing can we uh move the review to friday"
+
+    private var sample: String { settings.formatting.paragraphs || settings.formatting.lists ? Self.formattedSample : Self.sample }
 
     private var isOn: Bool { settings.enabled && settings.cleanup != .none }
+
+    /// A formatting switch. It saves at once like the level, and does nothing while the level is None.
+    private func formattingToggle<Label: View>(_ option: WritableKeyPath<RewriteFormatting, Bool>,
+                                               @ViewBuilder label: () -> Label) -> some View {
+        Toggle(isOn: Binding(get: { settings.formatting[keyPath: option] }, set: { on in
+            var next = settings; next.formatting[keyPath: option] = on; persist(next)
+            // The sample may change with formatting, and a result must stay beside the text it came from.
+            testTask?.cancel(); testOutput = nil; testMeta = nil; testFailure = nil
+        }), label: label)
+        .disabled(settings.cleanup == .none)
+    }
 
     private var setupProblem: String? { cleanupSetupProblem(settings, hasKey: keySaved) }
 
@@ -164,7 +207,7 @@ struct RewriteSettingsView: View {
 
     private func testCleanup() {
         guard !testing, inspectCredentials, isOn else { return }
-        let snapshot = settings
+        let snapshot = settings, sample = sample
         testing = true
         testFailure = nil
         testTask = Task { @MainActor in
@@ -172,7 +215,7 @@ struct RewriteSettingsView: View {
             do {
                 let key = try RewriteKeyStore.load(for: snapshot, defaults: defaults)
                 let start = ContinuousClock.now
-                let result = await RewriteClient().rewrite(Self.sample, settings: snapshot, apiKey: key)
+                let result = await RewriteClient().rewrite(sample, settings: snapshot, apiKey: key)
                 try Task.checkCancellation()
                 if let failure = result.failure { throw failure }
                 guard result.wasRewritten else { throw RewriteFailure.invalidResponse }

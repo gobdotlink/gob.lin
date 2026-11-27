@@ -62,9 +62,10 @@ public enum OnDeviceCleanup {
         return tokens(instructions) + 2 * tokens(transcript) > 4_000
     }
 
-    static func rewrite(_ rawText: String, cleanup: RewriteCleanup, tone: DictationTone,
+    static func rewrite(_ rawText: String, cleanup: RewriteCleanup, formatting: RewriteFormatting = .init(), tone: DictationTone,
                         preferredSpellings: [String]) async -> RewriteResult {
-        guard let messages = try? RewritePrompt.messages(transcript: rawText, cleanup: cleanup, tone: tone, preferredSpellings: preferredSpellings),
+        guard let messages = try? RewritePrompt.messages(transcript: rawText, cleanup: cleanup, formatting: formatting, tone: tone,
+                                                         preferredSpellings: preferredSpellings),
               let instructions = messages.first(where: { $0["role"] == "system" })?["content"],
               let payload = messages.first(where: { $0["role"] == "user" })?["content"] else {
             return RewriteResult(rawText: rawText, failure: .invalidResponse)

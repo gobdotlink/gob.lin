@@ -147,6 +147,21 @@ struct DictationContextTests {
         #expect(afterFormal.finalText == "Also the logs." && !afterFormal.restoresFullStop)
     }
 
+    @Test func layoutIsOnlyWhatFormattingAllows() throws {
+        func system(_ cleanup: RewriteCleanup, _ formatting: RewriteFormatting = .init()) throws -> String {
+            try RewritePrompt.messages(transcript: "ship it", cleanup: cleanup, formatting: formatting, tone: .formal, preferredSpellings: [])[0]["content"]!
+        }
+        let plain = try system(.light)
+        #expect(plain.contains("Do not split the text into paragraphs.") && plain.contains("Do not make bulleted or numbered lists"))
+        #expect(!plain.contains("new paragraph") && !plain.contains("\"1.\""))
+        // Coding agent's paragraphs come from its saved formatting now, not from the level.
+        #expect(try system(.codingAgent).contains("Do not split the text into paragraphs."))
+        let all = try system(.medium, RewriteFormatting(paragraphs: true, lists: true, spokenBreaks: true))
+        #expect(all.contains("Start a new paragraph") && all.contains("write them as a list") && all.contains("\"New line\" and \"new paragraph\""))
+        #expect(!all.contains("Do not split") && !all.contains("Do not make bulleted"))
+        #expect(all.contains("Do not add headings"))
+    }
+
     @Test func promptCarriesContextAsDataOnlyWhenThereIsSome() throws {
         let plain = try RewritePrompt.messages(transcript: "ship it", cleanup: .light, tone: .formal, preferredSpellings: [])
         let empty = try RewritePrompt.messages(transcript: "ship it", cleanup: .light, tone: .formal, preferredSpellings: [],

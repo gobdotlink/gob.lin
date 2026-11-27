@@ -236,7 +236,7 @@ struct InlineDiff: View {
         var result = AttributedString()
         for (index, change) in changes.enumerated() {
             let value = text(change)
-            if index > 0, !(value.count == 1 && ".,!?;:)…".contains(value)) { result += AttributedString(" ") }
+            if index > 0, TextDiff.needsSpace(after: text(changes[index - 1]), before: value) { result += AttributedString(" ") }
             var run = AttributedString(value)
             switch change {
             case .kept: break

@@ -43,3 +43,12 @@ import Testing
     #expect(!ToneFormatter.leftOutFullStop(said: "Make that change.", typed: "Make that change", tone: .formal))
     #expect(!ToneFormatter.leftOutFullStop(said: "", typed: "", tone: .casual))
 }
+
+@Test func listsAndLinesStartSentencesAndTheLastItemGetsNoFullStop() {
+    let list = "The plan is:\n1. ship the fix\n2. update the docs\n- tell support"
+    #expect(ToneFormatter.format(list, tone: .formal) == "The plan is:\n1. Ship the fix\n2. Update the docs\n- Tell support")
+    #expect(ToneFormatter.format("Thanks for this.\n\nsee you tomorrow", tone: .formal) == "Thanks for this.\n\nSee you tomorrow.")
+    #expect(ToneFormatter.format("Some things:\n- The login\n- The docs", tone: .veryCasual) == "some things:\n- the login\n- the docs")
+    // A single line that only looks like a list item is still a sentence.
+    #expect(ToneFormatter.format("- not a list", tone: .formal) == "- not a list.")
+}
