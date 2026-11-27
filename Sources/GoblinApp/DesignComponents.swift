@@ -281,6 +281,9 @@ extension View {
 /// Settings pages as white plates on the warm case. A native grouped Form can only draw its sections
 /// darker than the window in light mode, so this style lays the same sections out itself.
 struct PlateFormStyle: FormStyle {
+    /// Maximum width of the content column inside the scroll view, horizontal margins included.
+    var maxWidth: CGFloat = 760
+
     func makeBody(configuration: Configuration) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -291,10 +294,28 @@ struct PlateFormStyle: FormStyle {
                 }
             }
             .padding(.horizontal, 28).padding(.top, 2).padding(.bottom, 28)
+            .frame(maxWidth: maxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .labeledContentStyle(PlateLabeledContentStyle())
         .disclosureGroupStyle(RowDisclosureStyle())
         .toggleStyle(PlateToggleStyle())
+    }
+
+    @ViewBuilder fileprivate static func plateRows<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        Group(subviews: content()) { rows in
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Hairline().padding(.horizontal, 14) }
+                    row.padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, minHeight: row.containerValues.statusRow ? 36 : 42, alignment: .leading)
+                        .padding(.horizontal, 14)
+                }
+            }
+            .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.035), radius: 1, y: 1)
+        }
     }
 
     @ViewBuilder private static func section(_ section: SectionConfiguration, first: Bool) -> some View {
@@ -315,24 +336,29 @@ struct PlateFormStyle: FormStyle {
             } else {
                 Spacer().frame(height: first ? 6 : 14)
             }
-            Group(subviews: section.content) { rows in
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        if index > 0 { Hairline().padding(.horizontal, 14) }
-                        row.padding(.vertical, 9)
-                            .frame(maxWidth: .infinity, minHeight: row.containerValues.statusRow ? 36 : 42, alignment: .leading)
-                            .padding(.horizontal, 14)
-                    }
-                }
-                .background(GoblinBrand.plate, in: RoundedRectangle(cornerRadius: Radius.plate, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.plate, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.035), radius: 1, y: 1)
-            }
+            plateRows { section.content }
             if !section.footer.isEmpty, section.header.isEmpty || section.containerValues.footerShown {
                 section.footer.font(.meta).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14).padding(.top, 7)
             }
+        }
+    }
+}
+
+/// One case-and-plates section drawn outside a Form's single column, matching `PlateFormStyle` chrome.
+struct PlateSection<Content: View>: View {
+    let title: String
+    var first = false
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CapsHeader(title)
+                .frame(minHeight: 18)
+                .padding(.leading, 14).padding(.top, first ? 2 : 18).padding(.bottom, 4)
+                .accessibilityAddTraits(.isHeader)
+            PlateFormStyle.plateRows { content }
         }
     }
 }

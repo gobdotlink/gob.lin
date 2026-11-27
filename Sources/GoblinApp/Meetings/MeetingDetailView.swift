@@ -90,6 +90,8 @@ struct MeetingDetailView: View {
                 }
             }
             .padding(28)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         // The meeting's state too: processing that finishes in the background brings the transcript and voices.
         .task(id: "\(revision)-\(reloads)-\(meeting.state.rawValue)-\(notesModel.writing.contains(meeting.id))") {

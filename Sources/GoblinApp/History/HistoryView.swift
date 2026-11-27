@@ -362,6 +362,8 @@ private struct EntryDetail: View {
                 .padding(.top, 16)
             }
             .padding(28)
+            .frame(maxWidth: 860, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 

@@ -59,19 +59,11 @@ struct SettingsView: View {
                 switch section {
                 case .history: HistoryView(model: model)
                 case .meetings: MeetingsView(model: model)
-                case .insights:
-                    InsightsView(history: model.history)
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case .hoard:
-                    HoardView(hoard: model.hoard, meetings: model.meetings)
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .insights: InsightsView(history: model.history)
+                case .hoard: HoardView(hoard: model.hoard, meetings: model.meetings)
                 default:
                     Form { sectionContents }
-                        .formStyle(PlateFormStyle())
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .formStyle(PlateFormStyle(maxWidth: section == .dictionary ? 920 : 760))
                 }
             }
                 .id(section)

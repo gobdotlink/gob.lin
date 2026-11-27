@@ -55,7 +55,7 @@ struct HoardView: View {
                             Text(shelf.title)
                             Spacer()
                             let all = Hoard.shelf(shelf)
-                            Text("\(all.filter(found).count) of \(all.count)").monospacedDigit()
+                            Text("\(all.filter(found).count) of \(all.count)").monospacedDigit().padding(.trailing, 14)
                         }
                     }
                 }
@@ -63,7 +63,7 @@ struct HoardView: View {
                 Section { Text("Counting the hoard…").foregroundStyle(.secondary) }
             }
         }
-        .formStyle(PlateFormStyle())
+        .formStyle(PlateFormStyle(maxWidth: 1160))
         .task { await hoard.refresh(meetings: true) }
         // Anything new while the Hoard is open is marked NEW for this visit, and stops being new when it closes.
         .onChange(of: hoard.ledger.unseen, initial: true) { _, unseen in fresh.formUnion(unseen) }

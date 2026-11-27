@@ -55,7 +55,7 @@ struct GoblinApp: App {
             SettingsView(model: model, speechModels: model.speechModels)
         }
         .defaultSize(width: 1040, height: 720)
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .commands {
             // AppKit's own Quit does nothing while a sheet is up; this one closes the sheet first.
             CommandGroup(replacing: .appTermination) {

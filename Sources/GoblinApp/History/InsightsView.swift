@@ -12,6 +12,7 @@ struct InsightsView: View {
     @State private var period = InsightPeriod.week
     @State private var refreshID = UUID()
     @State private var error: String?
+    @State private var detailWidth: CGFloat = 0
 
     private struct PeriodDetails {
         var period: InsightPeriod
@@ -55,8 +56,10 @@ struct InsightsView: View {
                 Section { Text("Loading local history…").foregroundStyle(.secondary) }
             }
         }
-        .formStyle(PlateFormStyle())
+        .formStyle(PlateFormStyle(maxWidth: 1180))
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
         .toolbar {
+            ToolbarSpacer(.flexible)
             ToolbarItem(placement: .primaryAction) {
                 Picker("Period", selection: $period) {
                     ForEach([InsightPeriod.today, .week, .allTime], id: \.self) { Text(title($0)).tag($0) }
@@ -88,23 +91,53 @@ struct InsightsView: View {
                 activityRange(all, period: shown.period)
             }
         }
-        Section("What you talked about") {
-            cloudRow(shown)
-        }
-        // One device is the whole story, so the plate shows only when the period has more than one.
-        if shown.insights.devices.count > 1 {
-            Section("Where you talked") {
-                ForEach(shown.insights.devices) { device in
-                    shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
-                             total: shown.insights.totalWords)
+        if detailWidth >= 1040 {
+            Section {
+                SplitColumns(leadingFraction: 0.58, spacing: 20) {
+                    PlateSection(title: "What you talked about", first: true) {
+                        cloudRow(shown)
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        // One device is the whole story, so the plate shows only when the period has more than one.
+                        if shown.insights.devices.count > 1 {
+                            PlateSection(title: "Where you talked", first: true) {
+                                ForEach(shown.insights.devices) { device in
+                                    shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
+                                             total: shown.insights.totalWords)
+                                }
+                            }
+                        }
+                        PlateSection(title: "Where I typed", first: shown.insights.devices.count <= 1) {
+                            if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
+                            ForEach(shown.insights.applications) { app in
+                                shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
+                                         words: app.words, total: shown.insights.totalWords)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+            .containerValue(\.plateless, true)
+        } else {
+            Section("What you talked about") {
+                cloudRow(shown)
+            }
+            // One device is the whole story, so the plate shows only when the period has more than one.
+            if shown.insights.devices.count > 1 {
+                Section("Where you talked") {
+                    ForEach(shown.insights.devices) { device in
+                        shareRow(device.name, symbol: symbol(device.kind), words: device.words, dictations: device.dictations,
+                                 total: shown.insights.totalWords)
+                    }
                 }
             }
-        }
-        Section("Where I typed") {
-            if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
-            ForEach(shown.insights.applications) { app in
-                shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
-                         words: app.words, total: shown.insights.totalWords)
+            Section("Where I typed") {
+                if shown.insights.applications.isEmpty { Text("No words typed \(description(shown.period)) yet.").foregroundStyle(.secondary) }
+                ForEach(shown.insights.applications) { app in
+                    shareRow(app.name, bundleIdentifier: app.bundleIdentifier, symbol: app.deviceKind.map(symbol) ?? "app",
+                             words: app.words, total: shown.insights.totalWords)
+                }
             }
         }
         Section {
@@ -448,7 +481,6 @@ private struct ActivityRow: View {
     @State private var width: CGFloat = 0
 
     private static let labelWidth: CGFloat = 26
-    private static let gap: CGFloat = 2
     /// The divider and the space either side of it.
     private static let middle: CGFloat = 33
 
@@ -457,13 +489,14 @@ private struct ActivityRow: View {
 
     var body: some View {
         let half = max(0, (width - Self.middle) / 2)
-        let cell = max(6, ((half - Self.labelWidth - 24 * Self.gap) / 24).rounded(.down))
-        let height = 7 * cell + 6 * Self.gap
+        let gap: CGFloat = half >= 440 ? 4 : half >= 360 ? 3 : 2
+        let cell = max(6, ((half - Self.labelWidth - 24 * gap) / 24).rounded(.down))
+        let height = 7 * cell + 6 * gap
         HStack(alignment: .top, spacing: 16) {
             bars(width: chart.rows.isEmpty ? width : half, height: height).frame(maxWidth: .infinity, alignment: .leading)
             if !chart.rows.isEmpty {
                 Divider().padding(.vertical, -9)
-                grid(cell: cell).frame(maxWidth: .infinity, alignment: .leading)
+                grid(cell: cell, gap: gap).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.vertical, 6)
@@ -493,7 +526,7 @@ private struct ActivityRow: View {
             }
             HStack(spacing: 0) {
                 ForEach(bars.indices, id: \.self) { index in
-                    column(index, top: top, barWidth: (width / CGFloat(bars.count) * 0.54).rounded(), height: height,
+                    column(index, top: top, barWidth: min(34, max(4, (width / CGFloat(bars.count) * 0.54).rounded())), height: height,
                            labelled: index == peak || (index == current && !crowded))
                 }
             }
@@ -547,7 +580,7 @@ private struct ActivityRow: View {
 
     // MARK: When you talk
 
-    private func grid(cell: CGFloat) -> some View {
+    private func grid(cell: CGFloat, gap: CGFloat) -> some View {
         let rows = chart.rows
         let top = max(1, rows.flatMap(\.hours).max() ?? 0)
         let totals = (0..<24).map { hour in rows.reduce(0) { $0 + $1.hours[hour] } }
@@ -558,10 +591,10 @@ private struct ActivityRow: View {
                 Spacer(minLength: 0)
                 Text("Each square is one hour").font(.meta).foregroundStyle(.secondary).padding(.top, 3)
             }
-            VStack(alignment: .leading, spacing: Self.gap) {
+            VStack(alignment: .leading, spacing: gap) {
                 ForEach(rows.indices, id: \.self) { index in
                     let row = rows[index]
-                    HStack(spacing: Self.gap) {
+                    HStack(spacing: gap) {
                         Text(row.label)
                             .font(.meta.weight(row.current ? .semibold : .regular))
                             .foregroundStyle(row.current ? .primary : .secondary)
@@ -581,11 +614,11 @@ private struct ActivityRow: View {
             .padding(.top, 22)
             HStack(spacing: 0) {
                 ForEach([0, 6, 12, 18], id: \.self) { hour in
-                    Text(ActivityChart.hourName(hour)).frame(width: 6 * (cell + Self.gap), alignment: .leading)
+                    Text(ActivityChart.hourName(hour)).frame(width: 6 * (cell + gap), alignment: .leading)
                 }
             }
             .font(.meta).foregroundStyle(.tertiary).monospacedDigit()
-            .padding(.leading, Self.labelWidth + Self.gap).padding(.top, 7)
+            .padding(.leading, Self.labelWidth + gap).padding(.top, 7)
         }
     }
 
@@ -614,5 +647,35 @@ private struct ActivityRow: View {
 private struct DashedRule: Shape {
     func path(in rect: CGRect) -> Path {
         Path { $0.move(to: CGPoint(x: rect.minX, y: rect.midY)); $0.addLine(to: CGPoint(x: rect.maxX, y: rect.midY)) }
+    }
+}
+
+/// Two columns that divide the offered width by `leadingFraction`, each taking its natural height.
+private struct SplitColumns: Layout {
+    var leadingFraction: CGFloat = 0.58
+    var spacing: CGFloat = 20
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let widths = columnWidths(total: proposal.width ?? 1000)
+        let left = subviews[0].sizeThatFits(ProposedViewSize(width: widths.leading, height: nil))
+        let right = subviews[1].sizeThatFits(ProposedViewSize(width: widths.trailing, height: nil))
+        return CGSize(width: proposal.width ?? (widths.leading + spacing + widths.trailing),
+                      height: max(left.height, right.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let widths = columnWidths(total: bounds.width)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY),
+                          proposal: ProposedViewSize(width: widths.leading, height: nil))
+        subviews[1].place(at: CGPoint(x: bounds.minX + widths.leading + spacing, y: bounds.minY),
+                          proposal: ProposedViewSize(width: widths.trailing, height: nil))
+    }
+
+    private func columnWidths(total: CGFloat) -> (leading: CGFloat, trailing: CGFloat) {
+        let usable = max(0, total - spacing)
+        let leading = (usable * leadingFraction).rounded()
+        return (leading, max(0, usable - leading))
     }
 }
