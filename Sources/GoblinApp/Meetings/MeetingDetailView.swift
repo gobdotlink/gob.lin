@@ -33,6 +33,9 @@ struct MeetingDetailView: View {
     @State private var notesStale = false
     /// The tab picked by hand. Until then: Notes once there are notes or they're being written, else Transcript.
     @State private var pickedTab: Tab?
+    /// The last name change being saved. Each waits for the one before, so a chip renamed again before its first name is
+    /// saved takes its Undo from the names that save left.
+    @State private var saving: Task<Void, Never>?
 
     enum Tab: Hashable { case notes, transcript, typed }
 
@@ -410,7 +413,9 @@ struct MeetingDetailView: View {
     private func change(_ message: String, missing: String? = nil, mergedFrom: String? = nil, warning: String? = nil,
                         showing renamed: [String: String] = [:], _ edit: @escaping () async throws -> [TranscriptTurn]) {
         show(renamed)
-        Task {
+        let previous = saving
+        saving = Task {
+            await previous?.value
             do {
                 let before = try await store.speakerNames(meeting.id)
                 _ = try await edit()
@@ -442,7 +447,9 @@ struct MeetingDetailView: View {
     }
 
     private func restore(_ undo: Undo) {
-        Task {
+        let previous = saving
+        saving = Task {
+            await previous?.value
             do { _ = try await store.setSpeakerNames(meeting.id, undo.names) } catch { failure = error.localizedDescription }
             self.undo = nil
             reloads += 1
