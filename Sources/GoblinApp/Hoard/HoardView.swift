@@ -144,24 +144,14 @@ struct HoardView: View {
 
     @ViewBuilder private func shelfGrid(_ shelf: HoardShelf, stats: HoardStats) -> some View {
         let all = Hoard.shelf(shelf)
-        // A ladder shows what's found and the next rung; the rest wait unseen. Secrets all show, unfound as "???".
+        // A ladder shows what's found and the next rung; the rest wait unseen, counted by the header's "6 of 11".
+        // Secrets all show, unfound as "???".
         let next = all.first { !found($0) }
         let shown = shelf == .secrets ? all : all.filter { found($0) || $0.id == next?.id }
-        let hidden = all.count - shown.count
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 0, alignment: .top)], alignment: .leading, spacing: 12) {
             ForEach(shown) { treasure in
                 TreasureCell(treasure: treasure, find: hoard.ledger.found[treasure.id], isNew: fresh.contains(treasure.id),
                              progress: treasure.id == next?.id && measured(treasure) ? (fraction(treasure, stats), treasure.percent(stats)) : nil) { inspected = treasure }
-            }
-            if hidden > 0 {
-                VStack(spacing: 0) {
-                    Text("+\(hidden)").font(.cardTitle).foregroundStyle(.tertiary).frame(height: 84)
-                    Text("More to find").font(.meta.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 7)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 4).padding(4)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(hidden) more to find")
             }
         }
         .padding(.vertical, 2)
@@ -225,15 +215,14 @@ private struct TreasureCell: View {
                 Text(hiddenSecret ? "???" : treasure.name).font(.meta.weight(.semibold))
                     .foregroundStyle(find == nil ? .secondary : .primary)
                     .multilineTextAlignment(.center).lineLimit(2).fixedSize(horizontal: false, vertical: true).padding(.top, 7)
-                Text(detail).font(.meta).foregroundStyle(.secondary).monospacedDigit()
+                // NEW rides the date line, clear of the sprite.
+                Text("\(detail)\(isNew ? Text(" · NEW").fontWeight(.bold).foregroundStyle(GoblinBrand.candle) : Text(""))")
+                    .font(.meta).foregroundStyle(.secondary).monospacedDigit()
                     .multilineTextAlignment(.center).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 if let progress { CandleMeter(fraction: progress.fraction, height: 3).frame(width: 52).padding(.top, 5) }
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 4).padding(.bottom, 6)
-            .overlay(alignment: .topTrailing) {
-                if isNew { Text("NEW").font(.system(size: 9, weight: .bold)).foregroundStyle(GoblinBrand.candle).padding(6) }
-            }
         }
         .buttonStyle(HoverTileStyle())
         .accessibilityLabel(accessibilityText)
@@ -331,7 +320,7 @@ private struct CandleMeter: View {
     }
 }
 
-/// A tile that tints moss under the pointer, over its whole shape.
+/// A tile with a faint neutral wash under the pointer or keyboard focus, over its whole shape. Not moss: moss means selected.
 private struct HoverTileStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HoverTile(configuration: configuration)
@@ -340,11 +329,12 @@ private struct HoverTileStyle: ButtonStyle {
     private struct HoverTile: View {
         let configuration: ButtonStyleConfiguration
         @State private var hovering = false
+        @Environment(\.isFocused) private var focused
 
         var body: some View {
             configuration.label
                 .padding(4)
-                .background(GoblinBrand.selection.opacity(hovering || configuration.isPressed ? 1 : 0),
+                .background(.primary.opacity(configuration.isPressed ? 0.1 : hovering || focused ? 0.05 : 0),
                             in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
                 .onHover { hovering = $0 }
