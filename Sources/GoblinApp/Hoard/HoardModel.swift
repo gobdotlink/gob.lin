@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import GoblinCore
 import GoblinMeetings
@@ -9,25 +10,45 @@ final class HoardModel: ObservableObject {
     @Published private(set) var ledger: HoardLedger
     /// The latest numbers, for progress toward what's next. Nil until the first count finishes.
     @Published private(set) var stats: HoardStats?
+    /// History couldn't be read at the last count, so dictation progress may be behind.
+    @Published private(set) var historyUnavailable = false
 
     nonisolated static let ledgerKey = "hoard.ledger"
     /// The overlay switch: Settings › Overlay › Celebrate treasures.
     nonisolated static let celebrateKey = "overlay.milestones"
+    /// The words-only milestones this replaced: their lifetime total and the last threshold reached.
+    private static let legacyKeys = ["milestones.words", "milestones.celebrated"]
 
     private let defaults: UserDefaults
     private let history: HistoryModel
     private let meetings: MeetingsController
     private let dictionary: DictionaryModel
     private var counting: Task<[Treasure], Never>?
+    /// The last tally History gave, so other shelves keep counting while it can't be read.
+    private var lastTally: HoardTally?
+    private var subscriptions: Set<AnyCancellable> = []
 
     init(defaults: UserDefaults, history: HistoryModel, meetings: MeetingsController, dictionary: DictionaryModel) {
         self.defaults = defaults
         self.history = history
         self.meetings = meetings
         self.dictionary = dictionary
-        ledger = defaults.data(forKey: Self.ledgerKey).flatMap { try? JSONDecoder().decode(HoardLedger.self, from: $0) } ?? HoardLedger()
-        // The words-only milestones this replaces.
-        for key in ["milestones.words", "milestones.celebrated"] { defaults.removeObject(forKey: key) }
+        var ledger = defaults.data(forKey: Self.ledgerKey).flatMap { try? JSONDecoder().decode(HoardLedger.self, from: $0) } ?? HoardLedger()
+        // Words the old milestones counted stay counted, even if History has since been cleared or trimmed.
+        if !ledger.started { ledger.legacyWords = max(ledger.legacyWords, Self.legacyKeys.map(defaults.integer).max() ?? 0) }
+        self.ledger = ledger
+    }
+
+    /// Counts whenever what the Hoard reads changes: a dictation saved, synced in or retried, a meeting finishing
+    /// however it was processed, or a person or dictionary word added. Call once, after the first count has started.
+    func observeChanges() {
+        guard subscriptions.isEmpty else { return }
+        history.$revision.dropFirst().sink { [weak self] _ in self?.recount() }.store(in: &subscriptions)
+        dictionary.$entries.map(\.count).removeDuplicates().dropFirst().sink { [weak self] _ in self?.recount() }.store(in: &subscriptions)
+        meetings.$people.map { $0.filter { !$0.isMe }.count }.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.recount() }.store(in: &subscriptions)
+        meetings.$meetings.map { Set($0.filter { $0.state == .ready }.map(\.id)) }.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in self?.recount(meetings: true) }.store(in: &subscriptions)
     }
 
     var unseenCount: Int { ledger.unseen.count }
@@ -45,6 +66,10 @@ final class HoardModel: ObservableObject {
         return await task.value
     }
 
+    private func recount(meetings includeMeetings: Bool = false) {
+        Task { await refresh(meetings: includeMeetings) }
+    }
+
     /// Something only the app sees happen, such as dictating while a meeting records.
     func notice(_ secret: HoardSecret) {
         guard !ledger.noticed.contains(secret) else { return }
@@ -60,30 +85,41 @@ final class HoardModel: ObservableObject {
         return treasure
     }
 
-    /// The Hoard was opened: nothing is new any more.
-    func markSeen() {
-        guard !ledger.unseen.isEmpty else { return }
-        ledger.unseen = []
+    /// The Hoard showed these as new: they aren't any more.
+    func markSeen(_ ids: Set<String>) {
+        guard !ledger.unseen.isDisjoint(with: ids) else { return }
+        ledger.unseen.subtract(ids)
         save()
     }
 
     private func count(includeMeetings: Bool) async -> [Treasure] {
-        guard let store = history.store, let counted = try? await store.hoardTally() else { return [] }
-        let (tally, first) = counted
+        // History failing doesn't stop meetings, people and dictionary words from counting; its first readable count
+        // still files what was already there quietly.
+        var tally = lastTally ?? HoardTally(), first = false
+        if let counted = try? await history.store?.hoardTally() {
+            (tally, first) = counted
+            lastTally = tally
+            historyUnavailable = false
+        } else {
+            historyUnavailable = true
+        }
         if includeMeetings { await countMeetings() }
-        ledger.people = max(ledger.people, meetings.people.filter { !$0.isMe }.count)
+        // Read from People's own file rather than the published list, so the first count sees everyone already named.
+        let people = meetings.library.people.people().filter { !$0.isMe }.count
+        ledger.people = max(ledger.people, people)
         ledger.dictionaryWords = max(ledger.dictionaryWords, dictionary.entries.count)
+        tally.words = max(tally.words, ledger.legacyWords)
         let now = Date()
         let stats = HoardStats(dictations: tally, meetings: ledger.meetings, people: ledger.people,
                                dictionaryWords: ledger.dictionaryWords, noticed: ledger.noticed)
-        // A first count of History files everything quietly, like the Hoard's own first count.
         let found = ledger.record(Hoard.earned(stats, now: now), now: now, quietly: first)
         self.stats = stats
         save()
+        for key in Self.legacyKeys { defaults.removeObject(forKey: key) }
         return found
     }
 
-    /// Adds each finished meeting the Hoard hasn't counted.
+    /// Adds each finished meeting the Hoard hasn't counted. Only those load their marks.
     private func countMeetings() async {
         let store = meetings.library.store
         for summary in await store.list() where summary.state == .ready && !ledger.meetings.counted.contains(summary.id) {

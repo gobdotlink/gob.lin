@@ -33,7 +33,10 @@ public enum HoardShelf: String, CaseIterable, Sendable, Codable {
         switch self {
         case .words: return plural("word", "words")
         case .dictations: return plural("dictation", "dictations")
-        case .talk: return amount < 60 ? plural("minute", "minutes") : HoardShelf.saved.phrase(amount / 60)
+        case .talk:
+            guard amount >= 60 else { return plural("minute", "minutes") }
+            let hours = HoardShelf.saved.phrase(amount / 60), minutes = amount % 60
+            return minutes == 0 ? hours : "\(hours) \(HoardShelf.talk.phrase(minutes))"
         case .saved, .meetingTime: return plural("hour", "hours")
         case .meetings: return plural("meeting", "meetings")
         case .streak: return amount == 1 ? "1 day" : "\(number) days in a row"
@@ -140,7 +143,7 @@ public enum Hoard {
 
     /// Every treasure `stats` has reached.
     public static func earned(_ stats: HoardStats, now: Date = Date(), calendar: Calendar = .current) -> Set<String> {
-        let values = Dictionary(uniqueKeysWithValues: HoardShelf.allCases.map { ($0, stats.value($0, calendar: calendar)) })
+        let values = Dictionary(uniqueKeysWithValues: HoardShelf.allCases.filter { $0 != .secrets }.map { ($0, stats.value($0, calendar: calendar)) })
         let secrets = stats.secrets(now: now, calendar: calendar)
         return Set(treasures.filter { treasure in
             if let secret = treasure.secret { return secrets.contains(secret) }

@@ -297,6 +297,9 @@ final class OverlayController {
         model.microphoneLine = line
     }
 
+    /// Whether `session` is still the one on screen: hiding or a newer take ends it.
+    func owns(_ session: UUID) -> Bool { session == sessionID }
+
     func hide(session: UUID? = nil) {
         if let session, session != sessionID { return }
         hideTask?.cancel()

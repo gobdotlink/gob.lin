@@ -38,6 +38,8 @@ struct HoardTests {
         #expect(HoardShelf.talk.phrase(10) == "10 minutes")
         #expect(HoardShelf.talk.phrase(60) == "1 hour")
         #expect(HoardShelf.talk.phrase(600) == "10 hours")
+        #expect(HoardShelf.talk.phrase(119) == "1 hour 59 minutes")
+        #expect(HoardShelf.talk.phrase(121) == "2 hours 1 minute")
         #expect(HoardShelf.dictations.phrase(1) == "1 dictation")
         #expect(HoardShelf.streak.phrase(3) == "3 days in a row")
     }
@@ -128,6 +130,37 @@ struct HoardTests {
         #expect(tally.found.contains(.swarm))
     }
 
+    @Test func lateBatchesStillFindTheirNeighbours() {
+        var tally = HoardTally()
+        // Weeks of recent dictations, then an older iPhone burst and an older busy day synced in late.
+        for day in 1...28 { add(&tally, String(format: "2026-11-%02dT12:00:00Z", day), app: "app.recent") }
+        for minute in 0..<10 { add(&tally, String(format: "2026-10-02T09:%02d:00Z", minute)) }
+        for app in 0..<10 { add(&tally, "2026-10-01T12:00:00Z", app: "app.\(app)", tone: app == 0 ? "casual" : "formal") }
+        #expect(tally.found.isSuperset(of: [.swarm, .juggler, .split]))
+    }
+
+    @Test func switchingCalendarsKeepsAStreak() {
+        var buddhist = Calendar(identifier: .buddhist)
+        buddhist.timeZone = utc.timeZone
+        var tally = HoardTally()
+        add(&tally, "2026-11-25T12:00:00Z")
+        tally.add(date: date("2026-11-26T12:00:00Z"), words: 1, duration: nil, application: nil, deviceKind: nil, tone: nil, text: nil, calendar: buddhist)
+        add(&tally, "2026-12-31T12:00:00Z")
+        tally.add(date: date("2027-01-01T12:00:00Z"), words: 1, duration: nil, application: nil, deviceKind: nil, tone: nil, text: nil, calendar: buddhist)
+        #expect(tally.longestStreak(calendar: buddhist) == 2 && tally.longestStreak(calendar: utc) == 2)
+        #expect(tally.found.contains(.newYear))
+    }
+
+    @Test func recordsFromOtherBuildsStillRead() throws {
+        let ledger = try JSONDecoder().decode(HoardLedger.self, from: Data(#"{"found":{},"noticed":["lurker","someday"]}"#.utf8))
+        #expect(ledger.noticed == [.lurker] && !ledger.started && ledger.legacyWords == 0)
+        let tally = try JSONDecoder().decode(HoardTally.self, from: Data(#"{"words":12,"found":["night","someday"]}"#.utf8))
+        #expect(tally.words == 12 && tally.found == [.night])
+        var round = HoardLedger()
+        round.record(["words-100"])
+        #expect(try JSONDecoder().decode(HoardLedger.self, from: JSONEncoder().encode(round)) == round)
+    }
+
     @Test func weekendWeekAndAnniversary() {
         var tally = HoardTally()
         add(&tally, "2026-11-21T12:00:00Z") // Saturday
@@ -213,5 +246,18 @@ struct HoardTests {
         // Delete All doesn't either.
         try await store.deleteAll()
         #expect(try await store.hoardTally(calendar: utc).tally.words == 6)
+    }
+
+    @Test func retentionCountsWhatItTrims() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hoard-test-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try HistoryStore(directory: directory)
+        _ = try await store.hoardTally(calendar: utc)
+        // Keep 0: the dictation goes as it's saved, but it was said, and laughter counts from what was heard.
+        _ = try await store.insert(HistoryEntry(rawText: "ha ha ha that's good", finalText: "That's good.", createdAt: date("2026-11-27T12:00:00Z")))
+        #expect(try await store.applyRetention(HistoryRetention(maximumUnstarredCount: 0)) == 1)
+        let tally = try await store.hoardTally(calendar: utc).tally
+        #expect(tally.dictations == 1 && tally.words == 2 && tally.found.contains(.cackle))
     }
 }

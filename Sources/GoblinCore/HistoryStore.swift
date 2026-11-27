@@ -188,31 +188,39 @@ public actor HistoryStore {
     /// once, whichever device made it and whenever it arrived, so deleting or trimming one never takes it back.
     /// `first` is true when nothing had been counted before: everything already here was just added at once.
     public func hoardTally(calendar: Calendar = .current) throws -> (tally: HoardTally, first: Bool) {
+        var result = (tally: HoardTally(), first: true)
+        try database.transaction { result = try countForHoard(calendar: calendar) }
+        return result
+    }
+
+    /// The fold behind `hoardTally`, inside the caller's transaction. Retention calls it too, once the Hoard has
+    /// started, so a dictation trimmed as it arrives (Keep 0, or an old one synced in) is still counted.
+    private func countForHoard(calendar: Calendar = .current) throws -> (tally: HoardTally, first: Bool) {
         var tally = HoardTally(), first = true
-        try database.transaction {
-            if let saved = try database.meta(MetaKey.hoardTally) {
-                tally = try JSONDecoder().decode(HoardTally.self, from: Data(saved.utf8))
-                first = false
-            }
-            var counted: [String] = []
-            // Oldest first, so the ten-minute and per-day memories fill in order.
-            try database.forEachRow("""
-                SELECT entries.id, created_at, json_extract(metadata, '$.wordCount'), json_extract(metadata, '$.audioDuration'),
-                       COALESCE(NULLIF(json_extract(metadata, '$.targetBundleIdentifier'), ''), NULLIF(app_name, '')),
-                       devices.kind, json_extract(metadata, '$.tone'), final_text
-                FROM entries LEFT JOIN devices ON devices.id = \(Self.entryDevice)
-                LEFT JOIN hoard_counted ON hoard_counted.id = entries.id
-                WHERE hoard_counted.id IS NULL ORDER BY created_at, entries.id
-                """, [.text(deviceID)]) { row in
-                guard let id = row[0], let timestamp = Double(row[1] ?? ""), timestamp.isFinite else { return }
-                tally.add(date: Date(timeIntervalSince1970: timestamp), words: max(0, Int(row[2] ?? "") ?? 0),
-                          duration: row[3].flatMap(Double.init), application: row[4], deviceKind: row[5], tone: row[6],
-                          text: row[7], calendar: calendar)
-                counted.append(id)
-            }
-            for id in counted { try database.run("INSERT OR IGNORE INTO hoard_counted (id) VALUES (?)", [.text(id)]) }
-            try database.setMeta(MetaKey.hoardTally, String(decoding: try JSONEncoder().encode(tally), as: UTF8.self))
+        if let saved = try database.meta(MetaKey.hoardTally) {
+            tally = try JSONDecoder().decode(HoardTally.self, from: Data(saved.utf8))
+            first = false
         }
+        var counted: [String] = []
+        // Oldest first, so the ten-minute and per-day memories fill in order. Laughter is read from what was heard,
+        // before cleanup or the dictionary could change it.
+        try database.forEachRow("""
+            SELECT entries.id, created_at, json_extract(metadata, '$.wordCount'), json_extract(metadata, '$.audioDuration'),
+                   COALESCE(NULLIF(json_extract(metadata, '$.targetBundleIdentifier'), ''), NULLIF(app_name, '')),
+                   devices.kind, json_extract(metadata, '$.tone'), raw_text
+            FROM entries LEFT JOIN devices ON devices.id = \(Self.entryDevice)
+            LEFT JOIN hoard_counted ON hoard_counted.id = entries.id
+            WHERE hoard_counted.id IS NULL ORDER BY created_at, entries.id
+            """, [.text(deviceID)]) { row in
+            guard let id = row[0], let timestamp = Double(row[1] ?? ""), timestamp.isFinite else { return }
+            tally.add(date: Date(timeIntervalSince1970: timestamp), words: max(0, Int(row[2] ?? "") ?? 0),
+                      duration: row[3].flatMap(Double.init), application: row[4], deviceKind: row[5], tone: row[6],
+                      text: row[7], calendar: calendar)
+            counted.append(id)
+        }
+        guard first || !counted.isEmpty else { return (tally, first) }
+        for id in counted { try database.run("INSERT OR IGNORE INTO hoard_counted (id) VALUES (?)", [.text(id)]) }
+        try database.setMeta(MetaKey.hoardTally, String(decoding: try JSONEncoder().encode(tally), as: UTF8.self))
         return (tally, first)
     }
 
@@ -329,6 +337,8 @@ public actor HistoryStore {
 
     private func trim(_ policy: HistoryRetention, now: Date) throws -> Int {
         guard policy.maximumUnstarredCount != nil || policy.maximumAgeDays != nil else { return 0 }
+        // Before the Hoard's first count, that count takes in whatever is here; after it, anything trimmed is counted first.
+        if try database.meta(MetaKey.hoardTally) != nil { _ = try countForHoard() }
         let cutoff = policy.maximumAgeDays.map { now.addingTimeInterval(-Double($0) * 86400) }
         let syncing = try syncEnabled()
         var removed = 0

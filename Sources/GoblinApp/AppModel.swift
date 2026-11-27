@@ -244,10 +244,12 @@ final class AppModel: ObservableObject {
             await self.history.reload()
             if self.lastTranscript == nil { self.lastTranscript = self.history.entries.first?.finalText }
         }
-        // The first count files everything already in History and Meetings quietly; a finished meeting counts at once,
-        // and its treasure waits for the next dictation's moment.
-        Task { [hoard] in await hoard.refresh(meetings: true) }
-        meetings.$readyNotice.compactMap { $0 }.sink { [hoard] _ in Task { await hoard.refresh(meetings: true) } }.store(in: &subscriptions)
+        // The first count files everything already in History, Meetings, People and the dictionary quietly; after it,
+        // every change counts as it happens, and a treasure waits for the next dictation's moment.
+        Task { [hoard] in
+            await hoard.refresh(meetings: true)
+            hoard.observeChanges()
+        }
         historySync.onStatus = { [diagnostics] in diagnostics.setHistorySync($0) }
         Task { [historySync] in await historySync.start() }
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { [weak self] _ in
@@ -1213,10 +1215,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Counts the dictation into the Hoard, then celebrates at most one treasure a day, replacing the inserted chip.
+    /// Nothing is celebrated while a meeting records, and the day's moment is only spent if the chip is still showing.
     private func celebrateTreasure(overlay overlayID: UUID) async {
-        if case .recording = meetings.phase { hoard.notice(.lurker) }
+        let recording = if case .recording = meetings.phase { true } else { false }
+        if recording { hoard.notice(.lurker) }
         await hoard.refresh()
-        guard let treasure = hoard.celebration() else { return }
+        guard !recording, !Task.isCancelled, overlay.owns(overlayID), let treasure = hoard.celebration() else { return }
         overlay.update(.treasure(treasure), session: overlayID)
         overlay.hide(after: 2.5, session: overlayID)
     }
