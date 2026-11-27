@@ -63,10 +63,8 @@ struct SettingsView: View {
                     InsightsView(history: model.history)
                         .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case .hoard:
-                    HoardView(hoard: model.hoard, meetings: model.meetings)
-                        .frame(maxWidth: 760)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                // The Hoard is a gallery, not a form: its shelves take the whole width, so a wider window fits more on each.
+                case .hoard: HoardView(hoard: model.hoard, meetings: model.meetings, eyes: eyes)
                 default:
                     Form { sectionContents }
                         .formStyle(PlateFormStyle())
