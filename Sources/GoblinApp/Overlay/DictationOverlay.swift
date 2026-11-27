@@ -48,7 +48,7 @@ private struct OverlayGoblin: View {
                 if case .meetingQuiet = model.visiblePhase { PixelSprite(sprite: .zz, scale: 2).offset(x: mirrored ? -6 : 6, y: -4) }
             }
             .overlay(alignment: .topLeading) {
-                if case .milestone = model.visiblePhase {
+                if case .treasure = model.visiblePhase {
                     PixelSprite(sprite: .spark, scale: 2).offset(x: -6, y: 4)
                     PixelSprite(sprite: .spark, scale: 2).offset(x: 122, y: 30)
                 }
@@ -63,7 +63,7 @@ private struct OverlayGoblin: View {
         case .transcribing: .look
         case .polishing: .squint
         case .inserted: .closed
-        case .milestone: .cackle
+        case .treasure: .cackle
         case .readyToPaste, .newMicrophone: .side
         case .termSuggestion: .look
         case .termAdded: .closed
@@ -125,12 +125,12 @@ private struct OverlayBubble: View {
     }
 
     private var borderColor: Color {
-        if case .milestone = model.visiblePhase { return GoblinBrand.candle.opacity(0.5) }
+        if case .treasure = model.visiblePhase { return GoblinBrand.candle.opacity(0.5) }
         return .white.opacity(0.1)
     }
 
     private var glow: Color {
-        if case .milestone = model.visiblePhase { return GoblinBrand.candle.opacity(0.2) }
+        if case .treasure = model.visiblePhase { return GoblinBrand.candle.opacity(0.2) }
         return .clear
     }
 
@@ -227,13 +227,14 @@ private struct OverlayBubble: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-        case .milestone(let words):
+        case .treasure(let treasure):
             HStack(spacing: 12) {
-                PixelSprite(sprite: .candle, scale: 2)
+                TreasureSprite(treasure: treasure, scale: 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(words.formatted()) words yapped.").font(.row.weight(.semibold))
-                    Text(model.deliveryApplication.map { "Text landed in \($0)" } ?? "About \(max(1, words / 250).formatted()) pages you didn't type.")
-                        .font(.status).foregroundStyle(.white.opacity(0.55))
+                    Text(treasure.secret == nil ? "\(treasure.name)." : "A secret: \(treasure.name).").font(.row.weight(.semibold))
+                    Text(treasure.line).font(.status).foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    Text("It's in the Hoard.").font(.status).foregroundStyle(GoblinBrand.candle)
                 }
             }
         case .newMicrophone(let name, let uid):

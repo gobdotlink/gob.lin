@@ -29,6 +29,8 @@ final class AppModel: ObservableObject {
     /// Dictation first: meeting chunks wait while a take runs from key-down to insertion.
     let speechPriority = SpeechPriorityGate()
     let meetings: MeetingsController
+    /// Treasures found by using gob.lin, and the one a day the overlay celebrates.
+    let hoard: HoardModel
     /// The meeting's overlay questions, the Sidekick and ⌃⌥M.
     private var meetingSurfaces: MeetingSurfaces?
     let updates = UpdateChecker()
@@ -83,6 +85,7 @@ final class AppModel: ObservableObject {
         history.sync = historySync
         let dictionaryRepository = dataDirectory.map { DictionaryRepository(url: $0.appendingPathComponent("dictionary.json")) } ?? .applicationDefault
         dictionary = DictionaryModel(repository: dictionaryRepository, defaults: defaults)
+        hoard = HoardModel(defaults: defaults, history: history, meetings: meetings, dictionary: dictionary)
         // Meeting transcripts read the same words when they're shown, from disk, so an edit applies to the next render.
         MeetingVocabulary.dictionary = { (try? dictionaryRepository.load()) ?? [] }
         meetings.vocabulary = { [dictionary] in dictionary.entries.map(\.spelling) }
@@ -241,6 +244,10 @@ final class AppModel: ObservableObject {
             await self.history.reload()
             if self.lastTranscript == nil { self.lastTranscript = self.history.entries.first?.finalText }
         }
+        // The first count files everything already in History and Meetings quietly; a finished meeting counts at once,
+        // and its treasure waits for the next dictation's moment.
+        Task { [hoard] in await hoard.refresh(meetings: true) }
+        meetings.$readyNotice.compactMap { $0 }.sink { [hoard] _ in Task { await hoard.refresh(meetings: true) } }.store(in: &subscriptions)
         historySync.onStatus = { [diagnostics] in diagnostics.setHistorySync($0) }
         Task { [historySync] in await historySync.start() }
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { [weak self] _ in
@@ -1194,34 +1201,23 @@ final class AppModel: ObservableObject {
                     overlay.showCompletion(.inserted(OverlayResult(application: deliveryApplication?.localizedName,
                         words: entry.wordCount, seconds: deliverySeconds.isFinite ? max(0, deliverySeconds) : 0, notice: notice)), session: overlayID)
                 }
-                if saved, warning == nil { await celebrateMilestone(adding: entry.wordCount, overlay: overlayID) }
+                if saved, warning == nil { await celebrateTreasure(overlay: overlayID) }
             } else if let warning {
                 overlay.update(.error(OverlayNotice(message: warning, failure: warningFailure)), session: overlayID)
                 overlay.hide(after: 4, session: overlayID)
             } else {
                 overlay.hide(after: 0.8, session: overlayID)
-                if saved, insertionAttempted { await celebrateMilestone(adding: entry.wordCount, overlay: overlayID) }
+                if saved, insertionAttempted { await celebrateTreasure(overlay: overlayID) }
             }
         }
     }
 
-    /// One celebration per threshold, replacing the inserted chip. Thresholds passed before this
-    /// feature existed are recorded quietly instead of celebrated late.
-    private func celebrateMilestone(adding words: Int, overlay overlayID: UUID) async {
-        guard defaults.object(forKey: "overlay.milestones") as? Bool ?? true else { return }
-        let thresholds = [1_000, 10_000, 100_000, 1_000_000]
-        let total: Int
-        if defaults.object(forKey: "milestones.words") == nil {
-            total = (try? await history.store?.insights().totalWords) ?? words
-            defaults.set(thresholds.last { $0 <= total } ?? 0, forKey: "milestones.celebrated")
-            defaults.set(total, forKey: "milestones.words")
-            return
-        }
-        total = defaults.integer(forKey: "milestones.words") + words
-        defaults.set(total, forKey: "milestones.words")
-        guard let threshold = thresholds.last(where: { $0 <= total }), threshold > defaults.integer(forKey: "milestones.celebrated") else { return }
-        defaults.set(threshold, forKey: "milestones.celebrated")
-        overlay.update(.milestone(words: threshold), session: overlayID)
+    /// Counts the dictation into the Hoard, then celebrates at most one treasure a day, replacing the inserted chip.
+    private func celebrateTreasure(overlay overlayID: UUID) async {
+        if case .recording = meetings.phase { hoard.notice(.lurker) }
+        await hoard.refresh()
+        guard let treasure = hoard.celebration() else { return }
+        overlay.update(.treasure(treasure), session: overlayID)
         overlay.hide(after: 2.5, session: overlayID)
     }
 
@@ -1258,7 +1254,7 @@ final class AppModel: ObservableObject {
             case .arming, .listening: state = .recording
             case .transcribing, .polishing: state = .transcribing
             case .error, .readyToPaste: state = .warning
-            case .hidden, .inserted, .milestone, .newMicrophone, .termSuggestion, .termAdded, .meetingOffer, .meetingRecording,
+            case .hidden, .inserted, .treasure, .newMicrophone, .termSuggestion, .termAdded, .meetingOffer, .meetingRecording,
                  .meetingReady, .meetingInterrupted, .meetingQuiet: state = .idle
             }
         }

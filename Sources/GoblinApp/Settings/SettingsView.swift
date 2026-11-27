@@ -6,7 +6,7 @@ import ServiceManagement
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case insights = "Insights", history = "History", meetings = "Meetings", people = "People"
+    case insights = "Insights", hoard = "Hoard", history = "History", meetings = "Meetings", people = "People"
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
     case cleanup = "Cleanup", tone = "Tone", meetingRecording = "Meeting Recording", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
@@ -17,6 +17,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .insights: "chart.bar.xaxis"
+        case .hoard: "trophy"
         case .general: "gearshape"
         case .audio: "mic"
         case .model: "cpu"
@@ -62,6 +63,10 @@ struct SettingsView: View {
                     InsightsView(history: model.history)
                         .frame(maxWidth: 760)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                case .hoard:
+                    HoardView(hoard: model.hoard, meetings: model.meetings)
+                        .frame(maxWidth: 760)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 default:
                     Form { sectionContents }
                         .formStyle(PlateFormStyle())
@@ -99,7 +104,7 @@ struct SettingsView: View {
                                            onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                            onFailure: { model.showFailure($0) })
         case .tone: ToneSettingsView()
-        case .history, .insights, .meetings: EmptyView()
+        case .history, .insights, .hoard, .meetings: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .meetingRecording: MeetingRecordingSettingsView(meetings: model.meetings, openPeople: { model.settingsSelection = .people })
         case .people:
@@ -118,6 +123,7 @@ struct SettingsView: View {
 private struct SettingsSidebar: View {
     @ObservedObject var model: AppModel
     @ObservedObject private var meetings: MeetingsController
+    @ObservedObject private var hoard: HoardModel
     let section: SettingsSection
     @State private var needsNames = 0
 
@@ -125,6 +131,7 @@ private struct SettingsSidebar: View {
         self.model = model
         self.section = section
         _meetings = ObservedObject(wrappedValue: model.meetings)
+        _hoard = ObservedObject(wrappedValue: model.hoard)
     }
 
     private var pages: [SettingsSection] { SettingsSection.allCases.filter { !$0.needsMeetings || meetings.enabled } }
@@ -141,6 +148,12 @@ private struct SettingsSidebar: View {
                             HStack(spacing: 4) { StatusLight(state: .waiting); Text(needsNames.formatted()) }
                                 .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("\(needsNames) \(needsNames == 1 ? "meeting needs" : "meetings need") names")
+                        }
+                        // New treasures: a candle dot, never a status light, as nothing needs fixing.
+                        if item == .hoard, hoard.unseenCount > 0, section != .hoard {
+                            HStack(spacing: 4) { Circle().fill(GoblinBrand.candle).frame(width: 8, height: 8); Text(hoard.unseenCount.formatted()) }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("\(hoard.unseenCount) new \(hoard.unseenCount == 1 ? "treasure" : "treasures")")
                         }
                     }
                 }

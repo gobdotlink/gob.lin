@@ -32,6 +32,7 @@ struct SettingsCapture {
         defaults.set(["com.apple.FaceTime": "always"], forKey: MeetingsController.appPoliciesKey)
         defaults.set(["com.hnc.Discord"], forKey: MeetingsController.neverAskKey)
         defaults.set(true, forKey: MeetingsController.rememberVoicesKey)
+        try seedHoard(defaults)
         SystemAudioAccess.shared.override = .granted
         let sampleMeetings = try SampleMeetings.write(in: directory.appendingPathComponent("Meetings", isDirectory: true))
         // Notes were said yes to once, so the weekly sync has them; the design crit shows what writing them looks like.
@@ -156,6 +157,25 @@ struct SettingsCapture {
                         try await shoot("history-insights-devices\(dark ? "-dark" : "")", SettingsView(model: devices, speechModels: devices.speechModels), size: NSSize(width: 1100, height: 1500), dark: dark)
                     }
                     model.settingsSelection = .history
+                }
+                if wanted("hoard") {
+                    // The whole Hoard, then the sidebar's new-treasure count from another page.
+                    await model.hoard.refresh(meetings: true)
+                    model.settingsSelection = .general
+                    try await shoot("settings-hoard-badge", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 400))
+                    model.settingsSelection = .hoard
+                    for dark in [false, true] {
+                        try await shoot("hoard-full\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
+                                        size: NSSize(width: 1100, height: 2700), dark: dark, settle: .seconds(1))
+                    }
+                    // One treasure up close: found, next on its shelf, and a secret not found yet.
+                    for (name, id) in [("found", "words-100000"), ("next", "words-250000"), ("secret", "secret-lurker")] {
+                        for dark in [false, true] {
+                            try await shoot("hoard-treasure-\(name)\(dark ? "-dark" : "")",
+                                            TreasureSheet(treasure: Hoard.treasure(id)!, hoard: model.hoard).background(GoblinBrand.caseBackground),
+                                            size: NSSize(width: 380, height: 470), dark: dark)
+                        }
+                    }
                 }
                 if wanted("meetings") {
                     model.meetings.refreshList()
@@ -539,6 +559,25 @@ struct SettingsCapture {
         }
     }
 
+    /// A Hoard some weeks in: most of it found before the Hoard, the rest found lately, two of them still new.
+    private static func seedHoard(_ defaults: UserDefaults) throws {
+        var ledger = HoardLedger()
+        let before = ["words-100", "words-1000", "words-5000", "words-10000", "dictations-1", "dictations-10", "dictations-50",
+                      "dictations-100", "dictations-250", "talk-10", "talk-30", "talk-60", "saved-1", "streak-3", "streak-7",
+                      "bigDay-1000", "apps-3", "apps-5", "dictionary-1", "dictionary-10", "people-1", "people-5", "marks-1",
+                      "meetings-1", "meetings-5", "meetingTime-1", "meetingTime-5", "secret-night", "secret-pocket"]
+        ledger.record(Set(before), now: Date().addingTimeInterval(-40 * 86_400))
+        var found = Set(before)
+        for (id, daysAgo) in [("words-25000", 20.0), ("dictations-500", 14), ("talk-180", 12), ("saved-4", 9), ("meetings-10", 6),
+                              ("streak-14", 5), ("bigDay-2500", 3), ("words-50000", 2), ("secret-cackle", 1), ("words-100000", 0.2)] {
+            found.insert(id)
+            ledger.record(found, now: Date().addingTimeInterval(-daysAgo * 86_400))
+        }
+        ledger.unseen = ["secret-cackle", "words-100000"]
+        ledger.pending = []
+        defaults.set(try JSONEncoder().encode(ledger), forKey: HoardModel.ledgerKey)
+    }
+
     @MainActor private static func overlayPhases() -> [(String, OverlayModel)] {
         func make(_ phase: OverlayPhase, committed: String = "", tentative: String = "", level: Double = 0.6,
                   configure: (OverlayModel) -> Void = { _ in }) -> OverlayModel {
@@ -566,7 +605,8 @@ struct SettingsCapture {
             ("transcribing", make(.transcribing, committed: words + " see first.")),
             ("polishing", make(.polishing, committed: "so um cut the export redesign instead keep the onboarding it's what people see first") { $0.cleanupLabel = "Light · Cerebras" }),
             ("inserted", make(.inserted(OverlayResult(application: "Team chat", words: 23, seconds: 0.59)))),
-            ("milestone", make(.milestone(words: 10_000))),
+            ("treasure", make(.treasure(Hoard.treasure("words-100000")!))),
+            ("treasure-secret", make(.treasure(Hoard.treasure("secret-cackle")!))),
             ("term-suggestion", make(.termSuggestion(TermSuggestion(spelling: "panacea", aliases: ["anasia"], projects: ["gob.lin"],
                                                                      reason: .correction(heard: "anasia"))))),
             ("term-suggestion-repeated", make(.termSuggestion(TermSuggestion(spelling: "Sol", aliases: ["soul", "sole"],
