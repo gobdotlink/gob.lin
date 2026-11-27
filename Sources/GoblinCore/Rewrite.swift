@@ -9,7 +9,7 @@ public enum RewriteCleanup: String, CaseIterable, Codable, Sendable, Identifiabl
     public var title: String { self == .codingAgent ? "Coding agent" : rawValue.capitalized }
     public var detail: String {
         switch self {
-        case .none: "Types what the speech model heard. Nothing is sent."
+        case .none: "Skips AI cleanup. Your dictionary and tone still apply."
         case .light: "Cuts ums, stutters and false starts and fixes punctuation. Keeps every word you meant."
         case .medium: "Light, plus small grammar fixes. “Tuesday, no, Wednesday” becomes “Wednesday”."
         case .codingAgent: "Light, plus commands and issue IDs as you'd type them. “Slash review” becomes “/review”."
@@ -349,29 +349,29 @@ public enum RewritePrompt {
     /// What cleanup may do with lines, paragraphs and lists. Each choice that's off forbids its layout, so a model
     /// never adds structure nobody asked for.
     static func layout(_ formatting: RewriteFormatting) -> String {
-        var rules = ["Layout: write plain text, laid out only as these rules allow. Keep line breaks already in the transcript."]
+        var rules = ["Layout: keep line breaks already in the transcript; add others only as these rules allow."]
         if formatting.paragraphs {
             rules.append("""
             Start a new paragraph, after a blank line, when the speaker moves to a new point. Explicit transitions such as "next", "also" or "another thing" begin a separate paragraph, even when each point is only one sentence. Keep one point in one paragraph.
             Input: first fix login next check billing -> Output: First, fix login.\n\nNext, check billing.
             """)
         } else {
-            rules.append("Do not split the text into paragraphs.")
+            rules.append("Do not start paragraphs on your own.")
         }
         if formatting.lists {
             rules.append("""
-            When the speaker clearly lists items, write them as a list with one item per line. A clear list is two or more items the speaker numbers ("one … two …", "first … second …", "number one", "step one"), or three or more items after a spoken count or introduction such as "three things". Number the items "1.", "2." when the speaker numbered them or their order matters; otherwise start each with "- ". Remove only the spoken numbering words. Keep every other word, including the words that introduce the list and each item's own words, capitalized, with no full stop at the end unless the item has more than one sentence. Put words that introduce the list on their own line, ending with a colon, directly above it, and a blank line between the list and any text after it. Keep items mentioned in passing in the sentence.
+            When the speaker clearly lists items, write them as a list with one item per line. A clear list is two or more items the speaker numbers ("one … two …", "first … second …", "number one", "step one"), or three or more items after a spoken count or introduction such as "three things". Number the items "1.", "2." when the speaker numbered them or their order matters; otherwise start each with "- ". Remove only the spoken numbering words and an "and" joining the last item. Keep every other word, including the words that introduce the list and each item's own words, capitalized, with no full stop at the end unless the item has more than one sentence. Put words that introduce the list on their own line, ending with a colon, directly above it, and a blank line between the list and any text after it. Keep items mentioned in passing in the sentence.
             Input: the plan is one ship the fix two update the docs three tell support -> Output: The plan is:\n1. Ship the fix\n2. Update the docs\n3. Tell support
             Input: first we check the logs second we restart the server -> Output: 1. We check the logs\n2. We restart the server
             Input: we need three things from design the login the billing page and the docs -> Output: We need three things from design:\n- The login\n- The billing page\n- The docs
             Input: grab milk eggs and bread on the way -> Output: Grab milk, eggs and bread on the way.
             """)
         } else {
-            rules.append("Do not make bulleted or numbered lists; keep listed items in sentences.")
+            rules.append("Do not make lists.")
         }
         if formatting.spokenBreaks {
             rules.append("""
-            "New line" and "new paragraph" said on their own between thoughts are commands: replace "new line" with a single line break and "new paragraph" with a blank line, and drop punctuation around the command. When the words are part of a sentence, keep them as words.
+            "New line" and "new paragraph" said on their own between thoughts are commands: replace "new line" with a single line break and "new paragraph" with a blank line, and drop punctuation around the command. When the words are part of a sentence, or are the whole transcript, keep them as words.
             Input: thanks for this new paragraph see you tomorrow new line Sam -> Output: Thanks for this.\n\nSee you tomorrow.\nSam
             Input: add a new line to the config -> Output: Add a new line to the config.
             """)

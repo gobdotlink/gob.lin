@@ -224,12 +224,13 @@ struct BigKeyCap: View {
 /// Cut words struck through on red, added words on green, in one line of the person's own words.
 struct InlineDiff: View {
     let changes: [TextDiff.Change]
+    private let typed: String
 
-    init(from old: String, to new: String) { changes = TextDiff.changes(from: old, to: new) }
+    init(from old: String, to new: String) { changes = TextDiff.changes(from: old, to: new); typed = new }
 
     var body: some View {
         Text(attributed).lineSpacing(5)
-            .accessibilityLabel(changes.compactMap { if case .removed = $0 { nil } else { text($0) } }.joined(separator: " "))
+            .accessibilityLabel(typed)
     }
 
     private var attributed: AttributedString {
@@ -253,8 +254,12 @@ struct InlineDiff: View {
         return result
     }
 
+    /// A deleted line break shows as a struck "↵" in the line, so the words it joined read as joined.
     private func text(_ change: TextDiff.Change) -> String {
-        switch change { case .kept(let value), .removed(let value), .added(let value): value }
+        switch change {
+        case .removed(let value): value.replacingOccurrences(of: "\n", with: "↵")
+        case .kept(let value), .added(let value): value
+        }
     }
 }
 

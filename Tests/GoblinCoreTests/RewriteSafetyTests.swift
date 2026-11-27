@@ -103,7 +103,7 @@ struct RewriteSafetyTests {
         _ = await client().rewrite("one ship it two tell support", settings: listing, apiKey: "fixture-key")
         let body = try JSONSerialization.jsonObject(with: RewriteStubState.shared.received()[0].httpBody!) as! [String: Any]
         let system = (body["messages"] as! [[String: String]])[0]["content"]!
-        #expect(system.contains("write them as a list") && system.contains("Do not split the text into paragraphs."))
+        #expect(system.contains("write them as a list") && system.contains("Do not start paragraphs on your own."))
     }
 
     @Test func prewarmOpensTheConnectionWithoutKeyOrText() async throws {

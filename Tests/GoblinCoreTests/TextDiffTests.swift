@@ -15,4 +15,5 @@ import Testing
     #expect(TextDiff.changes(from: "one ship two test", to: "1. Ship\n2. Test") == [
         .removed("one ship two test"), .added("1. Ship\n2. Test"),
     ])
+    #expect(!TextDiff.needsSpace(after: "The plan", before: ":\n1. Ship"))
 }

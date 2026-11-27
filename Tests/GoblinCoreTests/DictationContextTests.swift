@@ -43,6 +43,15 @@ struct DictationContextTests {
             .following(take.map { PreviousTake(application: Self.app, text: $0, removedFullStop: removedFullStop) }, in: application)
     }
 
+    @Test func aTakeAfterAListStartsASentenceWithoutAFullStopOnTheItem() {
+        let list = "The plan is:\n1. Ship the fix\n2. Update the docs"
+        #expect(!after(nil, field: list).continuesSentence && !after(nil, field: "Groceries:\n- Milk ").continuesSentence)
+        let casual = after(list, field: list)
+        #expect(casual.followsFinishedTake && !casual.restoresFullStop)
+        // A dash in a sentence is not a list.
+        #expect(after(nil, field: "Ship it - then").continuesSentence)
+    }
+
     @Test func aTakeAfterAFinishedTakeStartsTheNextSentence() {
         // Nothing follows the take, so its full stop can go back.
         let bare = after("Please make that change", field: "Hi. Please make that change")
@@ -152,13 +161,13 @@ struct DictationContextTests {
             try RewritePrompt.messages(transcript: "ship it", cleanup: cleanup, formatting: formatting, tone: .formal, preferredSpellings: [])[0]["content"]!
         }
         let plain = try system(.light)
-        #expect(plain.contains("Do not split the text into paragraphs.") && plain.contains("Do not make bulleted or numbered lists"))
+        #expect(plain.contains("Do not start paragraphs on your own.") && plain.contains("Do not make lists."))
         #expect(!plain.contains("new paragraph") && !plain.contains("\"1.\""))
         // Coding agent's paragraphs come from its saved formatting now, not from the level.
-        #expect(try system(.codingAgent).contains("Do not split the text into paragraphs."))
+        #expect(try system(.codingAgent).contains("Do not start paragraphs on your own."))
         let all = try system(.medium, RewriteFormatting(paragraphs: true, lists: true, spokenBreaks: true))
         #expect(all.contains("Start a new paragraph") && all.contains("write them as a list") && all.contains("\"New line\" and \"new paragraph\""))
-        #expect(!all.contains("Do not split") && !all.contains("Do not make bulleted"))
+        #expect(!all.contains("Do not start paragraphs") && !all.contains("Do not make lists"))
         #expect(all.contains("Do not add headings"))
     }
 

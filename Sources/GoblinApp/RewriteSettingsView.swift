@@ -50,7 +50,7 @@ struct RewriteSettingsView: View {
             }
             if !settings.provider.runsOnDevice {
                 Toggle(isOn: Binding(get: { settings.usesScreenContext }, set: { on in
-                    var next = settings; next.usesScreenContext = on; persist(next)
+                    update { $0.usesScreenContext = on }
                 })) {
                     Text("Send text near the cursor")
                     Text("Sends the app, window title and nearby text to \(settings.provider.title) with each take.").rowDetail()
@@ -66,7 +66,7 @@ struct RewriteSettingsView: View {
             ForEach(RewriteCleanup.allCases) { level in
                 let selected = settings.cleanup == level
                 Button {
-                    var next = settings; next.cleanup = level; persist(next)
+                    update { $0.cleanup = level }
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -110,7 +110,7 @@ struct RewriteSettingsView: View {
                         Text("What you said → what gets typed")
                         Spacer()
                         if let testOutput {
-                            Text("\(sample.split(whereSeparator: \.isWhitespace).count) → \(testOutput.split(whereSeparator: \.isWhitespace).count) words").monospacedDigit()
+                            Text("\(Self.wordCount(sample)) → \(Self.wordCount(testOutput)) words").monospacedDigit()
                         }
                     }
                     .font(.meta).foregroundStyle(.secondary)
@@ -152,10 +152,20 @@ struct RewriteSettingsView: View {
 
     /// Fillers, a doubled word and missing punctuation, so the diff has something to show.
     static let sample = "um so i think we should uh ship the overlay fix tonight and and do onboarding tomorrow like the copy is basically done"
-    /// The same, plus a list and a new point, for when Paragraphs or Lists is on.
-    static let formattedSample = "um so this week there are three things the overlay fix the onboarding copy and and the docs another thing can we uh move the review to friday"
+    /// Fillers plus a list and a new point, for when formatting is on, with a spoken break when Say "New Line" is.
+    static func formattedSample(spokenBreak: Bool) -> String {
+        "um so this week there are three things the overlay fix the onboarding copy and and the docs"
+            + (spokenBreak ? " new paragraph" : "") + " another thing can we uh move the review to friday"
+    }
 
-    private var sample: String { settings.formatting.paragraphs || settings.formatting.lists ? Self.formattedSample : Self.sample }
+    private var sample: String {
+        settings.formatting.isPlain ? Self.sample : Self.formattedSample(spokenBreak: settings.formatting.spokenBreaks)
+    }
+
+    /// Words, not the "-" or "1." starting a list item.
+    private static func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).filter { $0.range(of: #"^(?:[-*•]|\d+[.)])$"#, options: .regularExpression) == nil }.count
+    }
 
     private var isOn: Bool { settings.enabled && settings.cleanup != .none }
 
@@ -163,7 +173,7 @@ struct RewriteSettingsView: View {
     private func formattingToggle<Label: View>(_ option: WritableKeyPath<RewriteFormatting, Bool>,
                                                @ViewBuilder label: () -> Label) -> some View {
         Toggle(isOn: Binding(get: { settings.formatting[keyPath: option] }, set: { on in
-            var next = settings; next.formatting[keyPath: option] = on; persist(next)
+            update { $0.formatting[keyPath: option] = on }
             // The sample may change with formatting, and a result must stay beside the text it came from.
             testTask?.cancel(); testOutput = nil; testMeta = nil; testFailure = nil
         }), label: label)
@@ -188,7 +198,14 @@ struct RewriteSettingsView: View {
             turnOnAfterEdit = true; editingProvider = true
             return
         }
-        var next = settings; next.enabled = on; persist(next)
+        update { $0.enabled = on }
+    }
+
+    /// Applies one change to the saved settings, not this page's copy: the menu bar may have changed them since it opened.
+    private func update(_ change: (inout RewriteSettings) -> Void) {
+        var next = RewriteSettingsStore.load(defaults: defaults)
+        change(&next)
+        persist(next)
     }
 
     private func persist(_ next: RewriteSettings) {
@@ -208,6 +225,8 @@ struct RewriteSettingsView: View {
     private func testCleanup() {
         guard !testing, inspectCredentials, isOn else { return }
         let snapshot = settings, sample = sample
+        // Typed text gets the saved tone, so the preview does too.
+        let tone = DictationTone(rawValue: defaults.string(forKey: DictationTone.preferenceKey) ?? "") ?? .formal
         testing = true
         testFailure = nil
         testTask = Task { @MainActor in
@@ -215,13 +234,13 @@ struct RewriteSettingsView: View {
             do {
                 let key = try RewriteKeyStore.load(for: snapshot, defaults: defaults)
                 let start = ContinuousClock.now
-                let result = await RewriteClient().rewrite(sample, settings: snapshot, apiKey: key)
+                let result = await RewriteClient().rewrite(sample, settings: snapshot, apiKey: key, tone: tone)
                 try Task.checkCancellation()
                 if let failure = result.failure { throw failure }
                 guard result.wasRewritten else { throw RewriteFailure.invalidResponse }
                 let elapsed = start.duration(to: .now).components
                 let milliseconds = Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15
-                testOutput = result.outputText
+                testOutput = ToneFormatter.format(result.outputText, tone: tone)
                 testMeta = "\(snapshot.cleanup.title) · \(snapshot.model) · \(Int(milliseconds.rounded())) ms"
             } catch {
                 guard !Task.isCancelled else { return }

@@ -35,7 +35,7 @@ public enum TextDiff {
 
     /// Whether a space separates `previous` from `next` when they are put back together.
     public static func needsSpace(after previous: String, before next: String) -> Bool {
-        !previous.hasSuffix("\n") && !next.hasPrefix("\n") && !(next.count == 1 && ".,!?;:)…".contains(next))
+        !previous.hasSuffix("\n") && !next.hasPrefix("\n") && !(next.first.map { ".,!?;:)…".contains($0) } ?? false)
     }
 
     /// Runs of kept, removed and added text, in reading order. `split` tokenizes both texts; the default separates

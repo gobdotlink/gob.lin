@@ -49,6 +49,9 @@ import Testing
     #expect(ToneFormatter.format(list, tone: .formal) == "The plan is:\n1. Ship the fix\n2. Update the docs\n- Tell support")
     #expect(ToneFormatter.format("Thanks for this.\n\nsee you tomorrow", tone: .formal) == "Thanks for this.\n\nSee you tomorrow.")
     #expect(ToneFormatter.format("Some things:\n- The login\n- The docs", tone: .veryCasual) == "some things:\n- the login\n- the docs")
+    #expect(ToneFormatter.format("- ship the fix\n- tell support", tone: .formal) == "- Ship the fix\n- Tell support")
+    #expect(ToneFormatter.format("Plan:\r\n- ship\r\n- test", tone: .formal) == "Plan:\r\n- Ship\r\n- Test")
+    #expect(ToneFormatter.format("- the login\n- the docs", tone: .veryCasual, continuesSentence: true) == "- the login\n- the docs")
     // A single line that only looks like a list item is still a sentence.
     #expect(ToneFormatter.format("- not a list", tone: .formal) == "- not a list.")
 }
