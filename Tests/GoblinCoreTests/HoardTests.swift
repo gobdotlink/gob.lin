@@ -18,7 +18,7 @@ struct HoardTests {
 
     // MARK: Catalogue
 
-    @Test func catalogueIsStableAndLadderClimbs() {
+    @Test func catalogueIDsAreUniqueAndShelvesAreOrdered() {
         let ids = Hoard.treasures.map(\.id)
         #expect(Set(ids).count == ids.count)
         #expect(Hoard.treasures.count == 107)
@@ -134,9 +134,12 @@ struct HoardTests {
         var tally = HoardTally()
         // Weeks of recent dictations, then an older iPhone burst and an older busy day synced in late.
         for day in 1...28 { add(&tally, String(format: "2026-11-%02dT12:00:00Z", day), app: "app.recent") }
+        // Ten apps an hour apart on one old day: Juggler and, with a second tone, Split Personality, but no swarm.
+        for app in 0..<10 { add(&tally, String(format: "2026-10-01T%02d:00:00Z", 8 + app), app: "app.\(app)", tone: app == 0 ? "casual" : "formal") }
+        #expect(tally.found.isSuperset(of: [.juggler, .split]) && !tally.found.contains(.swarm))
+        // Ten in ten minutes on another old day.
         for minute in 0..<10 { add(&tally, String(format: "2026-10-02T09:%02d:00Z", minute)) }
-        for app in 0..<10 { add(&tally, "2026-10-01T12:00:00Z", app: "app.\(app)", tone: app == 0 ? "casual" : "formal") }
-        #expect(tally.found.isSuperset(of: [.swarm, .juggler, .split]))
+        #expect(tally.found.contains(.swarm))
     }
 
     @Test func switchingCalendarsKeepsAStreak() {
@@ -173,6 +176,10 @@ struct HoardTests {
         stats.dictations.add(date: date("2026-11-27T12:00:00Z"), words: 1, duration: nil, application: nil, deviceKind: nil, tone: nil, text: nil, calendar: utc)
         #expect(stats.secrets(now: date("2026-11-27T12:00:00Z"), calendar: utc).contains(.fullWeek))
         #expect(!stats.secrets(now: date("2027-11-20T12:00:00Z"), calendar: utc).contains(.anniversary))
+        // A lunar year is shorter; the anniversary still waits for the Gregorian one.
+        var islamic = Calendar(identifier: .islamicUmmAlQura)
+        islamic.timeZone = utc.timeZone
+        #expect(!stats.secrets(now: date("2027-11-12T12:00:00Z"), calendar: islamic).contains(.anniversary))
         #expect(stats.secrets(now: date("2027-11-21T12:00:00Z"), calendar: utc).contains(.anniversary))
     }
 
@@ -246,6 +253,18 @@ struct HoardTests {
         // Delete All doesn't either.
         try await store.deleteAll()
         #expect(try await store.hoardTally(calendar: utc).tally.words == 6)
+    }
+
+    @Test func savedDictationsCountBeforeTheyCanGo() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hoard-test-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try HistoryStore(directory: directory)
+        _ = try await store.hoardTally(calendar: utc)
+        let entry = HistoryEntry(rawText: "", finalText: "gone before the count", createdAt: date("2026-11-27T12:00:00Z"))
+        _ = try await store.insert(entry)
+        try await store.delete(id: entry.id)
+        #expect(try await store.hoardTally(calendar: utc).tally.words == 4)
     }
 
     @Test func retentionCountsWhatItTrims() async throws {

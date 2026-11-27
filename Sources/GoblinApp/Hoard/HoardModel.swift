@@ -12,6 +12,8 @@ final class HoardModel: ObservableObject {
     @Published private(set) var stats: HoardStats?
     /// History couldn't be read at the last count, so dictation progress may be behind.
     @Published private(set) var historyUnavailable = false
+    /// History has given a tally since launch, so its shelves' progress is real rather than zero.
+    @Published private(set) var dictationsKnown = false
 
     nonisolated static let ledgerKey = "hoard.ledger"
     /// The overlay switch: Settings › Overlay › Celebrate treasures.
@@ -39,14 +41,25 @@ final class HoardModel: ObservableObject {
         self.ledger = ledger
     }
 
-    /// Counts whenever what the Hoard reads changes: a dictation saved, synced in or retried, a meeting finishing
-    /// however it was processed, or a person or dictionary word added. Call once, after the first count has started.
-    func observeChanges() {
-        guard subscriptions.isEmpty else { return }
+    /// The first count, which files everything already in History, Meetings, People and the dictionary quietly, then
+    /// a recount whenever any of them changes: a dictation saved, synced in or retried, a meeting finishing however
+    /// it was processed, a person or dictionary word added. The first count is queued before anything can change, so
+    /// what changes during it is counted next.
+    func start() {
+        guard counting == nil else { return }
+        counting = Task { @MainActor in await self.count(includeMeetings: true) }
         history.$revision.dropFirst().sink { [weak self] _ in self?.recount() }.store(in: &subscriptions)
-        dictionary.$entries.map(\.count).removeDuplicates().dropFirst().sink { [weak self] _ in self?.recount() }.store(in: &subscriptions)
-        meetings.$people.map { $0.filter { !$0.isMe }.count }.removeDuplicates().dropFirst()
-            .sink { [weak self] _ in self?.recount() }.store(in: &subscriptions)
+        // Every count published is a peak, even one undone a moment later by a merge from another device.
+        dictionary.$entries.map(\.count).removeDuplicates().dropFirst().sink { [weak self] count in
+            guard let self, self.ledger.started else { return }
+            if count > self.ledger.dictionaryWords { self.ledger.dictionaryWords = count; self.save() }
+            self.recount()
+        }.store(in: &subscriptions)
+        meetings.$people.map { $0.filter { !$0.isMe }.count }.removeDuplicates().dropFirst().sink { [weak self] count in
+            guard let self, self.ledger.started else { return }
+            if count > self.ledger.people { self.ledger.people = count; self.save() }
+            self.recount()
+        }.store(in: &subscriptions)
         meetings.$meetings.map { Set($0.filter { $0.state == .ready }.map(\.id)) }.removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.recount(meetings: true) }.store(in: &subscriptions)
     }
@@ -75,11 +88,15 @@ final class HoardModel: ObservableObject {
         guard !ledger.noticed.contains(secret) else { return }
         ledger.noticed.insert(secret)
         save()
+        recount()
     }
+
+    /// Whether the overlay celebrates new treasures.
+    var celebrates: Bool { defaults.object(forKey: Self.celebrateKey) as? Bool ?? true }
 
     /// The one treasure to celebrate in the overlay now, if celebrations are on and none has shown today.
     func celebration(now: Date = Date()) -> Treasure? {
-        guard defaults.object(forKey: Self.celebrateKey) as? Bool ?? true else { return nil }
+        guard celebrates else { return nil }
         guard let treasure = ledger.celebration(now: now) else { return nil }
         save()
         return treasure
@@ -100,6 +117,9 @@ final class HoardModel: ObservableObject {
             (tally, first) = counted
             lastTally = tally
             historyUnavailable = false
+            dictationsKnown = true
+            // Words the old milestones counted beyond what History still held become a fixed head start.
+            if ledger.legacyOffset == nil { ledger.legacyOffset = max(0, ledger.legacyWords - tally.words) }
         } else {
             historyUnavailable = true
         }
@@ -108,7 +128,7 @@ final class HoardModel: ObservableObject {
         let people = meetings.library.people.people().filter { !$0.isMe }.count
         ledger.people = max(ledger.people, people)
         ledger.dictionaryWords = max(ledger.dictionaryWords, dictionary.entries.count)
-        tally.words = max(tally.words, ledger.legacyWords)
+        tally.words = ledger.legacyOffset.map { tally.words + $0 } ?? max(tally.words, ledger.legacyWords)
         let now = Date()
         let stats = HoardStats(dictations: tally, meetings: ledger.meetings, people: ledger.people,
                                dictionaryWords: ledger.dictionaryWords, noticed: ledger.noticed)

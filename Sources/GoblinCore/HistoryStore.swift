@@ -107,6 +107,9 @@ public actor HistoryStore {
                              [.text(saved.id.uuidString), .number(saved.createdAt.timeIntervalSince1970),
                               .text(saved.rawText), .text(saved.finalText), .text(saved.targetApplicationName ?? ""),
                               .number(saved.starred ? 1 : 0), saved.audioFilename.map(SQLValue.text) ?? .null, .text(metadata)])
+            // Counted for the Hoard as it's saved, so nothing that removes it later can take it back. A failure here
+            // never fails the save: the next count picks it up.
+            try? database.transaction { try countForHoardIfStarted() }
             return saved
         } catch {
             if let copiedAudio { try? FileManager.default.removeItem(at: copiedAudio) }
@@ -191,6 +194,12 @@ public actor HistoryStore {
         var result = (tally: HoardTally(), first: true)
         try database.transaction { result = try countForHoard(calendar: calendar) }
         return result
+    }
+
+    /// Saving, syncing and trimming count as they go once the Hoard has started. Before its first count, that count
+    /// takes in whatever is here, quietly.
+    private func countForHoardIfStarted() throws {
+        if try database.meta(MetaKey.hoardTally) != nil { _ = try countForHoard() }
     }
 
     /// The fold behind `hoardTally`, inside the caller's transaction. Retention calls it too, once the Hoard has
@@ -337,8 +346,7 @@ public actor HistoryStore {
 
     private func trim(_ policy: HistoryRetention, now: Date) throws -> Int {
         guard policy.maximumUnstarredCount != nil || policy.maximumAgeDays != nil else { return 0 }
-        // Before the Hoard's first count, that count takes in whatever is here; after it, anything trimmed is counted first.
-        if try database.meta(MetaKey.hoardTally) != nil { _ = try countForHoard() }
+        try countForHoardIfStarted()
         let cutoff = policy.maximumAgeDays.map { now.addingTimeInterval(-Double($0) * 86400) }
         let syncing = try syncEnabled()
         var removed = 0
@@ -532,6 +540,8 @@ public actor HistoryStore {
             }
             let cleared = try localSettings().clearedThrough
             for record in saves { try apply(record, clearedThrough: cleared, to: &result) }
+            // Synced dictations count in the transaction that saves them, before a later page can delete them.
+            try countForHoardIfStarted()
             _ = try trim(retention, now: now)
         }
         return result

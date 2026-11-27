@@ -42,7 +42,7 @@ public struct HoardStats: Sendable, Equatable {
         var found = dictations.found.union(meetings.found).union(noticed)
         if dictations.hasWeekend(calendar: calendar) { found.insert(.weekend) }
         if dictations.hasFullWeek(calendar: calendar) { found.insert(.fullWeek) }
-        if let first = dictations.firstDate, let year = calendar.date(byAdding: .year, value: 1, to: first), now >= year {
+        if let first = dictations.firstDate, let year = HoardTally.civil(calendar).date(byAdding: .year, value: 1, to: first), now >= year {
             found.insert(.anniversary)
         }
         return found
@@ -195,7 +195,7 @@ public struct HoardTally: Codable, Sendable, Equatable {
     }
 
     /// The Gregorian calendar in `calendar`'s time zone, for day keys and the dated secrets.
-    private static func civil(_ calendar: Calendar) -> Calendar {
+    static func civil(_ calendar: Calendar) -> Calendar {
         var civil = Calendar(identifier: .gregorian)
         civil.timeZone = calendar.timeZone
         return civil
@@ -263,6 +263,8 @@ public struct HoardLedger: Codable, Sendable, Equatable {
     public var noticed: Set<HoardSecret> = []
     /// The lifetime words the milestones this replaced had counted, which History may no longer hold.
     public var legacyWords = 0
+    /// Those words beyond what History held at its first count, added to every count after it. Nil until then.
+    public var legacyOffset: Int?
     /// Whether the Hoard has counted before, so the first count files everything quietly.
     public var started = false
 
@@ -280,6 +282,7 @@ public struct HoardLedger: Codable, Sendable, Equatable {
         dictionaryWords = try values.decodeIfPresent(Int.self, forKey: .dictionaryWords) ?? 0
         noticed = HoardSecret.known(try values.decodeIfPresent([String].self, forKey: .noticed))
         legacyWords = try values.decodeIfPresent(Int.self, forKey: .legacyWords) ?? 0
+        legacyOffset = try values.decodeIfPresent(Int.self, forKey: .legacyOffset)
         started = try values.decodeIfPresent(Bool.self, forKey: .started) ?? false
     }
 

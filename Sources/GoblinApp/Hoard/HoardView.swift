@@ -93,7 +93,8 @@ struct HoardView: View {
 
     private func sentence(_ stats: HoardStats, next: Rung?) -> String {
         if hoard.ledger.found.isEmpty { return "Nothing in the hoard yet. One dictation and I'll start a pile." }
-        guard let next else { return "Every treasure I could find is in here. Shiny." }
+        if hoard.ledger.found.count == Hoard.treasures.count { return "Every treasure is in here. Shiny." }
+        guard let next else { return "What's left are secrets and records to beat." }
         return "My hoard grows. \(next.treasure.name) is \(remaining(next.treasure, stats)) away."
     }
 
@@ -148,7 +149,7 @@ struct HoardView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 92, maximum: 132), spacing: 0, alignment: .top)], alignment: .leading, spacing: 12) {
             ForEach(shown) { treasure in
                 TreasureCell(treasure: treasure, find: hoard.ledger.found[treasure.id], isNew: fresh.contains(treasure.id),
-                             progress: treasure.id == next?.id ? (fraction(treasure, stats), treasure.percent(stats)) : nil) { inspected = treasure }
+                             progress: treasure.id == next?.id && measured(treasure) ? (fraction(treasure, stats), treasure.percent(stats)) : nil) { inspected = treasure }
             }
             if hidden > 0 {
                 VStack(spacing: 0) {
@@ -173,7 +174,7 @@ struct HoardView: View {
     /// total, so they never read as nearly there.
     private func closest(_ stats: HoardStats) -> [Rung] {
         shelves.filter { ![.secrets, .streak, .bigDay].contains($0) }.compactMap { shelf in
-            Hoard.shelf(shelf).first { !found($0) }.map { Rung(treasure: $0, fraction: fraction($0, stats)) }
+            Hoard.shelf(shelf).first { !found($0) }.flatMap { measured($0) ? Rung(treasure: $0, fraction: fraction($0, stats)) : nil }
         }
         .sorted { $0.fraction > $1.fraction }
         .prefix(3).map { $0 }
@@ -182,6 +183,11 @@ struct HoardView: View {
     private func fraction(_ treasure: Treasure, _ stats: HoardStats) -> Double {
         guard let threshold = treasure.threshold, threshold > 0 else { return 0 }
         return min(1, Double(stats.value(treasure.shelf)) / Double(threshold))
+    }
+
+    /// Whether `treasure` has a number to show yet: secrets never do, and History's shelves wait for its first tally.
+    private func measured(_ treasure: Treasure) -> Bool {
+        treasure.threshold != nil && (hoard.dictationsKnown || !treasure.shelf.countsDictations)
     }
 
     /// What's left to reach `treasure`: "1,520 words", "2 hours 10 minutes".
@@ -290,7 +296,9 @@ struct TreasureSheet: View {
 
     private func status(_ find: HoardLedger.Find?) -> String {
         if let find { return find.before ? "Found before the Hoard" : "Found \(find.date.formatted(date: .long, time: .omitted))" }
-        guard treasure.threshold != nil, let stats = hoard.stats else { return "Not found yet" }
+        guard treasure.threshold != nil, let stats = hoard.stats, hoard.dictationsKnown || !treasure.shelf.countsDictations else {
+            return "Not found yet"
+        }
         let value = stats.value(treasure.shelf)
         // A streak or a big day is a record to beat, not a total that fills up.
         if [.streak, .bigDay].contains(treasure.shelf) { return "Best so far: \(treasure.shelf.phrase(value))" }

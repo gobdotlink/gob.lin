@@ -246,10 +246,7 @@ final class AppModel: ObservableObject {
         }
         // The first count files everything already in History, Meetings, People and the dictionary quietly; after it,
         // every change counts as it happens, and a treasure waits for the next dictation's moment.
-        Task { [hoard] in
-            await hoard.refresh(meetings: true)
-            hoard.observeChanges()
-        }
+        hoard.start()
         historySync.onStatus = { [diagnostics] in diagnostics.setHistorySync($0) }
         Task { [historySync] in await historySync.start() }
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { [weak self] _ in
@@ -1214,13 +1211,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Counts the dictation into the Hoard, then celebrates at most one treasure a day, replacing the inserted chip.
-    /// Nothing is celebrated while a meeting records, and the day's moment is only spent if the chip is still showing.
+    /// Celebrates at most one treasure a day, replacing the inserted chip. The save's own recount files the dictation;
+    /// this waits for a count only when a celebration could show. Nothing is celebrated while a meeting records, and the
+    /// day's moment is only spent if the chip is still on screen.
     private func celebrateTreasure(overlay overlayID: UUID) async {
-        let recording = if case .recording = meetings.phase { true } else { false }
-        if recording { hoard.notice(.lurker) }
+        if meetings.isRecording { hoard.notice(.lurker); return }
+        guard hoard.celebrates, overlay.owns(overlayID) else { return }
         await hoard.refresh()
-        guard !recording, !Task.isCancelled, overlay.owns(overlayID), let treasure = hoard.celebration() else { return }
+        guard !Task.isCancelled, !meetings.isRecording, overlay.owns(overlayID), let treasure = hoard.celebration() else { return }
         overlay.update(.treasure(treasure), session: overlayID)
         overlay.hide(after: 2.5, session: overlayID)
     }

@@ -22,6 +22,9 @@ public enum HoardShelf: String, CaseIterable, Sendable, Codable {
         }
     }
 
+    /// Shelves History's dictations fill.
+    public var countsDictations: Bool { [.words, .dictations, .talk, .saved, .streak, .bigDay, .apps].contains(self) }
+
     /// Shelves that only fill while Meetings is on.
     public var needsMeetings: Bool { [.meetings, .meetingTime, .people, .marks].contains(self) }
 

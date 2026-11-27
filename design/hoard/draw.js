@@ -67,6 +67,11 @@ function outline(d) {
     const n = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy])=>{ const X=x+dx, Y=y+dy; if(X<0||X>=W||Y<0||Y>=H) return false; const c=src[Y*W+X]; return c && c!==O; });
     if (n) d.a[y*W+x] = O;
   }
+  // A fill on the canvas edge has no room for its ring outside, so its edge pixel becomes the ring.
+  for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+    const c = d.a[y*W+x];
+    if (c && c!==O && (x===0 || x===W-1 || y===0)) d.a[y*W+x] = O;
+  }
 }
 function plinth(d, m) {
   const [m0,m1,m2,m3] = MATS[m].c;
