@@ -172,13 +172,8 @@ private func turn(_ speaker: String, _ start: Double, _ end: Double, track: Meet
     // Narrower windows thin further to hourly ticks.
     let narrow = MeetingTimeline.ticks(duration: fourHours, width: 450, minimumSpacing: 59)
     #expect(narrow == [0, 3_600, 7_200, 10_800])
-    // Extreme durations step cleanly past the fixed candidate list.
-    let fullDay: Double = 24 * 3_600
-    let dayTicks = MeetingTimeline.ticks(duration: fullDay, width: 100, minimumSpacing: 60)
-    #expect(dayTicks.count >= 1)
-    if dayTicks.count > 1 {
-        #expect(100 * (dayTicks[1] - dayTicks[0]) / fullDay >= 60)
-    }
+    // Extreme durations double past the 12-hour candidate and stay spaced on narrow tracks.
+    #expect(MeetingTimeline.ticks(duration: 30 * 3_600, width: 120, minimumSpacing: 60) == [0, 86_400])
 }
 
 private func summary(_ state: MeetingState = .ready, speakers: [String] = ["You", "Priya Shah"], hasAudio: Bool = true,
