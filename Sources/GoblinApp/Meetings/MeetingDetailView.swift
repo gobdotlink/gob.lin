@@ -33,6 +33,12 @@ struct MeetingDetailView: View {
     @State private var notesStale = false
     /// The tab picked by hand. Until then: Notes once there are notes or they're being written, else Transcript.
     @State private var pickedTab: Tab?
+    /// The last name change being saved. Each waits for the one before, so a chip renamed again before its first name is
+    /// saved takes its Undo from the names that save left.
+    @State private var saving: Task<Void, Never>?
+    /// Counts name changes and Undos as they start. Only the latest one's save offers Undo: an older one's, restored after a
+    /// newer save, would drop the newer name.
+    @State private var edits = 0
 
     enum Tab: Hashable { case notes, transcript, typed }
 
@@ -387,7 +393,7 @@ struct MeetingDetailView: View {
         let trimmed = other?.name ?? typed
         guard trimmed != lane.name else { return }
         if let other { return merge(lane, into: other) }
-        change(lane.needsName ? "Named \(lane.name) \(trimmed)." : "Renamed \(lane.name) to \(trimmed).") {
+        change(lane.needsName ? "Named \(lane.name) \(trimmed)." : "Renamed \(lane.name) to \(trimmed).", showing: [lane.name: trimmed]) {
             try await store.renameSpeaker(meeting.id, from: lane.name, to: trimmed)
         }
     }
@@ -400,23 +406,44 @@ struct MeetingDetailView: View {
             : SpeakerSuggestions.unmatched(lanes: lanes, participants: detail?.participants ?? MeetingParticipants())
         let warning = SpeakerSuggestions.mergeWarning(unmatched: unmatched)
         change("Merged \(lane.name) into \(other.name).", missing: unmatched.count == 1 ? unmatched[0] : nil,
-               mergedFrom: warning == nil ? nil : lane.name, warning: warning) {
+               mergedFrom: warning == nil ? nil : lane.name, warning: warning, showing: [lane.name: other.name]) {
             try await store.renameSpeaker(meeting.id, from: lane.name, to: other.name)
         }
     }
 
+    /// `renamed` (shown name → new name) shows on the page at once; the reload after saving replaces it, or puts the
+    /// old names back if saving failed.
     private func change(_ message: String, missing: String? = nil, mergedFrom: String? = nil, warning: String? = nil,
-                        _ edit: @escaping () async throws -> [TranscriptTurn]) {
-        Task {
+                        showing renamed: [String: String] = [:], _ edit: @escaping () async throws -> [TranscriptTurn]) {
+        show(renamed)
+        // The last change's Undo goes as this one starts: restoring its names after this save would drop this name.
+        undo = nil
+        edits += 1
+        let number = edits
+        let previous = saving
+        saving = Task {
+            await previous?.value
             do {
                 let before = try await store.speakerNames(meeting.id)
                 _ = try await edit()
-                undo = Undo(message: message, names: before, missing: missing, mergedFrom: mergedFrom, warning: warning)
+                if number == edits {
+                    undo = Undo(message: message, names: before, missing: missing, mergedFrom: mergedFrom, warning: warning)
+                }
                 failure = nil
             } catch { failure = error.localizedDescription }
             reloads += 1
             onEdited()
         }
+    }
+
+    /// The chips, timeline and transcript under the new names before they're saved, so a name given takes at once.
+    private func show(_ renamed: [String: String]) {
+        guard !renamed.isEmpty, var shown = detail else { return }
+        for index in shown.turns.indices {
+            if let name = renamed[shown.turns[index].speaker] { shown.turns[index].speaker = name }
+        }
+        detail = shown
+        lanes = MeetingTimeline.lanes(shown.turns, kind: meeting.kind)
     }
 
     /// Undoes a merge and names the voice that was merged in after the person who had no voice.
@@ -429,9 +456,12 @@ struct MeetingDetailView: View {
     }
 
     private func restore(_ undo: Undo) {
-        Task {
+        self.undo = nil
+        edits += 1
+        let previous = saving
+        saving = Task {
+            await previous?.value
             do { _ = try await store.setSpeakerNames(meeting.id, undo.names) } catch { failure = error.localizedDescription }
-            self.undo = nil
             reloads += 1
             onEdited()
         }

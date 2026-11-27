@@ -245,8 +245,13 @@ public actor MeetingStore {
                 || FileManager.default.fileExists(atPath: directory.appendingPathComponent(MeetingStorage.transcriptFile).path) else {
             throw MeetingStoreError.noTranscript(id)
         }
-        // Writes attributed.json from an older transcript if needed, so labels are known.
-        try MeetingPostProcessor.render(directory: directory)
+        // Writes attributed.json from an older transcript if needed, so labels are known. Otherwise only a pending relabel
+        // is finished: the transcript is rendered once, below, with the new name.
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent(MeetingStorage.attributedFile).path) {
+            try MeetingPostProcessor.finishRelabel(directory)
+        } else {
+            try MeetingPostProcessor.render(directory: directory)
+        }
         let base = try JSONDecoder.meeting.decode([TranscriptTurn].self,
                                                   from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.attributedFile)))
         var names = MeetingPostProcessor.speakerNames(directory)
