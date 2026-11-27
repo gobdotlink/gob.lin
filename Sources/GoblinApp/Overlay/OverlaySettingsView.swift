@@ -29,8 +29,8 @@ struct OverlaySettingsView: View {
         } header: { Text("Where it sits") }
         Section {
             Toggle(isOn: $milestones) {
-                Text("Celebrate milestones")
-                Text("A note at 1,000, 10,000, 100,000 and a million words.").rowDetail()
+                Text("Celebrate treasures")
+                Text("After a dictation, a note for something new in the Hoard, at most once a day.").rowDetail()
             }
             Toggle(isOn: $termSuggestions) {
                 Text("Offer words from your fixes")

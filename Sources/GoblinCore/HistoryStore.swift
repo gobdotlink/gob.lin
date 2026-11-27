@@ -107,6 +107,9 @@ public actor HistoryStore {
                              [.text(saved.id.uuidString), .number(saved.createdAt.timeIntervalSince1970),
                               .text(saved.rawText), .text(saved.finalText), .text(saved.targetApplicationName ?? ""),
                               .number(saved.starred ? 1 : 0), saved.audioFilename.map(SQLValue.text) ?? .null, .text(metadata)])
+            // Counted for the Hoard as it's saved, so nothing that removes it later can take it back. A failure here
+            // never fails the save: the next count picks it up.
+            try? database.transaction { try countForHoardQuietly() }
             return saved
         } catch {
             if let copiedAudio { try? FileManager.default.removeItem(at: copiedAudio) }
@@ -182,6 +185,62 @@ public actor HistoryStore {
                             duration: row[2].flatMap(Double.init), bundle: row[3], name: row[4], deviceKind: row[5], deviceName: row[6])
         }
         return accumulator.finish()
+    }
+
+    /// Adds every dictation the Hoard hasn't counted to its running tally, and returns the tally. Each dictation counts
+    /// once, whichever device made it and whenever it arrived, so deleting or trimming one never takes it back.
+    /// `first` is true when nothing had been counted before: everything already here was just added at once.
+    public func hoardTally(calendar: Calendar = .current) throws -> (tally: HoardTally, first: Bool) {
+        var result = (tally: HoardTally(), first: true)
+        try database.transaction { result = try countForHoard(calendar: calendar) }
+        return result
+    }
+
+    /// Saving, syncing and trimming count as they go once the Hoard has started; before its first count, that count
+    /// takes in whatever is here, quietly. It runs in a savepoint, so a count that fails is undone on its own and can't
+    /// roll back the History change around it, whose recordings may already be gone; the next count takes in what it
+    /// missed. A failure that ended the whole transaction, as a full disk can, still throws, so nothing after it runs
+    /// outside the transaction.
+    private func countForHoardQuietly() throws {
+        try database.run("SAVEPOINT hoard_count")
+        do {
+            if try database.meta(MetaKey.hoardTally) != nil { _ = try countForHoard() }
+            try database.run("RELEASE hoard_count")
+        } catch {
+            try database.run("ROLLBACK TO hoard_count")
+            try database.run("RELEASE hoard_count")
+        }
+    }
+
+    /// The fold behind `hoardTally`, inside the caller's transaction. Retention calls it too, once the Hoard has
+    /// started, so a dictation trimmed as it arrives (Keep 0, or an old one synced in) is still counted.
+    private func countForHoard(calendar: Calendar = .current) throws -> (tally: HoardTally, first: Bool) {
+        var tally = HoardTally(), first = true
+        if let saved = try database.meta(MetaKey.hoardTally) {
+            tally = try JSONDecoder().decode(HoardTally.self, from: Data(saved.utf8))
+            first = false
+        }
+        var counted: [String] = []
+        // Oldest first, so the ten-minute and per-day memories fill in order. Laughter is read from what was heard,
+        // before cleanup or the dictionary could change it.
+        try database.forEachRow("""
+            SELECT entries.id, created_at, json_extract(metadata, '$.wordCount'), json_extract(metadata, '$.audioDuration'),
+                   COALESCE(NULLIF(json_extract(metadata, '$.targetBundleIdentifier'), ''), NULLIF(app_name, '')),
+                   devices.kind, json_extract(metadata, '$.tone'), raw_text
+            FROM entries LEFT JOIN devices ON devices.id = \(Self.entryDevice)
+            LEFT JOIN hoard_counted ON hoard_counted.id = entries.id
+            WHERE hoard_counted.id IS NULL ORDER BY created_at, entries.id
+            """, [.text(deviceID)]) { row in
+            guard let id = row[0], let timestamp = Double(row[1] ?? ""), timestamp.isFinite else { return }
+            tally.add(date: Date(timeIntervalSince1970: timestamp), words: max(0, Int(row[2] ?? "") ?? 0),
+                      duration: row[3].flatMap(Double.init), application: row[4], deviceKind: row[5], tone: row[6],
+                      text: row[7], calendar: calendar)
+            counted.append(id)
+        }
+        guard first || !counted.isEmpty else { return (tally, first) }
+        for id in counted { try database.run("INSERT OR IGNORE INTO hoard_counted (id) VALUES (?)", [.text(id)]) }
+        try database.setMeta(MetaKey.hoardTally, String(decoding: try JSONEncoder().encode(tally), as: UTF8.self))
+        return (tally, first)
     }
 
     /// Reads saved final text in the requested period, retaining only word counts. Text in a language this device has no
@@ -297,6 +356,7 @@ public actor HistoryStore {
 
     private func trim(_ policy: HistoryRetention, now: Date) throws -> Int {
         guard policy.maximumUnstarredCount != nil || policy.maximumAgeDays != nil else { return 0 }
+        try countForHoardQuietly()
         let cutoff = policy.maximumAgeDays.map { now.addingTimeInterval(-Double($0) * 86400) }
         let syncing = try syncEnabled()
         var removed = 0
@@ -490,6 +550,8 @@ public actor HistoryStore {
             }
             let cleared = try localSettings().clearedThrough
             for record in saves { try apply(record, clearedThrough: cleared, to: &result) }
+            // Synced dictations count in the transaction that saves them, before a later page can delete them.
+            try countForHoardQuietly()
             _ = try trim(retention, now: now)
         }
         return result
@@ -666,6 +728,8 @@ private enum MetaKey {
     static let settingsServer = "settings.server"
     static let settingsPending = "settings.pending"
     static let settingsRevision = "settings.revision"
+    /// The Hoard's running dictation tally, as JSON.
+    static let hoardTally = "hoard.tally"
 }
 
 // This connection belongs exclusively to HistoryStore's actor after initialization.
@@ -697,6 +761,8 @@ private final class HistoryDatabase {
                 // What iCloud holds of each dictation: its record's system fields (base64), when iCloud first saved it,
                 // the changes it hasn't confirmed, and a count of local changes so one made mid-upload isn't lost.
                 try run("CREATE TABLE IF NOT EXISTS sync (id TEXT PRIMARY KEY NOT NULL, server TEXT, created REAL, pending INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0)")
+                // Every dictation the Hoard has counted, kept after the dictation goes so it never counts twice.
+                try run("CREATE TABLE IF NOT EXISTS hoard_counted (id TEXT PRIMARY KEY NOT NULL)")
                 // An older build that trims or deletes leaves a row without its dictation. Trimming must never delete
                 // everywhere, and the two can't be told apart, so such rows are forgotten rather than sent.
                 try run("DELETE FROM sync WHERE (pending & 4) = 0 AND id NOT IN (SELECT id FROM entries)")

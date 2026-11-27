@@ -8,7 +8,8 @@ enum OverlayPhase: Equatable {
     case hidden, arming, listening, transcribing, polishing
     case inserted(OverlayResult)
     case readyToPaste(application: String?, shortcut: Bool = true)
-    case milestone(words: Int)
+    /// A treasure just found for the Hoard, at most one a day.
+    case treasure(Treasure)
     /// Asks once whether a microphone seen for the first time should be used.
     case newMicrophone(name: String, uid: String)
     /// A word learned from the user's fix, offered with Add and Not Now.
@@ -36,7 +37,7 @@ enum OverlayPhase: Equatable {
         case .polishing: "Cleaning up"
         case .inserted: "Typed"
         case .readyToPaste: "Ready to paste"
-        case .milestone: "Milestone"
+        case .treasure: "New treasure"
         case .newMicrophone: "New microphone"
         case .termSuggestion: "New word"
         case .termAdded: "Word added"
@@ -295,6 +296,9 @@ final class OverlayController {
         guard session == sessionID, model.microphoneLine != line else { return }
         model.microphoneLine = line
     }
+
+    /// Whether `session` is still the one on screen: hiding or a newer take ends it.
+    func owns(_ session: UUID) -> Bool { session == sessionID }
 
     func hide(session: UUID? = nil) {
         if let session, session != sessionID { return }

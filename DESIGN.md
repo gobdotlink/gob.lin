@@ -13,8 +13,8 @@ gob.lin is a native macOS 26 app with a proud pixel goblin living in it. Control
 | Overlay | ~100 times a day | A face, a moving mouth, one hand. Plain words. |
 | Sidekick | during a recorded meeting | The overlay's budget: a face, plus the quill while a mark is written down. |
 | Menu-bar popover | daily | A goblin portrait and the wordmark in the header. Everything else is stock. |
-| Settings, History, Meetings | weekly | Status sentences in the goblin's voice. No sprites, except on About and Insights. |
-| First run, setup sheets, empty states, milestones, About | rare | The full goblin: big sprites, jokes, sparkles and the tagline. |
+| Settings, History, Meetings | weekly | Status sentences in the goblin's voice. No sprites, except on About, Insights and the Hoard. |
+| First run, setup sheets, empty states, treasures, About | rare | The full goblin: big sprites, jokes, sparkles and the tagline. |
 
 ## Rules
 
@@ -32,7 +32,7 @@ The values live in `GoblinBrand`. This table is what it must contain.
 |---|---|---|---|
 | moss | `#2B7D4F` | `#34965F` fill, `#62C78A` text | Every interactive job: primary buttons, switches, links, selection, chart bars |
 | neon | `#57E68F` | `#57E68F` | Marks only: the wordmark on dark, the overlay meter and caret, the tagline on dark, the top word of the Insights cloud on dark |
-| candle | `#B26B0F` | `#F2A93B` | Stars, milestones and meeting marks |
+| candle | `#B26B0F` | `#F2A93B` | Stars, treasures and the Hoard's meters, and meeting marks |
 | case | `#EDECE9` | `#1E1F21` | Settings window background (Settings, History and Meetings pages) |
 | plate | `#FBFAF8` | `#2A2B2E` | A grouped section, with a 0.5 pt hairline |
 | bubble | `#181A1C` at 92% | same | The overlay, over a blur |
@@ -106,16 +106,18 @@ Reuse these before writing new ones:
 | side-eye | `goblin-side.png` | Password field; popover header while something needs attention |
 | closed | `goblin-closed.png` | The inserted nod, idle blinks, asleep |
 | sheepish | `goblin-sheepish.png` | The goblin's own fault, like failed cleanup. The sweat drop is drawn in. |
-| cackle | `goblin-cackle.png` | The first take and milestones only |
+| cackle | `goblin-cackle.png` | The first take, new treasures and the Hoard only |
 | eyes | `goblin-eyes-ahead.png`, `goblin-eyes-<n…nw>.png` | Popover header and About: slit pupils looking ahead or toward the pointer |
 | grip hands | `hand-grip.png` | Gripping the top edge of a card or field. Mirror it for the right hand. |
 | open palm | `hand-palm.png` | "Not touching that": no microphone, password field |
 | quill fist | `hand-quill.png` | Transcribing |
-| props | `prop-zz`, `prop-drop`, `prop-candle`, `prop-spark`, `prop-coin` | Asleep, sweat, milestone, celebration |
+| props | `prop-zz`, `prop-drop`, `prop-candle`, `prop-spark`, `prop-coin` | Asleep, sweat, candlelight, celebration |
 
 The first two frames already ship in `Sources/GoblinApp/Assets/`. The rest are in `docs/design/sprites/`. Copy one into Assets when a surface needs it, and run `xcodegen generate` afterwards. The old 7 × 7 fists in `hands.png` are retired once the grip hands land.
 
 The menu-bar icon (`GoblinBrand.menuImage`) is the 22 px goblin in `design/menu-icon/draw.py`, doubled pixel for pixel for Retina. While a meeting records, the goblin wears a pixel headset from the same script (`menu-headset*.png`), graphite on a light bar and pale grey on a dark one. It's a shape, not a colour, so it never reads as a status light, and it stacks with the state dot: dictating during a call shows both. Settings can add the elapsed time beside it. On a light menu bar its edge and the state-dot ring are black. On a dark menu bar the edge and the ring are dropped, and each green is drawn one step lighter, so the bar itself outlines the goblin and the shading doesn't sink into it. Any outline on a dark bar reads as a glow. To change it, edit the map and rerun the script; don't edit the PNGs by hand.
+
+The Hoard's treasures come from `design/hoard/draw.js`, one 24 × 26 pixel PNG each in `Sources/GoblinApp/Assets/hoard/`, named by the treasure's id in `Sources/GoblinCore/Hoard.swift`. The object stands in the top 20 rows on a plinth whose material climbs its shelf: wood, tin, copper, silver, gold, emerald, goblinite. Secrets stand on amethyst. Fills come from the goblin's own palette and every shape gets a one-pixel ink ring; flames, sparks and runes are glow and go unringed. Show them at 3× on a shelf, 2× in the overlay and beside a meter, and 8× up close. Purple and green can appear anywhere, a potion or a gem early on, but they gather on the top rungs and the secrets, so the hoard turns more goblin as it fills. To change one, edit its drawing and rerun the script.
 
 The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a three-pixel slit pupil in each eye and the glow redrawn around it, one frame per compass point. Looking down starts from `goblin-look`, so the lid drops too. To move a slit, edit its table and rerun the script.
 
@@ -176,7 +178,7 @@ The eyes frames come from `design/goblin-eyes/draw.swift`: `goblin-shut` with a 
 | meeting ready (new) | closed | After processing: "Weekly sync is ready · 42 min · 1 voice to name" with Open. Stays 4 s; hovering holds it. |
 | meeting stopped (new) | side-eye | Sleep or the lid cut a recording short. Said on wake, once the screen is unlocked: "Recording stopped because the Mac went to sleep, so I kept the first 31 minutes." Subline: `Meetings › slept at 10:31` with Dismiss, and a moss Record the Rest while the call app still has the mic (it records part two). If the call ended meanwhile, a notification says it instead. |
 | quiet room (new) | closed, Zz | An in-person recording has heard nothing for 10 minutes: "It's been quiet for 10 minutes. Stop recording?" Subline: `Meetings › Conversation` with Keep Going and a moss Stop. Stays 20 s; ignoring it keeps recording and asks again after another quiet 10 minutes. |
-| milestone (new) | cackle, sparkles | Replaces the inserted chip once, at 1k, 10k, 100k and 1M words: "10,000 words yapped." The bubble edge glows candle. Stays 2.5 s. |
+| treasure (new) | cackle, sparkles | Something new is in the Hoard. A dictation that lands replaces its inserted chip with a treasure at most once a day: the most precious find of the last three days, even one from earlier, such as a meeting. It shows the treasure at 2×, its name ("Doorstop.", "A secret: Cackle."), the goblin's line and "It's in the Hoard." in candle. The rest wait in the Hoard. Nothing shows while a meeting records. The bubble edge glows candle. Stays 2.5 s. Overlay settings can turn it off. |
 
 Any other error uses the same form: a symbol, one first-person sentence, and an `Area › cause` subline.
 
@@ -226,7 +228,7 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
 - **Case and plates:** the window background is the case, and each group is a plate with a 10 pt small-caps label above it.
 - **Window chrome:** the sidebar is always visible (no toggle), with the traffic lights inside it. The page title is the window's toolbar title, level with the traffic lights, and the toolbar draws no band, so the case runs to the top of the window. Scroll views use the hard top edge effect, so scrolled content stops at the toolbar and never shows through the title.
 - **Status rows:** a group may end with one status row: a light, a sentence, and either a right-aligned detail or one button.
-- **Sidebar:** the pages you read, Insights, History, Meetings and People, then a rule, then the settings: General, Audio, Model, Dictionary, Cleanup, Tone, Meeting Recording, Overlay, Diagnostics, About, all with SF Symbols. Meetings, People and Meeting Recording show only while Meetings is on. A row may end with an amber light and a count when items there need you (Meetings: meetings with a voice to name). The footer is a status light, "Ready", and the engine and where it runs ("Parakeet v3 · on this Mac").
+- **Sidebar:** the pages you read, Insights, Hoard, History, Meetings and People, then a rule, then the settings: General, Audio, Model, Dictionary, Cleanup, Tone, Meeting Recording, Overlay, Diagnostics, About, all with SF Symbols. Meetings, People and Meeting Recording show only while Meetings is on. A row may end with an amber light and a count when items there need you (Meetings: meetings with a voice to name). The Hoard's row ends with a candle dot and a count of treasures found since it was last open: new, not a problem, so never a status light. The footer is a status light, "Ready", and the engine and where it runs ("Parakeet v3 · on this Mac").
 - **General:**
   - Talk key: a big keycap card with the key, one sentence on how it works, and Record New Key…. Quick picks: fn / Globe, Right ⌥, ⌥ Space. Cancel a take: esc, or the overlay's × when esc is the talk key. A status row for the Globe key setting.
   - Behaviour: Open at login, Click sounds, Add a space after each take.
@@ -279,6 +281,11 @@ Right-clicking or Control-clicking the menu-bar icon opens a native menu instead
   - Activity: bars stand on faint full-height tracks, labelled on the current bar and the peak, which is the full-moss bar and bold label when it's the current one. The hour grid is 7 × 24 square cells in four steps of moss. Hovering a bar or a square shows its count. Today is words per hour across the whole plate. This Week is words per day with a dashed average beside When you talk, and ‹ › step a week at a time. All Time is the last 12 months with a dashed average beside When you talk by weekday.
   - What you talked about: the pixel word cloud for the selected period. The side-eye goblin grips the top edge of the biggest word, and smaller goblins and sparks appear only where a gap fits them. The layout is seeded by the day and period, so it doesn't reshuffle on every visit. Hovering a word shows how often you said it.
   - Where you talked, only when the period has dictations from more than one device: the device's symbol, name, words, dictations and share. Where I typed: app icon, name, words and share over a thin moss track; an iPhone can't name the app it typed into, so its dictations make one row named after it, with its symbol. Counts and shares use the selected period's words. Then "How I count".
+- **Hoard:** `Sources/GoblinApp/Hoard/`. Treasures found by using gob.lin, on the case in plates like Insights.
+  - Summary: the cackling goblin at 128 pt, the count in 48 pt ("39 of 107 treasures"), one sentence on the closest treasure ("My hoard grows. Skeleton Key is 4 apps away."), a candle meter of the whole hoard and the latest find. Under a hairline, the three treasures closest to found, as silhouettes with candle meters. Streak and biggest day are personal bests, not running totals, so they aren't among them, and up close they say "Best so far". Finds show from the Hoard's own record at once; the shelves History fills show progress only once History has been read. When it can't be, a red status row says progress may be behind.
+  - One plate per shelf, headed by its name and "7 OF 12": each find at 3× in candlelight on a faint ledge, its name and the day it was found (or what it took, for finds from before the Hoard). The next rung is a silhouette with what it takes and a meter; the rest wait as "+4 More to find". Secrets all show, unfound ones as "???" silhouettes. Finds new since the last visit say NEW in candle. Meeting shelves show while Meetings is on, or once they hold something.
+  - Clicking a treasure opens it up close: the sprite at 8×, its name, what it takes, the goblin's line, when it was found or how far there, and its plinth.
+  - Nothing is taken back: deleting History or a meeting never removes a treasure. Dictations count from every device, the iPhone too.
 - **Empty:** the closed goblin at 128 pt with Zz, then "Nothing to snitch on yet." and "Hold fn and say something. I'll keep the receipts."
 - **Problems:** save errors and unsaved dictations are amber status plates with one action each.
 

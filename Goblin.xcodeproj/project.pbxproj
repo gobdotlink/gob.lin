@@ -32,6 +32,8 @@
 		5264B4D0B2C86D5B65FC5C92 /* PixelWordCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2745F4B71BDEC692D53F93C8 /* PixelWordCloud.swift */; };
 		58E00021912DB4B5D0D06F35 /* ModelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F18F0064FDFE0737432235A /* ModelSettingsView.swift */; };
 		5C55A7CF565ECAD05E937128 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAC73565C924F4F70CD7F9BB /* InsightsView.swift */; };
+		4D749834542AEFF168919275 /* HoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A48A38EC297AD903578CDC38 /* HoardView.swift */; };
+		FD338D3CE97DA8F0BF1A750C /* HoardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 153E0D48388BEA2DFEB47F5A /* HoardModel.swift */; };
 		5FFE7394E4A1EC402B37C343 /* DirectInsertionVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24B1A95910F26D0E4F24463 /* DirectInsertionVerification.swift */; };
 		669F2B38F2AF4EAC3C0BBEB0 /* OverlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4740B2E14FC110A8510E92CB /* OverlayController.swift */; };
 		705B8F8AD911ADC0032158D6 /* TextInsertionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFF7DAB8B6EE7D5B80A5975 /* TextInsertionService.swift */; };
@@ -124,6 +126,8 @@
 		A24B1A95910F26D0E4F24463 /* DirectInsertionVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectInsertionVerification.swift; sourceTree = "<group>"; };
 		A9A0D0DB452A87EEC40083EE /* UpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstaller.swift; sourceTree = "<group>"; };
 		AAC73565C924F4F70CD7F9BB /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		A48A38EC297AD903578CDC38 /* HoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoardView.swift; sourceTree = "<group>"; };
+		153E0D48388BEA2DFEB47F5A /* HoardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoardModel.swift; sourceTree = "<group>"; };
 		B029479976312A99966D9899 /* AppStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStatus.swift; sourceTree = "<group>"; };
 		B0D589917F852F1F35A10767 /* PermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModel.swift; sourceTree = "<group>"; };
 		B1C7D9C4546227E5C237B460 /* MenuPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPopover.swift; sourceTree = "<group>"; };
@@ -249,6 +253,15 @@
 			path = Overlay;
 			sourceTree = "<group>";
 		};
+		5BB6E37032A1AFDEFFB65572 /* Hoard */ = {
+			isa = PBXGroup;
+			children = (
+				153E0D48388BEA2DFEB47F5A /* HoardModel.swift */,
+				A48A38EC297AD903578CDC38 /* HoardView.swift */,
+			);
+			path = Hoard;
+			sourceTree = "<group>";
+		};
 		46547DF0C29D7ED94EADCB64 /* History */ = {
 			isa = PBXGroup;
 			children = (
@@ -348,6 +361,7 @@
 				F6B5ED23068FA0A009D95838 /* RewriteSettingsView.swift */,
 				D589A7D61E1523D950AF3638 /* ToneSettingsView.swift */,
 				195481D948EED77B9D1FF41E /* Diagnostics */,
+				5BB6E37032A1AFDEFFB65572 /* Hoard */,
 				46547DF0C29D7ED94EADCB64 /* History */,
 				2121F3256188A52EA0842CDA /* Hotkeys */,
 				FB558193443617ABD3750FC0 /* Insertion */,
@@ -496,6 +510,8 @@
 				31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */,
 				70A43218ED3899143DB3A8C9 /* InsertionSettingsView.swift in Sources */,
 				5C55A7CF565ECAD05E937128 /* InsightsView.swift in Sources */,
+				4D749834542AEFF168919275 /* HoardView.swift in Sources */,
+				FD338D3CE97DA8F0BF1A750C /* HoardModel.swift in Sources */,
 				8501CDDB453B7273A240B88A /* KeyboardLayout.swift in Sources */,
 				2CEF1DEC0B82CA2270B7C39A /* MenuPopover.swift in Sources */,
 				58E00021912DB4B5D0D06F35 /* ModelSettingsView.swift in Sources */,
