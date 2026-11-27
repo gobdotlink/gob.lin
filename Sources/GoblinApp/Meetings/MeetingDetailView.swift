@@ -413,6 +413,8 @@ struct MeetingDetailView: View {
     private func change(_ message: String, missing: String? = nil, mergedFrom: String? = nil, warning: String? = nil,
                         showing renamed: [String: String] = [:], _ edit: @escaping () async throws -> [TranscriptTurn]) {
         show(renamed)
+        // The last change's Undo goes as this one starts: restoring its names after this save would drop this name.
+        undo = nil
         let previous = saving
         saving = Task {
             await previous?.value
@@ -447,11 +449,11 @@ struct MeetingDetailView: View {
     }
 
     private func restore(_ undo: Undo) {
+        self.undo = nil
         let previous = saving
         saving = Task {
             await previous?.value
             do { _ = try await store.setSpeakerNames(meeting.id, undo.names) } catch { failure = error.localizedDescription }
-            self.undo = nil
             reloads += 1
             onEdited()
         }
