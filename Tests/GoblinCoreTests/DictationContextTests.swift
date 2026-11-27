@@ -48,6 +48,9 @@ struct DictationContextTests {
         #expect(!after(nil, field: list).continuesSentence && !after(nil, field: "Groceries:\n- Milk ").continuesSentence)
         let casual = after(list, field: list)
         #expect(casual.followsFinishedTake && !casual.restoresFullStop)
+        // In the middle of an item, the dictation carries it on.
+        let field = "- Milk or juice"
+        #expect(DictationContext(application: nil, windowTitle: nil, fieldText: field, selection: NSRange(location: 7, length: 0)).continuesSentence)
         // A dash in a sentence is not a list.
         #expect(after(nil, field: "Ship it - then").continuesSentence)
     }

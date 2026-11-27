@@ -27,13 +27,13 @@ public enum TextDiff {
     public static func joined(_ tokens: [String]) -> String {
         var text = ""
         for token in tokens {
-            if !text.isEmpty, needsSpace(after: text, before: token) { text += " " }
+            if !text.isEmpty, !text.hasSuffix("\n"), token != "\n", !(token.count == 1 && ".,!?;:)…".contains(token)) { text += " " }
             text += token
         }
         return text
     }
 
-    /// Whether a space separates `previous` from `next` when they are put back together.
+    /// Whether a space separates two shown runs of a diff. A run can open with punctuation, such as ":\n" after a lead-in.
     public static func needsSpace(after previous: String, before next: String) -> Bool {
         !previous.hasSuffix("\n") && !next.hasPrefix("\n") && !(next.first.map { ".,!?;:)…".contains($0) } ?? false)
     }

@@ -16,4 +16,6 @@ import Testing
         .removed("one ship two test"), .added("1. Ship\n2. Test"),
     ])
     #expect(!TextDiff.needsSpace(after: "The plan", before: ":\n1. Ship"))
+    // Rejoined tokens keep a space before a dotted part, so a fix of that space still reads as a change.
+    #expect(TextDiff.joined(["gob", ".lin"]) == "gob .lin")
 }

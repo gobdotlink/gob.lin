@@ -56,8 +56,9 @@ public struct DictationContext: Equatable, Sendable {
         // Any line break: Windows "\r\n", old Mac "\r" and paragraph separators as well as "\n".
         let line = textBefore.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).last ?? ""
         guard let last = line.last(where: { !$0.isWhitespace && !#""')]}”’»"#.contains($0) }) else { return false }
-        // A list item ends without a full stop, but what follows it isn't more of the item.
-        guard line.range(of: #"^\s*(?:[-*•]|\d+[.)])[ \t]+\S"#, options: .regularExpression) == nil else { return false }
+        // A list item ends without a full stop, but what follows the end of one isn't more of the item.
+        let endOfLine = selectedText.isEmpty && textAfter.prefix { !$0.isNewline }.allSatisfy(\.isWhitespace)
+        guard !endOfLine || line.range(of: #"^\s*(?:[-*•]|\d+[.)])[ \t]+\S"#, options: .regularExpression) == nil else { return false }
         return !".!?…".contains(last)
     }
 
