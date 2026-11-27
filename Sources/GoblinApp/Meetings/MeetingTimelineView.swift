@@ -1,3 +1,4 @@
+import AppKit
 import GoblinMeetings
 import SwiftUI
 
@@ -152,10 +153,22 @@ struct MeetingTimelineView: View {
         }
     }
 
+    private static let axisFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+
+    private static func axisLabelWidth(_ text: String) -> CGFloat {
+        ceil((text as NSString).size(withAttributes: [.font: axisFont]).width)
+    }
+
     private var axis: some View {
-        row(height: 14) { EmptyView() } track: { width in
+        let zeroWidth = Self.axisLabelWidth(MeetingTimeline.clock(0))
+        let maxWidth = Self.axisLabelWidth(MeetingTimeline.clock(duration))
+        let spacing = max(maxWidth, zeroWidth + 12) + 16
+        return row(height: 14) { EmptyView() } track: { width in
+            let ticks = width > 0
+                ? MeetingTimeline.ticks(duration: duration, width: Double(width), minimumSpacing: Double(spacing))
+                : []
             ZStack(alignment: .topLeading) {
-                ForEach(MeetingTimeline.ticks(duration: duration), id: \.self) { tick in
+                ForEach(ticks, id: \.self) { tick in
                     Text(MeetingTimeline.clock(tick)).font(.meta).foregroundStyle(.tertiary).monospacedDigit()
                         .fixedSize()
                         .offset(x: tick == 0 ? 0 : x(tick, width) - 12)

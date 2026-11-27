@@ -56,7 +56,7 @@ struct UIProbeApp: App {
             SettingsView(model: model, speechModels: model.speechModels)
         }
         .defaultSize(width: 1040, height: 720)
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
     }
 
     private func attach() { driver.lifecycle.model = model }

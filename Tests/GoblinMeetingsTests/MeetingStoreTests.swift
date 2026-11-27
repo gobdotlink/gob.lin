@@ -66,6 +66,8 @@ private func transcript(_ directory: URL) throws -> [TranscriptTurn] {
                                     startedAt: Date(timeIntervalSince1970: 1_800_200_000), ended: false)
     try FileManager.default.createDirectory(at: root.appendingPathComponent("not a meeting"), withIntermediateDirectories: true)
     let store = MeetingStore(root: root, options: Fixtures.options(spans: threeVoiceSpans))
+    // Mark the live recording active so slow parallel test runs can't age it past `liveWriteWindow` while `older` processes.
+    await store.setRecording(live.lastPathComponent, true)
     _ = try await store.process(older.lastPathComponent)
 
     try await store.rename(older.lastPathComponent, title: "Weekly sync with Alex")

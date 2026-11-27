@@ -154,6 +154,25 @@ public enum MeetingTimeline {
         return stride(from: 0, to: duration, by: step).map { $0 }
     }
 
+    /// Axis labels thinned to clean clock intervals so consecutive labels stay at least `minimumSpacing` points
+    /// apart across `width`. Stretches, marks, and the playhead remain positioned on the true duration scale.
+    public static func ticks(duration: Double, width: Double, minimumSpacing: Double) -> [Double] {
+        guard duration > 0 else { return [0] }
+        let base: Double = duration > 1_800 ? 600 : duration > 600 ? 300 : 60
+        guard width > 0, minimumSpacing > 0 else { return ticks(duration: duration) }
+        let needed = max(base, duration * minimumSpacing / width)
+        let candidates: [Double] = [60, 120, 300, 600, 900, 1_200, 1_800, 3_600, 7_200, 10_800, 14_400, 21_600, 28_800, 43_200]
+        let step: Double
+        if let match = candidates.first(where: { $0 >= needed }) {
+            step = match
+        } else {
+            var doubled = candidates.last!
+            while doubled < needed { doubled *= 2 }
+            step = doubled
+        }
+        return stride(from: 0, to: duration, by: step).map { $0 }
+    }
+
     /// "4:02" under an hour, "1:04:02" over it.
     public static func clock(_ seconds: Double) -> String {
         let total = max(0, Int(seconds.rounded(.down)))

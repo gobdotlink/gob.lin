@@ -22,17 +22,23 @@ struct PixelWordCloud: View {
         let cell = WordCloudLayout.cell
         ZStack(alignment: .topLeading) {
             if let layout {
-                Image(decorative: layout.image(dark: scheme == .dark, highlight: hover?.word), scale: 1)
-                    .resizable().interpolation(.none)
-                    .frame(width: CGFloat(layout.columns) * cell, height: CGFloat(layout.rows) * cell)
-                ForEach(layout.props) { prop in
-                    let sprite = Sprite(rawValue: prop.sprite.rawValue)!
-                    Group {
-                        if prop.peeking { PeekingGoblin(sprite: sprite, scale: 1) }
-                        else { PixelSprite(sprite: sprite, scale: prop.scale, mirrored: prop.mirrored) }
+                // Clip the raster and sprites to the current bounds so a wider cloud stays inside its column while
+                // repacking after a resize, while leaving the hover tooltip free of the clip edge.
+                ZStack(alignment: .topLeading) {
+                    Image(decorative: layout.image(dark: scheme == .dark, highlight: hover?.word), scale: 1)
+                        .resizable().interpolation(.none)
+                        .frame(width: CGFloat(layout.columns) * cell, height: CGFloat(layout.rows) * cell)
+                    ForEach(layout.props) { prop in
+                        let sprite = Sprite(rawValue: prop.sprite.rawValue)!
+                        Group {
+                            if prop.peeking { PeekingGoblin(sprite: sprite, scale: 1) }
+                            else { PixelSprite(sprite: sprite, scale: prop.scale, mirrored: prop.mirrored) }
+                        }
+                        .offset(x: prop.x, y: prop.y)
                     }
-                    .offset(x: prop.x, y: prop.y)
                 }
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: WordCloudLayout.height, maxHeight: WordCloudLayout.height, alignment: .topLeading)
+                .clipped()
                 // Padding, not offset: VoiceOver frames follow layout, not where a view is drawn.
                 ForEach(layout.words) { word in
                     Color.clear

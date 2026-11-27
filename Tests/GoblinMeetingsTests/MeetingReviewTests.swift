@@ -160,6 +160,22 @@ private func turn(_ speaker: String, _ start: Double, _ end: Double, track: Meet
     #expect(MeetingTimeline.length(40) == "40 s")
 }
 
+@Test func widthAwareTicksPreventOverlapOnLongMeetings() {
+    // Normal meetings keep their default 10-minute cadence when labels fit comfortably.
+    #expect(MeetingTimeline.ticks(duration: 42 * 60, width: 724, minimumSpacing: 58) == [0, 600, 1_200, 1_800, 2_400])
+    // A four-hour meeting at the 980 pt detail cap (724 pt track) steps up to 20-minute ticks instead of overlapping.
+    let fourHours: Double = 4 * 3_600
+    let capped = MeetingTimeline.ticks(duration: fourHours, width: 724, minimumSpacing: 59)
+    #expect(capped.count == 12)
+    #expect(capped[1] - capped[0] == 1_200)
+    #expect(724 * (capped[1] - capped[0]) / fourHours >= 59)
+    // Narrower windows thin further to hourly ticks.
+    let narrow = MeetingTimeline.ticks(duration: fourHours, width: 450, minimumSpacing: 59)
+    #expect(narrow == [0, 3_600, 7_200, 10_800])
+    // Extreme durations double past the 12-hour candidate and stay spaced on narrow tracks.
+    #expect(MeetingTimeline.ticks(duration: 30 * 3_600, width: 120, minimumSpacing: 60) == [0, 86_400])
+}
+
 private func summary(_ state: MeetingState = .ready, speakers: [String] = ["You", "Priya Shah"], hasAudio: Bool = true,
                      interrupted: Bool = false, stopReason: String? = "call ended", startedAt: Date = Date(timeIntervalSince1970: 1_800_000_000),
                      id: String = "a") -> MeetingSummary {
