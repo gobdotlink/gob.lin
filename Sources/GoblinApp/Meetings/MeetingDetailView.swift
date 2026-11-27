@@ -36,6 +36,9 @@ struct MeetingDetailView: View {
     /// The last name change being saved. Each waits for the one before, so a chip renamed again before its first name is
     /// saved takes its Undo from the names that save left.
     @State private var saving: Task<Void, Never>?
+    /// Counts name changes and Undos as they start. Only the latest one's save offers Undo: an older one's, restored after a
+    /// newer save, would drop the newer name.
+    @State private var edits = 0
 
     enum Tab: Hashable { case notes, transcript, typed }
 
@@ -415,13 +418,17 @@ struct MeetingDetailView: View {
         show(renamed)
         // The last change's Undo goes as this one starts: restoring its names after this save would drop this name.
         undo = nil
+        edits += 1
+        let number = edits
         let previous = saving
         saving = Task {
             await previous?.value
             do {
                 let before = try await store.speakerNames(meeting.id)
                 _ = try await edit()
-                undo = Undo(message: message, names: before, missing: missing, mergedFrom: mergedFrom, warning: warning)
+                if number == edits {
+                    undo = Undo(message: message, names: before, missing: missing, mergedFrom: mergedFrom, warning: warning)
+                }
                 failure = nil
             } catch { failure = error.localizedDescription }
             reloads += 1
@@ -450,6 +457,7 @@ struct MeetingDetailView: View {
 
     private func restore(_ undo: Undo) {
         self.undo = nil
+        edits += 1
         let previous = saving
         saving = Task {
             await previous?.value
