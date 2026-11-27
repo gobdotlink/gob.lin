@@ -109,7 +109,7 @@ public actor HistoryStore {
                               .number(saved.starred ? 1 : 0), saved.audioFilename.map(SQLValue.text) ?? .null, .text(metadata)])
             // Counted for the Hoard as it's saved, so nothing that removes it later can take it back. A failure here
             // never fails the save: the next count picks it up.
-            try? database.transaction { countForHoardQuietly() }
+            try? database.transaction { try countForHoardQuietly() }
             return saved
         } catch {
             if let copiedAudio { try? FileManager.default.removeItem(at: copiedAudio) }
@@ -197,19 +197,19 @@ public actor HistoryStore {
     }
 
     /// Saving, syncing and trimming count as they go once the Hoard has started; before its first count, that count
-    /// takes in whatever is here, quietly. It runs in a savepoint and never throws, so a failed count can't roll back
-    /// the History change around it, whose recordings may already be gone. Whatever it misses, the next count takes in.
-    private func countForHoardQuietly() {
+    /// takes in whatever is here, quietly. It runs in a savepoint, so a count that fails is undone on its own and can't
+    /// roll back the History change around it, whose recordings may already be gone; the next count takes in what it
+    /// missed. A failure that ended the whole transaction, as a full disk can, still throws, so nothing after it runs
+    /// outside the transaction.
+    private func countForHoardQuietly() throws {
+        try database.run("SAVEPOINT hoard_count")
         do {
-            try database.run("SAVEPOINT hoard_count")
-            do {
-                if try database.meta(MetaKey.hoardTally) != nil { _ = try countForHoard() }
-                try database.run("RELEASE hoard_count")
-            } catch {
-                try database.run("ROLLBACK TO hoard_count")
-                try database.run("RELEASE hoard_count")
-            }
-        } catch {}
+            if try database.meta(MetaKey.hoardTally) != nil { _ = try countForHoard() }
+            try database.run("RELEASE hoard_count")
+        } catch {
+            try database.run("ROLLBACK TO hoard_count")
+            try database.run("RELEASE hoard_count")
+        }
     }
 
     /// The fold behind `hoardTally`, inside the caller's transaction. Retention calls it too, once the Hoard has
@@ -356,7 +356,7 @@ public actor HistoryStore {
 
     private func trim(_ policy: HistoryRetention, now: Date) throws -> Int {
         guard policy.maximumUnstarredCount != nil || policy.maximumAgeDays != nil else { return 0 }
-        countForHoardQuietly()
+        try countForHoardQuietly()
         let cutoff = policy.maximumAgeDays.map { now.addingTimeInterval(-Double($0) * 86400) }
         let syncing = try syncEnabled()
         var removed = 0
@@ -551,7 +551,7 @@ public actor HistoryStore {
             let cleared = try localSettings().clearedThrough
             for record in saves { try apply(record, clearedThrough: cleared, to: &result) }
             // Synced dictations count in the transaction that saves them, before a later page can delete them.
-            countForHoardQuietly()
+            try countForHoardQuietly()
             _ = try trim(retention, now: now)
         }
         return result
