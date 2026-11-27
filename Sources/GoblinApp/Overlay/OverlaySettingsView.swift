@@ -30,7 +30,7 @@ struct OverlaySettingsView: View {
         Section {
             Toggle(isOn: $milestones) {
                 Text("Celebrate treasures")
-                Text("A note when something new lands in the Hoard, at most once a day.").rowDetail()
+                Text("After a dictation, a note for something new in the Hoard, at most once a day.").rowDetail()
             }
             Toggle(isOn: $termSuggestions) {
                 Text("Offer words from your fixes")

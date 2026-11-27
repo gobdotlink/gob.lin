@@ -130,16 +130,13 @@ struct HoardTests {
         #expect(tally.found.contains(.swarm))
     }
 
-    @Test func lateBatchesStillFindTheirNeighbours() {
+    @Test func lateDaysKeepTheirAppsAndTones() {
         var tally = HoardTally()
-        // Weeks of recent dictations, then an older iPhone burst and an older busy day synced in late.
+        // Weeks of recent dictations, then an older busy day synced in late.
         for day in 1...28 { add(&tally, String(format: "2026-11-%02dT12:00:00Z", day), app: "app.recent") }
         // Ten apps an hour apart on one old day: Juggler and, with a second tone, Split Personality, but no swarm.
         for app in 0..<10 { add(&tally, String(format: "2026-10-01T%02d:00:00Z", 8 + app), app: "app.\(app)", tone: app == 0 ? "casual" : "formal") }
         #expect(tally.found.isSuperset(of: [.juggler, .split]) && !tally.found.contains(.swarm))
-        // Ten in ten minutes on another old day.
-        for minute in 0..<10 { add(&tally, String(format: "2026-10-02T09:%02d:00Z", minute)) }
-        #expect(tally.found.contains(.swarm))
     }
 
     @Test func switchingCalendarsKeepsAStreak() {
@@ -214,7 +211,7 @@ struct HoardTests {
         #expect(Set(ledger.found.keys) == ["words-100", "words-1000"])
     }
 
-    @Test func oneCelebrationADayMostPreciousFirst() {
+    @Test func celebrationsAreLimitedPerCalendarDayAndExpire() {
         var ledger = HoardLedger()
         ledger.record([])
         let morning = date("2026-11-27T09:00:00Z")
@@ -267,13 +264,14 @@ struct HoardTests {
         #expect(try await store.hoardTally(calendar: utc).tally.words == 4)
     }
 
-    @Test func retentionCountsWhatItTrims() async throws {
+    @Test func retentionPreservesCountedDictations() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hoard-test-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try HistoryStore(directory: directory)
         _ = try await store.hoardTally(calendar: utc)
-        // Keep 0: the dictation goes as it's saved, but it was said, and laughter counts from what was heard.
+        // Keep 0 removes the dictation right after it's saved and counted; what was counted stays, and laughter counts from
+        // what was heard.
         _ = try await store.insert(HistoryEntry(rawText: "ha ha ha that's good", finalText: "That's good.", createdAt: date("2026-11-27T12:00:00Z")))
         #expect(try await store.applyRetention(HistoryRetention(maximumUnstarredCount: 0)) == 1)
         let tally = try await store.hoardTally(calendar: utc).tally

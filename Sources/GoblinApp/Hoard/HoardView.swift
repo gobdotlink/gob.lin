@@ -253,7 +253,8 @@ private struct TreasureCell: View {
             let when = find.before ? "found" : "found " + find.date.formatted(date: .long, time: .omitted)
             return "\(isNew ? "New: " : "")\(treasure.name), \(when)"
         }
-        return "\(treasure.name), \(treasure.requirement), \(progress?.percent ?? 0) percent there"
+        guard let progress else { return "\(treasure.name), \(treasure.requirement), not found yet" }
+        return "\(treasure.name), \(treasure.requirement), \(progress.percent) percent there"
     }
 }
 

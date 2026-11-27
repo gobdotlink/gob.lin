@@ -166,7 +166,7 @@ struct SettingsCapture {
                     model.settingsSelection = .hoard
                     for dark in [false, true] {
                         try await shoot("hoard-full\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
-                                        size: NSSize(width: 1100, height: 2700), dark: dark, settle: .seconds(1))
+                                        size: NSSize(width: 1100, height: 3200), dark: dark, settle: .seconds(1))
                     }
                     // One treasure up close: found, next on its shelf, and a secret not found yet.
                     for (name, id) in [("found", "words-100000"), ("next", "words-250000"), ("secret", "secret-lurker")] {
@@ -605,8 +605,6 @@ struct SettingsCapture {
             ("transcribing", make(.transcribing, committed: words + " see first.")),
             ("polishing", make(.polishing, committed: "so um cut the export redesign instead keep the onboarding it's what people see first") { $0.cleanupLabel = "Light · Cerebras" }),
             ("inserted", make(.inserted(OverlayResult(application: "Team chat", words: 23, seconds: 0.59)))),
-            ("treasure", make(.treasure(Hoard.treasure("words-100000")!))),
-            ("treasure-secret", make(.treasure(Hoard.treasure("secret-cackle")!))),
             ("term-suggestion", make(.termSuggestion(TermSuggestion(spelling: "panacea", aliases: ["anasia"], projects: ["gob.lin"],
                                                                      reason: .correction(heard: "anasia"))))),
             ("term-suggestion-repeated", make(.termSuggestion(TermSuggestion(spelling: "Sol", aliases: ["soul", "sole"],
@@ -631,6 +629,8 @@ struct SettingsCapture {
                     sentence: "Recording stopped because the Mac went to sleep, so I kept the first 31 minutes.",
                     detail: "slept at 10:31", canRecordRest: true)))),
                 ("meeting-quiet\(suffix)", make(.meetingQuiet(minutes: 10))),
+                ("treasure\(suffix)", make(.treasure(Hoard.treasure("words-100000")!))),
+                ("treasure-secret\(suffix)", make(.treasure(Hoard.treasure("secret-cackle")!))),
             ]
         }
     }
