@@ -104,6 +104,18 @@ struct RewriteSettingsTests {
         #expect(throws: RewriteFailure.self) { try settings.extraRequestParameters() }
     }
 
+    @Test func formattingStartsOffAndCodingAgentKeepsTheParagraphsItAlwaysHad() throws {
+        func decoded(_ cleanup: String) throws -> RewriteSettings {
+            try JSONDecoder().decode(RewriteSettings.self, from: Data(#"{"enabled":true,"baseURL":"https://api.cerebras.ai/v1","model":"m","cleanup":"\#(cleanup)"}"#.utf8))
+        }
+        #expect(try decoded("light").formatting == RewriteFormatting() && RewriteSettings().formatting.isPlain)
+        #expect(try decoded("codingAgent").formatting == RewriteFormatting(paragraphs: true))
+        var settings = try decoded("codingAgent")
+        settings.formatting = RewriteFormatting(lists: true, spokenBreaks: true)
+        let restored = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.formatting == RewriteFormatting(lists: true, spokenBreaks: true))
+    }
+
     @Test func codingAgentPresetPersistsWithoutChangingProviderTuning() throws {
         var settings = RewriteSettings(enabled: true, cleanup: .codingAgent, reasoning: .off)
         settings.selectProvider(.cerebras)

@@ -6,7 +6,7 @@ public enum TextDiff {
         case kept(String), removed(String), added(String)
     }
 
-    /// Words and single punctuation marks. Whitespace is dropped and restored by `joined`.
+    /// Words, single punctuation marks and line breaks. Other whitespace is dropped and restored by `joined`.
     public static func tokens(_ text: String) -> [String] {
         var tokens: [String] = []
         var word = ""
@@ -16,20 +16,26 @@ public enum TextDiff {
                 continue
             }
             if !word.isEmpty { tokens.append(word); word = "" }
-            if !character.isWhitespace { tokens.append(String(character)) }
+            if character.isNewline { tokens.append("\n") }
+            else if !character.isWhitespace { tokens.append(String(character)) }
         }
         if !word.isEmpty { tokens.append(word) }
         return tokens
     }
 
-    /// Joins tokens with spaces, except before closing punctuation.
+    /// Joins tokens with spaces, except before closing punctuation and around line breaks.
     public static func joined(_ tokens: [String]) -> String {
         var text = ""
         for token in tokens {
-            if !text.isEmpty, !(token.count == 1 && ".,!?;:)…".contains(token)) { text += " " }
+            if !text.isEmpty, !text.hasSuffix("\n"), token != "\n", !(token.count == 1 && ".,!?;:)…".contains(token)) { text += " " }
             text += token
         }
         return text
+    }
+
+    /// Whether a space separates two shown runs of a diff. A run can open with punctuation, such as ":\n" after a lead-in.
+    public static func needsSpace(after previous: String, before next: String) -> Bool {
+        !previous.hasSuffix("\n") && !next.hasPrefix("\n") && !(next.first.map { ".,!?;:)…".contains($0) } ?? false)
     }
 
     /// Runs of kept, removed and added text, in reading order. `split` tokenizes both texts; the default separates

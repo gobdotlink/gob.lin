@@ -40,8 +40,12 @@ public enum ToneFormatter {
         guard !input.isEmpty else { return (input, false) }
         var text = input
         var protected = protectedRanges(in: text, terms: protectedTerms)
-        let regex = try! NSRegularExpression(pattern: #"(?:^\s*|[.!?]\s+)["'“‘(\[{]?([\p{L}\p{M}][\p{L}\p{M}\p{N}'’]*)"#)
+        // A sentence starts the text, follows its end, or starts a line, after any list marker. A lone line starting
+        // with "-" is a dash, not a list.
+        let opening = text.contains(where: \.isNewline) ? #"^\s*(?:[-*•][ \t]+)?"# : #"^\s*"#
+        let regex = try! NSRegularExpression(pattern: #"(?:"# + opening + #"|[.!?]\s+|[\n\r\x{2028}\x{2029}][ \t]*(?:(?:[-*•]|\d+[.)])[ \t]+)?)["'“‘(\[{]?([\p{L}\p{M}][\p{L}\p{M}\p{N}'’]*)"#)
         let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        let startsWithListItem = text.range(of: #"^\s*(?:[-*•]|\d+[.)])[ \t]"#, options: .regularExpression) != nil
         for match in matches.reversed() {
             let nsrange = match.range(at: 1)
             guard !protected.contains(where: { NSIntersectionRange($0, nsrange).length > 0 }),
@@ -50,7 +54,7 @@ public enum ToneFormatter {
             let lower = word.lowercased()
             let replacement: String
             switch tone {
-            case _ where continuesSentence && match.range.location == 0:
+            case _ where continuesSentence && match.range.location == 0 && !startsWithListItem:
                 // "I" and unknown words, which may be names, keep their capital.
                 replacement = sentenceWords.contains(lower) && lower != "i" && !lower.hasPrefix("i'") && !lower.hasPrefix("i’") ? lower : word
             case .formal, .casual:
@@ -76,7 +80,8 @@ public enum ToneFormatter {
         let endingProtection = tone == .formal ? protectedRanges(in: text, terms: [], technicalOnly: true) : protected
         let protectedEnd = endingProtection.contains { NSIntersectionRange($0, endingRange).length > 0 }
         if tone == .formal {
-            if !protectedEnd, !".!?:;".contains(text[ending]), text[ending].isLetter || text[ending].isNumber {
+            // List items carry no full stop, so the last one gets none either.
+            if !protectedEnd, !endsInListItem(text), !".!?:;".contains(text[ending]), text[ending].isLetter || text[ending].isNumber {
                 text.insert(".", at: text.index(after: last))
             }
         } else if text[ending] == ".", !protectedEnd {
@@ -84,6 +89,13 @@ public enum ToneFormatter {
             if before != "." { text.remove(at: ending); return (text, true) }
         }
         return (text, false)
+    }
+
+    /// Whether `text` has more than one line and its last is a list item: "- ", "• ", "* ", "1. " or "1) ".
+    static func endsInListItem(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let lineBreak = trimmed.lastIndex(where: \.isNewline) else { return false }
+        return trimmed[trimmed.index(after: lineBreak)...].range(of: #"^[ \t]*(?:[-*•]|\d+[.)])[ \t]+\S"#, options: .regularExpression) != nil
     }
 
     /// The last character of `text` that isn't a space or a closing quote or bracket.
