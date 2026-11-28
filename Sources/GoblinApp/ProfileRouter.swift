@@ -17,11 +17,10 @@ struct ProfileRoute: Equatable {
 final class ProfileRouter {
     private let defaults: UserDefaults
     private let decisions = ProfileDecisionClient()
-    /// By bundle identifier, or bundle identifier and window title for a browser tab.
-    private var guesses: [String: ProfileGuess] = [:]
-    private var guessing: [String: Task<ProfileGuess?, Never>] = [:]
-    /// The profiles the guesses were made among; editing them makes every guess stale.
-    private var guessedAmong: [String] = []
+    /// By bundle identifier, or bundle identifier and window title for a browser tab, each with what it was made among
+    /// (see `among`): a guess counts only while that's unchanged.
+    private var guesses: [String: (among: [String], guess: ProfileGuess)] = [:]
+    private var guessing: [String: (among: [String], task: Task<ProfileGuess?, Never>)] = [:]
     /// Takes into an app no guess could place.
     private var unplacedTakes: [String: Int] = [:]
     /// Apps already asked about this launch. Not Now, or letting the question go, waits for the next launch.
@@ -36,8 +35,8 @@ final class ProfileRouter {
     func knownProfile(for bundleIdentifier: String?) -> CleanupProfile {
         let profiles = profiles
         if let placed = profiles.placedProfile(for: bundleIdentifier) { return placed }
-        if profiles.sortsApps, let bundleIdentifier, let guess = guesses[bundleIdentifier], guess.certainty != .lost,
-           let profile = profiles.profile(guess.profile) {
+        if profiles.sortsApps, let bundleIdentifier, let made = guesses[bundleIdentifier], made.among == Self.among(profiles),
+           made.guess.certainty != .lost, let profile = profiles.profile(made.guess.profile) {
             return profile
         }
         return profiles.everywhere
@@ -54,8 +53,12 @@ final class ProfileRouter {
         } else if route.profile.isEverywhere || !profiles.sortsApps {
             route.profile = profiles.everywhere
             if !profiles.sortsApps { route.question = nil }
+        } else if let profile = profiles.profile(route.profile.id) {
+            route.profile = profile
         } else {
-            route.profile = profiles.profile(route.profile.id) ?? profiles.everywhere
+            // The guessed profile was deleted: Everywhere, and no question naming it.
+            route.profile = profiles.everywhere
+            route.question = nil
         }
         return route
     }
@@ -82,14 +85,14 @@ final class ProfileRouter {
         guard let app, let bundle = app.bundleIdentifier, app.processIdentifier != getpid() else {
             return Task { ProfileRoute(profile: profiles.everywhere) }
         }
+        // A placement is your own choice, password manager or not, so it applies from key-down to the end of the take.
+        if let placed = profiles.placedProfile(for: bundle) { return Task { routed(placed) } }
         // A password manager's name is all a decision model would get, and it isn't sent.
         if AppInsertionQuirks.forBundle(bundle, at: app.bundleURL).credentialManager { return Task { routed(profiles.everywhere) } }
-        if let placed = profiles.placedProfile(for: bundle) { return Task { routed(placed) } }
         let name = app.localizedName ?? DictionaryApps.name(bundle)
         guard profiles.sortsApps, profiles.profiles.count > 1, let (sorter, key) = sorter(profiles) else {
             return Task { routed(profiles.everywhere) }
         }
-        forgetStaleGuesses(profiles)
         if CleanupProfiles.isBrowser(bundle) {
             guard profiles.sortsBrowserTabs else { return Task { routed(profiles.everywhere) } }
             return Task { [weak self] in
@@ -148,27 +151,26 @@ final class ProfileRouter {
         unplacedTakes[bundle] = nil
     }
 
-    private func forgetStaleGuesses(_ profiles: CleanupProfiles) {
-        let among = [profiles.sorter.rawValue, profiles.openRouterModel] + profiles.profiles.map { $0.id + "\u{1F}" + $0.name + "\u{1F}" + $0.purpose }
-        guard among != guessedAmong else { return }
-        guessedAmong = among
-        guesses.removeAll()
+    /// What a guess depends on besides the app: the sorter, its model, and every profile's name and purpose.
+    private static func among(_ profiles: CleanupProfiles) -> [String] {
+        [profiles.sorter.rawValue, profiles.openRouterModel] + profiles.profiles.map { $0.id + "\u{1F}" + $0.name + "\u{1F}" + $0.purpose }
     }
 
     private func guess(_ cacheKey: String, application: String, bundle: String, title: String?, profiles: CleanupProfiles,
                        sorter: ProfileSorter, key: String) async -> ProfileGuess? {
-        if let known = guesses[cacheKey] { return known }
-        if let pending = guessing[cacheKey] { return await pending.value }
-        let among = guessedAmong
+        let among = Self.among(profiles)
+        if let made = guesses[cacheKey], made.among == among { return made.guess }
+        if let pending = guessing[cacheKey], pending.among == among { return await pending.task.value }
         let decisions = decisions, options = profiles.profiles, model = profiles.openRouterModel
         let task = Task { await decisions.guess(application: application, bundleIdentifier: bundle, windowTitle: title,
                                                 profiles: options, sorter: sorter, model: model, apiKey: key) }
-        guessing[cacheKey] = task
+        guessing[cacheKey] = (among, task)
         let result = await task.value
-        guessing[cacheKey] = nil
+        if guessing[cacheKey]?.among == among { guessing[cacheKey] = nil }
         // ponytail: browser titles pile up for the launch; a few hundred short strings at most.
-        // A guess made among profiles or a sorter that changed meanwhile isn't kept.
-        if let result, among == guessedAmong { guesses[cacheKey] = result }
+        // Profiles or the sorter changed while the model thought: the guess is stale, so it's neither kept nor used.
+        guard Self.among(self.profiles) == among else { return nil }
+        if let result { guesses[cacheKey] = (among, result) }
         return result
     }
 }

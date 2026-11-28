@@ -584,7 +584,8 @@ struct RewriteSettingsView: View {
         testing = true
         testFailure = nil
         testTask = Task { @MainActor in
-            defer { testing = false; testTask = nil }
+            // A cancelled run was already cleared by whoever cancelled it, and may have a replacement running now.
+            defer { if !Task.isCancelled { testing = false; testTask = nil } }
             do {
                 let key = try RewriteKeyStore.load(for: snapshot, defaults: defaults)
                 let start = ContinuousClock.now

@@ -51,7 +51,7 @@ enum RewriteEvaluation {
                    "cleanup": configuration.rewrite.cleanup.rawValue, "reasoning": configuration.rewrite.reasoning.rawValue,
                    "temperature": configuration.rewrite.temperature ?? NSNull(), "tone": configuration.tone.rawValue,
                    // The instructions actually sent: a custom prompt, or the ones built for this level, formatting and tone.
-                   "promptSHA256": sha256(Data((configuration.customPrompt ?? RewritePrompt.instructions(cleanup: configuration.rewrite.cleanup,
+                   "promptSHA256": sha256(Data((configuration.customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? RewritePrompt.instructions(cleanup: configuration.rewrite.cleanup,
                        formatting: configuration.rewrite.formatting, tone: configuration.tone)).utf8)),
                    "formatsTone": configuration.formatsTone,
                    "deduplicated": configuration.rewrite.temperature == 0, "goblinVersion": GoblinMetadata.version])
