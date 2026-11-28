@@ -1,4 +1,5 @@
 import AppKit
+import GoblinCore
 import GoblinMeetings
 import SwiftUI
 
@@ -18,10 +19,21 @@ struct MeetingsView: View {
     @State private var revision = 0
     @State private var copied = false
     @State private var deleting: Deletion?
+    /// Why the last delete didn't go through, until it's dismissed.
+    @State private var editFailure: String?
+    /// The transcript beside the selected meeting, remembered like an inspector.
+    @AppStorage(MeetingsView.showsTranscriptKey) private var showsTranscript = false
+    static let showsTranscriptKey = "meetings.showsTranscript"
 
     enum Filter: Hashable { case all, needsNames, source(String) }
-    enum Deletion: Identifiable { case audio(StoredMeeting), meeting(StoredMeeting)
-        var id: String { switch self { case .audio(let m): "audio-" + m.id; case .meeting(let m): "meeting-" + m.id } }
+    enum Deletion: Identifiable { case audio(StoredMeeting), meeting(StoredMeeting), notes(StoredMeeting)
+        var id: String {
+            switch self {
+            case .audio(let m): "audio-" + m.id
+            case .meeting(let m): "meeting-" + m.id
+            case .notes(let m): "notes-" + m.id
+            }
+        }
     }
 
     init(model: AppModel) {
@@ -53,10 +65,20 @@ struct MeetingsView: View {
                 if let meeting = selected, list.contains(where: { $0.id == meeting.id }) {
                     ToolbarSpacer(.flexible)
                     ToolbarItemGroup {
-                        Button(copied ? "Copied" : "Copy All", systemImage: copied ? "checkmark" : "doc.on.doc") { copy(meeting) }
-                            .disabled(meeting.state != .ready && meeting.state != .failed)
-                            .help("Copy the notes and transcript as Markdown")
+                        Button(showsTranscript ? "Hide Transcript" : "Show Transcript", systemImage: "sidebar.right") { showsTranscript.toggle() }
+                            .keyboardShortcut("t", modifiers: [.command, .option])
+                            .help(showsTranscript ? "Hide Transcript (⌥⌘T)" : "Show Transcript (⌥⌘T)")
+                        Menu(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                            Button("Copy Notes") { copy(meeting, .notes) }
+                            Button("Copy Transcript") { copy(meeting, .transcript) }.disabled(meeting.speakers.isEmpty)
+                            Button("Copy All as Markdown") { copy(meeting, .all) }
+                        }
+                        .menuIndicator(.hidden)
+                        .disabled(meeting.state != .ready && meeting.state != .failed)
+                        .help("Copy the notes, the transcript, or both as Markdown")
                         Menu("Delete", systemImage: "trash") {
+                            // A rewrite still running would write the notes again once it lands.
+                            Button("Delete Notes…") { deleting = .notes(meeting) }.disabled(meetings.notes.writing.contains(meeting.id))
                             Button("Delete Audio Only…") { deleting = .audio(meeting) }.disabled(!meeting.hasAudio)
                             Button("Delete Meeting…", role: .destructive) { deleting = .meeting(meeting) }
                         }
@@ -84,16 +106,26 @@ struct MeetingsView: View {
             .onChange(of: list.map(\.id)) { _, ids in
                 if selectedID.map({ ids.contains($0) }) != true { selectedID = shown.first?.id }
             }
+            .alert("I couldn't delete that", isPresented: Binding(get: { editFailure != nil }, set: { if !$0 { editFailure = nil } })) {
+                Button("OK") { editFailure = nil }
+            } message: {
+                Text(editFailure ?? "")
+            }
             .alert(deletionTitle, isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { deletion in
                 switch deletion {
                 case .audio(let meeting): Button("Delete Audio", role: .destructive) { edit { try await store.deleteAudio(meeting.id) } }
                 case .meeting(let meeting): Button("Delete Meeting", role: .destructive) { edit { try await store.delete(meeting.id) } }
+                case .notes(let meeting): Button("Delete Notes", role: .destructive) {
+                    guard !meetings.notes.writing.contains(meeting.id) else { deleting = nil; return }
+                    edit { try await meetings.notes.deleteNotes(meeting.id) }
+                }
                 }
                 Button("Cancel", role: .cancel) { deleting = nil }
             } message: { deletion in
                 switch deletion {
                 case .audio: Text("I'll keep the transcript, names and marks, but you won't be able to play it.")
                 case .meeting: Text("This removes its transcript, names, marks and audio from this Mac.")
+                case .notes: Text("I'll keep the transcript, names and marks. You can write new notes any time.")
                 }
             }
     }
@@ -125,7 +157,9 @@ struct MeetingsView: View {
                     if let meeting = selected {
                         MeetingDetailView(meeting: meeting, store: store, notesModel: meetings.notes, revision: revision,
                                           processingLine: meetings.processingLine, remembersVoices: meetings.rememberVoices,
-                                          askWho: meetings.askWhoMeetingID == meeting.id, onAskedWho: { meetings.askWhoMeetingID = nil }) {
+                                          people: meetings.people.map(\.name),
+                                          askWho: meetings.askWhoMeetingID == meeting.id, onAskedWho: { meetings.askWhoMeetingID = nil },
+                                          showsTranscript: $showsTranscript, addToDictionary: addToDictionary) {
                             revision += 1
                             // The popover and the status menu read the controller's list: their voices-to-name counts too.
                             meetings.refreshList()
@@ -249,8 +283,29 @@ struct MeetingsView: View {
         switch deleting {
         case .audio(let meeting): "Delete the audio for \(meeting.title)?"
         case .meeting(let meeting): "Delete \(meeting.title)?"
+        case .notes(let meeting): "Delete the notes for \(meeting.title)?"
         case nil: ""
         }
+    }
+
+    /// Names fixed in a meeting, into the Dictionary for every app, so dictation and later meetings spell them right.
+    /// Says what happened: added, already there, or why it couldn't be.
+    private func addToDictionary(_ spellings: [String]) -> String? {
+        let dictionary = model.dictionary
+        var added: [String] = [], known: [String] = [], refused: [String] = []
+        var reason: String?
+        for spelling in spellings {
+            guard let clean = MeetingCorrections.normalized(spelling) else { continue }
+            if dictionary.entries.contains(where: { $0.spelling.caseInsensitiveCompare(clean) == .orderedSame }) { known.append(clean); continue }
+            // One that clashes with another entry doesn't stop the rest.
+            if dictionary.put(DictionaryEntry(spelling: clean)) { added.append(clean) } else { refused.append(clean); reason = dictionary.error }
+        }
+        let joined = { (names: [String]) in ListFormatter.localizedString(byJoining: names) }
+        var sentences: [String] = []
+        if !added.isEmpty { sentences.append("Added \(joined(added)) to the Dictionary.") }
+        if !known.isEmpty { sentences.append("\(joined(known)) \(known.count == 1 ? "was" : "were") already there.") }
+        if !refused.isEmpty { sentences.append("I couldn't add \(joined(refused))" + (reason.map { ": \($0)" } ?? ".")) }
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
     }
 
     private func reload() async {
@@ -264,16 +319,24 @@ struct MeetingsView: View {
     private func edit(_ change: @escaping () async throws -> Void) {
         deleting = nil
         Task {
-            try? await change()
+            do { try await change() } catch { editFailure = error.localizedDescription }
             revision += 1
             meetings.refreshList()
             NotificationCenter.default.post(name: .meetingsEdited, object: nil)
         }
     }
 
-    private func copy(_ meeting: StoredMeeting) {
+    enum CopyPart { case notes, transcript, all }
+
+    private func copy(_ meeting: StoredMeeting, _ part: CopyPart = .all) {
         Task {
-            guard let markdown = try? await store.fullMarkdown(meeting.id) else { return }
+            let markdown: String? = switch part {
+            case .all: try? await store.fullMarkdown(meeting.id)
+            // Nothing is copied, and nothing says Copied, when there are no lines.
+            case .transcript: try? await store.transcriptMarkdown(meeting.id)
+            case .notes: try? await store.notesMarkdown(meeting.id)
+            }
+            guard let markdown else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(markdown, forType: .string)
             copied = true
@@ -310,8 +373,11 @@ private struct MeetingRow: View {
                     Text(MeetingsView.sourceName(meeting))
                     ForEach(badges, id: \.self) { badge in
                         switch badge {
-                        case .needsNames, .failed:
-                            HStack(spacing: 4) { StatusLight(state: badge == .failed ? .problem : .waiting); Text(badge.title) }
+                        case .needsNames:
+                            let count = meeting.speakers.filter(MeetingTimeline.isUnnamed).count
+                            HStack(spacing: 4) { StatusLight(state: .waiting); Text(count == 1 ? "1 voice to name" : "\(count) voices to name") }
+                        case .failed:
+                            HStack(spacing: 4) { StatusLight(state: .problem); Text(badge.title) }
                         case .recording, .processing:
                             HStack(spacing: 4) { StatusLight(state: .waiting); Text(badge.title) }
                         case .stoppedEarly, .noAudio:
@@ -378,7 +444,7 @@ struct EmptyMeetingsView: View {
                          : "Turn on Meetings in General, and I'll ask before I record your next call.")
                 .foregroundStyle(.secondary).frame(maxWidth: 380).padding(.top, 4)
             Text("Or record a conversation in the room from the menu bar. Meetings stay on this Mac.")
-                .font(.meta).foregroundStyle(.tertiary).frame(maxWidth: 380).padding(.top, 16)
+                .font(.meta).foregroundStyle(.secondary).frame(maxWidth: 380).padding(.top, 16)
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

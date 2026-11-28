@@ -41,6 +41,8 @@ final class MeetingNotesModel: ObservableObject {
     var meetingsEnabled: @MainActor () -> Bool = { true }
     /// Why the last run for a meeting failed, until the next one starts.
     @Published private(set) var failures: [String: String] = [:]
+    /// What a failed write was asked for (its template and ask), so Try Again asks for the same, from any page.
+    @Published private(set) var failedRequests: [String: NotesSettings] = [:]
     @Published private(set) var customTemplates: [NotesTemplate] = []
 
     private let defaults: UserDefaults
@@ -237,58 +239,71 @@ final class MeetingNotesModel: ObservableObject {
     /// is the consent for later calls too.
     /// A write the person asked for. It's still checked right before the transcript goes: Meetings turned off, or
     /// notes switched to None meanwhile, stop it.
-    func write(_ meetingID: String, override: NotesSettings? = nil, consent: Bool = true, onDone: (@MainActor () -> Void)? = nil) {
+    /// `onDone` is told whether notes were saved: false when the write was skipped, cancelled or failed.
+    func write(_ meetingID: String, override: NotesSettings? = nil, consent: Bool = true, onDone: (@MainActor (Bool) -> Void)? = nil) {
         // Any change of the notes model in Settings meanwhile (None, or another tool) stops it: the destination the
         // person was shown is no longer this one. A one-off "Write Again With" model stays fine while it doesn't.
         // Best Available is checked by what it resolves to as well, which a fresh look at the tools can change.
         let startChoice = choice
         let startRoute = settings.map { ($0.tool, $0.model) }
         Task {
-            await write(meetingID, override: override, consent: consent, stillWanted: { [weak self] in
+            let wrote = await write(meetingID, override: override, consent: consent, stillWanted: { [weak self] in
                 guard let self, self.meetingsEnabled(), self.choice == startChoice else { return false }
                 let route = self.settings.map { ($0.tool, $0.model) }
                 return route?.0 == startRoute?.0 && route?.1 == startRoute?.1
             })
-            onDone?()
+            onDone?(wrote)
         }
     }
 
+    /// Returns whether notes were saved.
+    @discardableResult
     func write(_ meetingID: String, override: NotesSettings? = nil, consent: Bool = true,
-               stillWanted: @escaping @MainActor @Sendable () -> Bool = { true }) async {
-        guard !writing.contains(meetingID) else { return }
+               stillWanted: @escaping @MainActor @Sendable () -> Bool = { true }) async -> Bool {
+        guard !writing.contains(meetingID) else { return false }
         await ready()
         // Another request for this meeting may have started while the tools were being found.
-        guard !writing.contains(meetingID) else { return }
+        guard !writing.contains(meetingID) else { return false }
         guard let settings = override ?? settings else {
             failures[meetingID] = "There's no notes model to write with. Choose one in Settings › Meeting Recording."
-            return
+            failedRequests[meetingID] = nil
+            return false
         }
         guard let install = tools[settings.tool]?.install, case .ready = tools[settings.tool] else {
             failures[meetingID] = (tools[settings.tool] == .notInstalled ? MeetingNotesError.notInstalled(settings.tool)
                 : MeetingNotesError.signedOut(settings.tool)).localizedDescription
-            return
+            // Try Again, once the tool is back, asks for this same template and ask.
+            failedRequests[meetingID] = settings
+            return false
         }
         if consent { consented = true }
         writing.insert(meetingID)
         active[meetingID] = settings
         failures[meetingID] = nil
+        failedRequests[meetingID] = nil
         let words = vocabulary()
         let logger = logger
+        var wrote = false
         do {
             try await store.writeNotes(meetingID, settings: settings, vocabulary: words, runner: NotesTools.runner(install),
                                        proceed: { await stillWanted() }) { line in
                 logger.info("\(line, privacy: .public)")
             }
+            wrote = true
         } catch MeetingNotesError.tooShort {
             failures[meetingID] = MeetingNotesError.tooShort.localizedDescription
         } catch {
-            if !(error is CancellationError) { failures[meetingID] = error.localizedDescription }
+            if !(error is CancellationError) {
+                failures[meetingID] = error.localizedDescription
+                failedRequests[meetingID] = settings
+            }
             // The tool's own message can hold anything it chose to say back, so it stays private in the log.
             logger.error("notes failed: \(error.localizedDescription, privacy: .private)")
         }
         writing.remove(meetingID)
         active[meetingID] = nil
         NotificationCenter.default.post(name: .meetingsEdited, object: nil)
+        return wrote
     }
 
     /// After a call is processed: writes its notes when the person has said yes and "Write notes after each call" is
@@ -324,5 +339,6 @@ final class MeetingNotesModel: ObservableObject {
     func deleteNotes(_ meetingID: String) async throws {
         try await store.deleteNotes(meetingID)
         failures[meetingID] = nil
+        failedRequests[meetingID] = nil
     }
 }

@@ -1,7 +1,7 @@
 # Agent instructions
 
-- Do not add docs to the repository: no reports, plans, reviews, triage, evidence, investigation notes or summaries. Edit existing docs only when your change makes them wrong, or when asked.
-- Put everything temporary (notes, scratch scripts, plans, logs, screenshots, review output) in `.context/` at the root of the worktree you are working in. It is gitignored; never force-add it.
+- Do not add docs or screenshots to the repository: no reports, plans, reviews, triage, evidence, investigation notes, summaries or images, and nothing new under `docs/screenshots/`. Edit existing docs only when your change makes them wrong, or when asked.
+- Put everything temporary (docs, notes, scratch scripts, plans, logs, screenshots, review output) in `.context/` at the root of the worktree you are working in. It is gitignored; never force-add it. That includes the screenshots a pull request needs: capture them into `.context/` and never commit them, even where earlier pull requests did.
 - Never commit machine-specific details: absolute paths, usernames, private repository names, or agent and tool configuration. The same applies to commit messages and pull request descriptions.
 - Follow `CONTRIBUTING.md`, and read `DESIGN.md` before changing anything a person sees.
 - All UI MUST follow Apple's Human Interface Guidelines (HIG). Run the `apple-design` skill (https://www.ui-skills.com/skills/dickwu/apple-design) whenever writing or changing any UI, and before opening a pull request on every change.

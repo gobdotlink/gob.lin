@@ -148,7 +148,7 @@ struct SidekickView: View {
                 .buttonStyle(SidekickButtonStyle())
                 .help("Drop a bookmark here. Label it now or later.")
                 Button { meetings.stop() } label: { Label("Stop", systemImage: "stop.fill").labelStyle(.titleAndIcon) }
-                    .buttonStyle(SidekickButtonStyle())
+                    .buttonStyle(SidekickButtonStyle(stop: true))
             }
         }
         .padding(.leading, 14).padding(.trailing, 12).padding(.top, 10).padding(.bottom, 12)
@@ -311,13 +311,15 @@ private struct SidekickNotes: View {
             Text("YOUR NOTES").font(.capsLabel).tracking(0.85).foregroundStyle(.white.opacity(0.55))
                 .padding(.leading, 5)
             TextEditor(text: $draft)
+                // The system scroller sat beside the column like a second divider, as it would by the captions.
+                .scrollIndicators(.never)
                 .font(Self.font).lineSpacing(4)
                 .foregroundStyle(.white.opacity(0.92))
                 .scrollContentBackground(.hidden)
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
                         Text("Jot anything down. I'll fold it into the notes after the call.")
-                            .font(Self.font).foregroundStyle(.white.opacity(0.32))
+                            .font(Self.font).foregroundStyle(.white.opacity(0.5))
                             .padding(.leading, 5).allowsHitTesting(false)
                     }
                 }
@@ -676,12 +678,26 @@ struct Elapsed: View {
     }
 }
 
-/// A capsule on glass: the Sidekick's two closing buttons.
+/// A capsule on glass: the Sidekick's two closing buttons. Stop is tinted red, so it never passes for Mark This
+/// beside it.
 private struct SidekickButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.status.weight(.medium)).foregroundStyle(.white)
-            .padding(.horizontal, 12).frame(height: 28)
-            .background(.white.opacity(configuration.isPressed ? 0.22 : 0.14), in: Capsule())
-            .contentShape(Capsule())
+    var stop = false
+
+    func makeBody(configuration: Configuration) -> some View { Capsule(configuration: configuration, stop: stop) }
+
+    private struct Capsule: View {
+        let configuration: Configuration
+        let stop: Bool
+        @State private var hovering = false
+
+        var body: some View {
+            let fill: Color = stop ? Color(red: 0.89, green: 0.22, blue: 0.18) : .white
+            let opacity = stop ? (configuration.isPressed ? 0.55 : hovering ? 0.45 : 0.36) : (configuration.isPressed ? 0.22 : hovering ? 0.18 : 0.14)
+            configuration.label.font(.status.weight(.medium)).foregroundStyle(.white)
+                .padding(.horizontal, 12).frame(height: 28)
+                .background(fill.opacity(opacity), in: SwiftUI.Capsule())
+                .contentShape(SwiftUI.Capsule())
+                .onHover { hovering = $0 }
+        }
     }
 }
