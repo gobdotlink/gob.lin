@@ -332,7 +332,8 @@ struct MeetingsView: View {
         Task {
             let markdown: String? = switch part {
             case .all: try? await store.fullMarkdown(meeting.id)
-            case .transcript: try? await store.markdown(meeting.id)
+            // Nothing is copied, and nothing says Copied, when there are no lines.
+            case .transcript: try? await store.transcriptMarkdown(meeting.id)
             case .notes: try? await store.notesMarkdown(meeting.id)
             }
             guard let markdown else { return }

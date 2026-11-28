@@ -207,6 +207,12 @@ public actor MeetingStore {
         MeetingMarkdown.export(try detail(id))
     }
 
+    /// The transcript as Markdown, or nil when the meeting has no lines to copy.
+    public func transcriptMarkdown(_ id: String) throws -> String? {
+        let detail = try detail(id)
+        return detail.turns.isEmpty ? nil : MeetingMarkdown.export(detail)
+    }
+
     /// The notes alone as Markdown, with what was typed during the call; nil without notes.
     public func notesMarkdown(_ id: String) throws -> String? {
         let directory = try directory(for: id)

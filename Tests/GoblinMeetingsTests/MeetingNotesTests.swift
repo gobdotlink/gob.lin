@@ -657,6 +657,7 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     try await store.correctSpelling(id, heard: "priya", meant: "PRIYA")
     #expect(try transcript(directory).contains { $0.text.contains("with PRIYA before") })
     #expect(MeetingCorrections.normalized(" ‘O’Connor’ ") == "O’Connor")
+    #expect(MeetingCorrections.normalized("‘ Kestral ’") == "Kestral")
     // Nothing on one side, or the same words on both, is refused.
     await #expect(throws: MeetingStoreError.invalidCorrection) { try await store.correctSpelling(id, heard: "Kestral", meant: "  ") }
     await #expect(throws: MeetingStoreError.invalidCorrection) { try await store.correctSpelling(id, heard: "Priya", meant: "Priya") }
@@ -695,6 +696,12 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
         try await store.writeNotes(id, settings: settings, vocabulary: ["Kestrel"], runner: runner(planningAnswer()))
     }
     #expect(try await store.earlierNotes(id).count == MeetingNotesHistory.limit)
+    // Going back from a full history keeps it full: only the restored copy leaves, not the oldest one.
+    let full = try await store.earlierNotes(id).map(\.id)
+    try await store.restoreNotes(id, version: full[1])
+    let after = try await store.earlierNotes(id).map(\.id)
+    #expect(after.count == MeetingNotesHistory.limit)
+    #expect(after.contains(full.last!) && !after.contains(full[1]))
     try await store.deleteNotes(id)
     #expect(try await store.earlierNotes(id).isEmpty)
 }
@@ -721,16 +728,19 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     defer { try? FileManager.default.removeItem(at: root) }
     let (store, id, directory) = try await planningMeeting(in: root)
     try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(planningAnswer()))
-    let task = try #require(MeetingNotesFile.read(directory)?.actionItems.first?.task)
-    try await store.setActionItemDone(id, item: 0, task: task, done: true)
+    let item = try #require(MeetingNotesFile.read(directory)?.actionItems.first)
+    try await store.setActionItemDone(id, item: 0, shown: item, done: true)
     #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == true)
     let markdown = try String(contentsOf: directory.appendingPathComponent(MeetingNotesFile.markdownFile), encoding: .utf8)
     #expect(markdown.contains("- [x] **"))
-    try await store.setActionItemDone(id, item: 0, task: task, done: false)
+    try await store.setActionItemDone(id, item: 0, shown: item, done: false)
     #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == nil)
-    // A tick that names a task the notes no longer have at that place finds it by its text, or changes nothing.
-    try await store.setActionItemDone(id, item: 2, task: task, done: true)
+    // A tick for an item no longer at that place finds the one item with the same task, owner and time, or changes
+    // nothing: an out-of-range index, or another owner's task with the same words, isn't it.
+    try await store.setActionItemDone(id, item: 7, shown: item, done: true)
     #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == true)
-    try await store.setActionItemDone(id, item: 0, task: "Something nobody said", done: false)
+    var someoneElse = item
+    someoneElse.owner = "S9"
+    try await store.setActionItemDone(id, item: 7, shown: someoneElse, done: false)
     #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == true)
 }

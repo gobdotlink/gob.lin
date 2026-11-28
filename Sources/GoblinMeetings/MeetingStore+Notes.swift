@@ -52,8 +52,8 @@ extension MeetingStore {
         try MeetingNotesWriter.restore(version, directory: try directory(for: id))
     }
 
-    public func setActionItemDone(_ id: String, item index: Int, task: String, done: Bool) throws {
-        try MeetingNotesWriter.setDone(done, item: index, task: task, directory: try directory(for: id))
+    public func setActionItemDone(_ id: String, item index: Int, shown item: MeetingNotes.ActionItem, done: Bool) throws {
+        try MeetingNotesWriter.setDone(done, item: index, shown: item, directory: try directory(for: id))
     }
 
     /// The person's own fix of a misheard word: every place it was heard takes the new spelling, notes included.

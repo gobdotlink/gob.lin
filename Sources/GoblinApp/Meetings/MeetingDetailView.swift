@@ -37,8 +37,6 @@ struct MeetingDetailView: View {
     @State private var reloads = 0
     @State private var savedNotes: MeetingNotes?
     @State private var earlierNotes: [MeetingNotesHistory.Version] = []
-    /// The last template or ask a write was asked for, so Try Again after a failure asks for the same.
-    @State private var lastRequest: (template: NotesTemplate?, ask: String?)?
     /// The title when the field got the keyboard: leaving it unchanged saves nothing.
     @State private var titleAtFocus: String?
     @State private var corrections: [MeetingNotes.SpellingFix] = []
@@ -46,7 +44,7 @@ struct MeetingDetailView: View {
     @State private var title = ""
     @State private var editingTemplates = false
     /// A moment to show in the transcript once it's open.
-    @State private var transcriptFocus: Double?
+    @State private var transcriptFocus: MeetingTranscriptPanel.Focus?
     @FocusState private var titleFocused: Bool
     /// The last name change being saved. Each waits for the one before, so a voice renamed again before its first name
     /// is saved takes its Undo from the names that save left.
@@ -162,7 +160,8 @@ struct MeetingDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if !lanes.isEmpty { cast(colors).padding(.top, 12).id("cast") }
-            if let undo { MeetingChangeLine(undo).padding(.top, 14) }
+            // While notes are written, the line's buttons wait: an Undo then would be overwritten by the write.
+            if let undo { MeetingChangeLine(undo).disabled(notesModel.writing.contains(meeting.id)).padding(.top, 14) }
             notices
             MeetingNeedsYou(meeting: meeting, notes: savedNotes, turns: turns, unnamed: unnamed, model: notesModel, player: player,
                             onWho: { who(nil) }, addToDictionary: addToDictionary) {
@@ -177,8 +176,8 @@ struct MeetingDetailView: View {
                                     onName: { who($0) }, onMoment: { showMoment($0) }, onDone: tick, onRestore: restoreNotes,
                                     onWrite: {
                                         // After a failure, Try Again asks for what failed; otherwise it's a plain write.
-                                        let retry = notesModel.failures[meeting.id] != nil ? lastRequest : nil
-                                        write(template: retry?.template ?? nil, ask: retry?.ask ?? nil)
+                                        let failed = notesModel.failures[meeting.id] != nil ? notesModel.failedRequests[meeting.id] : nil
+                                        write(template: failed?.template, ask: failed?.ask)
                                     })
                     .padding(.top, 26)
             }
@@ -244,7 +243,7 @@ struct MeetingDetailView: View {
                           player: player,
                           onName: { name in named(lane, name) },
                           onSkip: { advance(after: lane.name) },
-                          onShowInTranscript: { showMoment($0, play: false) },
+                          onShowInTranscript: { clip in showMoment(clip.start, line: clip.id, play: false) },
                           onClose: { self.naming = nil })
         }
     }
@@ -490,8 +489,10 @@ struct MeetingDetailView: View {
         guard var settings = notesModel.settings else { return }
         settings.template = template ?? savedNotes?.written.template ?? notesModel.template
         settings.ask = ask
-        lastRequest = (template, ask)
         let rewriting = savedNotes != nil
+        // The notes being replaced, known by when they were written: the kept version with that date is the one to go
+        // back to, whatever else writes meanwhile.
+        let replacing = savedNotes?.written.createdAt
         let id = meeting.id
         notesModel.write(id, override: settings) { wrote in
             reloads += 1
@@ -499,8 +500,7 @@ struct MeetingDetailView: View {
             // Only a write that saved notes says so and can be undone: one skipped or cancelled changed nothing.
             guard wrote, rewriting else { return }
             Task {
-                // The notes these replaced are now the newest kept version.
-                guard let previous = try? await store.earlierNotes(id).first?.id else { return }
+                guard let previous = try? await store.earlierNotes(id).first(where: { $0.notes.written.createdAt == replacing })?.id else { return }
                 let message = ask.map { "Rewrote the notes: “\($0)”." } ?? "Rewrote the notes with the \(settings.template.name) template."
                 undo = Undo(message: message, action: ask == nil ? nil : "Save as Template…",
                             onAction: ask.map { asked in { saveTemplate(asked, from: settings.template) } }) { restoreNotes(previous) }
@@ -518,8 +518,12 @@ struct MeetingDetailView: View {
     }
 
     private func restoreNotes(_ version: String) {
-        // A rewrite still running would land on top of whatever is restored.
-        guard !notesModel.writing.contains(meeting.id) else { return }
+        // A rewrite still running would land on top of whatever is restored. Edit › Undo already took the action off
+        // its stack, so it goes back on, to try again once the write is done.
+        guard !notesModel.writing.contains(meeting.id) else {
+            registerUndo("Rewrite Notes") { restoreNotes(version) }
+            return
+        }
         undo = nil
         Task {
             do { try await store.restoreNotes(meeting.id, version: version) } catch { failure = error.localizedDescription }
@@ -529,20 +533,21 @@ struct MeetingDetailView: View {
     }
 
     private func tick(_ index: Int, _ done: Bool) {
-        guard let task = savedNotes?.actionItems[index].task else { return }
+        guard let item = savedNotes?.actionItems[index] else { return }
         // At once on the page; the save follows, then the notes as saved.
         savedNotes?.actionItems[index].done = done ? true : nil
         Task {
-            do { try await store.setActionItemDone(meeting.id, item: index, task: task, done: done) } catch { failure = error.localizedDescription }
+            do { try await store.setActionItemDone(meeting.id, item: index, shown: item, done: done) } catch { failure = error.localizedDescription }
             reloads += 1
         }
     }
 
     /// A time in the notes or a clip: play from it and show it in the transcript.
     /// Both sides of the call play, so a reply on the other track is heard too.
-    private func showMoment(_ at: Double, play: Bool = true) {
+    /// `line` is the exact line to show, when known (a clip); otherwise the line being said at that moment.
+    private func showMoment(_ at: Double, line: UUID? = nil, play: Bool = true) {
         showsTranscript = true
-        transcriptFocus = at
+        transcriptFocus = MeetingTranscriptPanel.Focus(at: at, line: line)
         if play, player.hasAudio { player.play(max(0, at - 1)...(at + 30)) }
     }
 

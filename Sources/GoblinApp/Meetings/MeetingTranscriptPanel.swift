@@ -23,7 +23,7 @@ struct MeetingTranscriptPanel: View {
     /// How many lines and how long the audio is kept.
     let summary: String?
     /// The moment to show: set from a time in the notes, then scrolled to once.
-    @Binding var focus: Double?
+    @Binding var focus: Focus?
     let onName: (String) -> Void
     /// Correct a word everywhere it was heard; true when it was saved.
     let onCorrect: (_ heard: String, _ meant: String, _ addToDictionary: Bool) async -> Bool
@@ -33,6 +33,12 @@ struct MeetingTranscriptPanel: View {
 
     @State private var search = ""
     @State private var correcting: UUID?
+
+    /// A moment to show: a time in the notes, or a clip's own line.
+    struct Focus: Equatable {
+        var at: Double
+        var line: UUID?
+    }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum Row: Identifiable {
@@ -102,13 +108,14 @@ struct MeetingTranscriptPanel: View {
                     .padding(.horizontal, 8).padding(.vertical, 8)
                 }
                 .scrollEdgeEffectStyle(.hard, for: .top)
-                .onChange(of: focus, initial: true) { _, moment in
-                    guard let moment else { return }
+                .onChange(of: focus, initial: true) { _, wanted in
+                    guard let wanted else { return }
                     focus = nil
-                    // The line being said at that moment, found in the whole transcript; a search that would hide it is
-                    // cleared first, and the scroll waits for the row to be there.
-                    guard let turn = turns.last(where: { $0.start <= moment + 0.01 }) ?? turns.first else { return }
-                    if !search.isEmpty { search = "" }
+                    // The clip's own line, or the line being said at that moment, found in the whole transcript. A
+                    // search is cleared only when it hides that line; the scroll waits for the row to be there.
+                    guard let turn = wanted.line.flatMap({ id in turns.first { $0.id == id } })
+                            ?? turns.last(where: { $0.start <= wanted.at + 0.01 }) ?? turns.first else { return }
+                    if !search.isEmpty, !rows.contains(where: { $0.id == turn.id.uuidString }) { search = "" }
                     DispatchQueue.main.async {
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(turn.id.uuidString, anchor: .center) }
                     }
@@ -249,27 +256,29 @@ struct CorrectSpellingView: View {
 
     private var cleanHeard: String? { MeetingCorrections.normalized(heard) }
     private var cleanMeant: String? { MeetingCorrections.normalized(meant) }
-    /// Lines the correction would change, across the whole meeting.
-    private var lines: Int {
-        guard let cleanHeard, let cleanMeant else { return 0 }
-        return Self.changedLines(heard: cleanHeard, meant: cleanMeant, in: turns)
-    }
     private var heardLines: Int {
         guard let cleanHeard else { return 0 }
         let regex = MeetingNotesFixer.pattern(for: cleanHeard)
         return turns.filter { regex.firstMatch(in: $0.text, range: NSRange($0.text.startIndex..., in: $0.text)) != nil }.count
     }
 
-    /// Lines a correction really changes, by the same rules the transcript is respelled with: a line that already has
-    /// the right spelling doesn't count.
+    /// Lines a correction really changes, by the same rules the transcript text is respelled with: a line that
+    /// already has the right spelling doesn't count.
     static func changedLines(heard: String, meant: String, in turns: [TranscriptTurn]) -> Int {
-        let fix = MeetingNotes.SpellingFix(heard: heard, meant: meant, count: 0, kind: .applied)
-        return zip(turns, MeetingNotesFixer.apply([fix], to: turns)).filter { $0.text != $1.text }.count
+        let fix = [MeetingNotes.SpellingFix(heard: heard, meant: meant, count: 0, kind: .applied)]
+        return turns.filter { MeetingNotesFixer.respell($0.text, with: fix) != $0.text }.count
     }
-    private var canSave: Bool { cleanHeard != nil && cleanMeant != nil && cleanHeard != cleanMeant && lines > 0 && !saving }
+    /// Lines the typed correction changes, counted once per redraw for the line, the button and its title.
+    private var lines: Int {
+        guard let cleanHeard, let cleanMeant else { return 0 }
+        return Self.changedLines(heard: cleanHeard, meant: cleanMeant, in: turns)
+    }
+    private func canSave(_ lines: Int) -> Bool { cleanHeard != nil && cleanMeant != nil && cleanHeard != cleanMeant && lines > 0 && !saving }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let lines = self.lines
+        let heardLines = self.heardLines
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Correct Spelling").font(.cardTitle)
             Text("“\(turn.text)”").font(.status).foregroundStyle(.secondary).lineLimit(3)
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
@@ -281,7 +290,7 @@ struct CorrectSpellingView: View {
                 GridRow {
                     Text("Should be").font(.status)
                     TextField("Right spelling", text: $meant).textFieldStyle(.roundedBorder).focused($focused, equals: .meant)
-                        .onSubmit(save)
+                        .onSubmit { save(lines) }
                 }
             }
             Text(cleanHeard == nil ? "Type the word as it appears in the line."
@@ -295,7 +304,7 @@ struct CorrectSpellingView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: onDone).keyboardShortcut(.cancelAction)
-                Button(lines > 1 ? "Fix All \(lines)" : "Fix", action: save).prominent().keyboardShortcut(.defaultAction).disabled(!canSave)
+                Button(lines > 1 ? "Fix All \(lines)" : "Fix") { save(lines) }.prominent().keyboardShortcut(.defaultAction).disabled(!canSave(lines))
             }
         }
         .padding(16)
@@ -303,8 +312,8 @@ struct CorrectSpellingView: View {
         .onAppear { focused = .heard }
     }
 
-    private func save() {
-        guard canSave, let cleanHeard, let cleanMeant else { return }
+    private func save(_ lines: Int) {
+        guard canSave(lines), let cleanHeard, let cleanMeant else { return }
         saving = true
         Task {
             if await onCorrect(cleanHeard, cleanMeant, addToDictionary) { onDone() }

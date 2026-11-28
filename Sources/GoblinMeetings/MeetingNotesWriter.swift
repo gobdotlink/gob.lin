@@ -84,10 +84,15 @@ public enum MeetingNotesWriter {
     /// notes as shown, fixes applied; notes.json keeps the model's text.
     @discardableResult
     public static func commit(_ draft: MeetingNotes, directory: URL) throws -> MeetingNotes {
+        try commit(draft, directory: directory, prune: true)
+    }
+
+    /// `prune: false` leaves the history at one over its limit, for a restore that takes its own copy out first.
+    static func commit(_ draft: MeetingNotes, directory: URL, prune: Bool) throws -> MeetingNotes {
         let notes = withSavedDecisions(draft, directory: directory)
         try MeetingNotesHistory.keep(directory)
         try MeetingNotesFile.write(notes, to: directory)
-        MeetingNotesHistory.prune(directory)
+        if prune { MeetingNotesHistory.prune(directory) }
         try MeetingPostProcessor.render(directory: directory)
         return MeetingNotesFixer.apply(MeetingNotesFile.allFixes(directory), to: notes)
     }
@@ -210,19 +215,22 @@ public enum MeetingNotesWriter {
             earlier.fixes[index].dismissed = now.dismissed
             earlier.fixes[index].meant = now.meant
         }
-        let restored = try commit(earlier, directory: directory)
-        // Only once the restored notes are saved does their copy in the history go.
+        let restored = try commit(earlier, directory: directory, prune: false)
+        // Only once the restored notes are saved does their copy in the history go, and only then is the history
+        // trimmed, so a full history loses nothing but that copy.
         try? FileManager.default.removeItem(at: url)
+        MeetingNotesHistory.prune(directory)
         return restored
     }
 
-    /// Ticks an action item off, or back on. `task` is the item's text as shown: when the notes changed meanwhile,
-    /// the item with that text is the one ticked, and none when it's gone.
-    public static func setDone(_ done: Bool, item index: Int, task: String, directory: URL) throws {
+    /// Ticks an action item off, or back on. `shown` is the item as the page shows it: when the notes changed
+    /// meanwhile, the one item with the same task, owner and time is ticked, and none when there isn't exactly one.
+    public static func setDone(_ done: Bool, item index: Int, shown item: MeetingNotes.ActionItem, directory: URL) throws {
         guard var notes = MeetingNotesFile.stored(directory) else { return }
-        let shown = MeetingNotesFixer.apply(MeetingNotesFile.allFixes(directory), to: notes)
-        let match = shown.actionItems.indices.contains(index) && shown.actionItems[index].task == task ? index
-            : shown.actionItems.firstIndex { $0.task == task }
+        let shown = MeetingNotesFixer.apply(MeetingNotesFile.allFixes(directory), to: notes).actionItems
+        func same(_ other: MeetingNotes.ActionItem) -> Bool { other.task == item.task && other.owner == item.owner && other.at == item.at }
+        let matches = shown.indices.filter { same(shown[$0]) }
+        let match = shown.indices.contains(index) && same(shown[index]) ? index : matches.count == 1 ? matches[0] : nil
         guard let match else { return }
         notes.actionItems[match].done = done ? true : nil
         try MeetingNotesFile.write(notes, to: directory)

@@ -190,6 +190,11 @@ public enum MeetingNotesFixer {
         return notes
     }
 
+    /// `text` with the active fixes applied, as a transcript line's text is respelled; word timings aren't touched.
+    public static func respell(_ text: String, with fixes: [MeetingNotes.SpellingFix]) -> String {
+        settle(text, compile(fixes))
+    }
+
     /// The turns with every active fix applied to their text, and to the words of one-word fixes.
     public static func apply(_ fixes: [MeetingNotes.SpellingFix], to turns: [TranscriptTurn]) -> [TranscriptTurn] {
         let compiled = compile(fixes)
@@ -238,6 +243,8 @@ public enum MeetingCorrections {
         let cleaned = text.replacingOccurrences(of: "[<>\"“”]", with: "", options: .regularExpression)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
             .trimmingCharacters(in: CharacterSet(charactersIn: "'‘’"))
+            // Spaces just inside the quotes, so normalizing again gives the same words.
+            .trimmingCharacters(in: .whitespaces)
         return cleaned.isEmpty || cleaned.count > maximumLength ? nil : cleaned
     }
 

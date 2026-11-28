@@ -41,6 +41,8 @@ final class MeetingNotesModel: ObservableObject {
     var meetingsEnabled: @MainActor () -> Bool = { true }
     /// Why the last run for a meeting failed, until the next one starts.
     @Published private(set) var failures: [String: String] = [:]
+    /// What a failed write was asked for (its template and ask), so Try Again asks for the same, from any page.
+    @Published private(set) var failedRequests: [String: NotesSettings] = [:]
     @Published private(set) var customTemplates: [NotesTemplate] = []
 
     private let defaults: UserDefaults
@@ -275,6 +277,7 @@ final class MeetingNotesModel: ObservableObject {
         writing.insert(meetingID)
         active[meetingID] = settings
         failures[meetingID] = nil
+        failedRequests[meetingID] = nil
         let words = vocabulary()
         let logger = logger
         var wrote = false
@@ -287,7 +290,10 @@ final class MeetingNotesModel: ObservableObject {
         } catch MeetingNotesError.tooShort {
             failures[meetingID] = MeetingNotesError.tooShort.localizedDescription
         } catch {
-            if !(error is CancellationError) { failures[meetingID] = error.localizedDescription }
+            if !(error is CancellationError) {
+                failures[meetingID] = error.localizedDescription
+                failedRequests[meetingID] = settings
+            }
             // The tool's own message can hold anything it chose to say back, so it stays private in the log.
             logger.error("notes failed: \(error.localizedDescription, privacy: .private)")
         }
@@ -330,5 +336,6 @@ final class MeetingNotesModel: ObservableObject {
     func deleteNotes(_ meetingID: String) async throws {
         try await store.deleteNotes(meetingID)
         failures[meetingID] = nil
+        failedRequests[meetingID] = nil
     }
 }

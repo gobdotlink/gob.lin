@@ -26,7 +26,8 @@ struct WhoIsThisView: View {
     @ObservedObject var player: MeetingPlayer
     let onName: (String) -> Void
     var onSkip: (() -> Void)? = nil
-    var onShowInTranscript: (Double) -> Void = { _ in }
+    /// The clip's own line, shown in the transcript.
+    var onShowInTranscript: (TranscriptTurn) -> Void = { _ in }
     let onClose: () -> Void
 
     @State private var typed = ""
@@ -164,7 +165,7 @@ struct WhoIsThisView: View {
             .disabled(!player.hasAudio)
             .accessibilityLabel("\(playing ? "Stop" : "Play") clip at \(MeetingTimeline.clock(clip.start)): \(clip.text)")
             Text("“\(clip.text)”").font(.row).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-            Button { onShowInTranscript(clip.start) } label: {
+            Button { onShowInTranscript(clip) } label: {
                 Text(MeetingTimeline.clock(clip.start)).font(.meta).monospacedDigit().foregroundStyle(GoblinBrand.mossText)
                     .padding(.horizontal, 4).padding(.vertical, 2).contentShape(Rectangle())
             }
