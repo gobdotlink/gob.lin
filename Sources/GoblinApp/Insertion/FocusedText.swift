@@ -160,6 +160,15 @@ struct FocusedText {
         return windows.contains { CFEqual($0, window) }
     }
 
+    /// The title of `pid`'s focused window: a browser's names the page in its tab. Read off the main thread.
+    static func windowTitle(pid: pid_t) -> String? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        guard let window = elementAttribute(app, kAXFocusedWindowAttribute) else { return nil }
+        AXUIElementSetMessagingTimeout(window, 0.1)
+        return (attribute(window, kAXTitleAttribute) as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var raw: CFTypeRef?
         return AXUIElementCopyAttributeValue(element, name as CFString, &raw) == .success ? raw : nil

@@ -64,7 +64,7 @@ private struct OverlayGoblin: View {
         case .polishing: .squint
         case .inserted: .closed
         case .treasure: .cackle
-        case .readyToPaste, .newMicrophone: .side
+        case .readyToPaste, .newMicrophone, .profileQuestion: .side
         case .termSuggestion: .look
         case .termAdded: .closed
         case .meetingOffer, .meetingInterrupted: .side
@@ -208,7 +208,7 @@ private struct OverlayBubble: View {
                         else { Text("Text delivered") }
                     }
                     .font(.row)
-                    Text("\(result.words.formatted()) \(result.words == 1 ? "word" : "words") · \(result.seconds.formatted(.number.precision(.fractionLength(2)))) s")
+                    Text((result.profile.map { $0 + " · " } ?? "") + "\(result.words.formatted()) \(result.words == 1 ? "word" : "words") · \(result.seconds.formatted(.number.precision(.fractionLength(2)))) s")
                         .font(.status).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
                 }
                 if let notice = result.notice {
@@ -263,6 +263,35 @@ private struct OverlayBubble: View {
                     Spacer(minLength: 8)
                     Button("Not Now") { model.perform(.dismissTerm(suggestion)) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Not Now")
                     Button("Add") { model.perform(.addTerm(suggestion)) }.buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Add")
+                }
+            }
+        case .profileQuestion(let question):
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 15)).foregroundStyle(GoblinBrand.neon).padding(.top, 1)
+                    Group {
+                        if let guess = question.guess {
+                            Text("I used \(Text(guess.name).fontWeight(.semibold)) for \(Text(question.application).fontWeight(.semibold)). Keep it there?")
+                        } else {
+                            Text("Which profile should I use for \(Text(question.application).fontWeight(.semibold))?")
+                        }
+                    }
+                    .font(.row).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Subline {
+                    Text(question.guess == nil ? "Cleanup › new app" : "Cleanup › my guess").lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Not Now") { model.perform(.placeApp(question, profile: nil)) }.buttonStyle(OverlayPillStyle()).accessibilityLabel("Not Now")
+                    Menu {
+                        ForEach(question.choices.filter { $0 != question.guess }, id: \.self) { choice in
+                            Button(choice.name) { model.perform(.placeApp(question, profile: choice.id)) }
+                        }
+                    } label: { Text(question.guess == nil ? "Choose" : "Change") }
+                        .menuStyle(.button).buttonStyle(OverlayPillStyle(prominent: question.guess == nil)).menuIndicator(.hidden).fixedSize()
+                    if let guess = question.guess {
+                        Button("Keep") { model.perform(.placeApp(question, profile: guess.id)) }
+                            .buttonStyle(OverlayPillStyle(prominent: true)).accessibilityLabel("Keep")
+                    }
                 }
             }
         case .termAdded(let suggestion):

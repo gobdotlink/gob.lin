@@ -27,6 +27,15 @@ struct SettingsCapture {
         // Meetings on, so the popover and the menu-bar mark have something to show; nothing records.
         defaults.set(true, forKey: MeetingsController.enabledKey)
         try RewriteSettingsStore.save(RewriteSettings(enabled: false, baseURL: "https://provider.invalid/v1", model: "example-model", cleanup: .light), defaults: defaults)
+        // The starters with a few apps each, one of them sorted by gob.lin, and a profile with its own prompt.
+        var profiles = CleanupProfiles(sortsApps: true, sorter: .openRouter)
+        for (app, profile, automatic) in [("com.apple.Terminal", "code", false), ("com.apple.dt.Xcode", "code", true), ("com.apple.MobileSMS", "chat", false),
+                                          ("com.apple.mail", "email", false), ("com.apple.Notes", "email", true)] {
+            profiles.apps[app] = AppPlacement(profile: profile, automatic: automatic)
+        }
+        profiles.put(CleanupProfile(id: "tweets", name: "Posts", purpose: "Short public posts.", tone: .veryCasual,
+                                    customPrompt: "Clean a speech-to-text transcript into one short post under 280 characters. Keep the speaker's words and voice."))
+        try CleanupProfileStore.save(profiles, defaults: defaults)
         defaults.set(true, forKey: MeetingsController.enabledKey)
         defaults.set(true, forKey: MeetingsController.setupFinishedKey)
         defaults.set(["com.apple.FaceTime": "always"], forKey: MeetingsController.appPoliciesKey)
@@ -99,6 +108,16 @@ struct SettingsCapture {
                         model.settingsSelection = page
                         try await shoot("settings-\(page.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))-dark", SettingsView(model: model, speechModels: model.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     }
+                    // A starter profile, and one with its own prompt.
+                    model.settingsSelection = .cleanup
+                    for profile in ["code", "tweets"] {
+                        model.cleanupProfileFocus = profile
+                        for dark in [false, true] {
+                            try await shoot("settings-cleanup-\(profile)\(dark ? "-dark" : "")", SettingsView(model: model, speechModels: model.speechModels),
+                                            size: NSSize(width: 1040, height: 2200), dark: dark)
+                        }
+                    }
+                    model.cleanupProfileFocus = nil
                     empty.settingsSelection = .dictionary
                     try await shoot("settings-dictionary-empty-dark", SettingsView(model: empty, speechModels: empty.speechModels), size: NSSize(width: 1040, height: 1080), dark: true)
                     model.diagnostics.resolve(.model)
@@ -610,6 +629,7 @@ struct SettingsCapture {
             return model
         }
         let words = "Cut the export redesign instead. Keep the onboarding, it's what people"
+        let choices = ([CleanupProfile.everywhere()] + CleanupProfile.starters).map { ProfileQuestion.Choice(id: $0.id, name: $0.name) }
         let long = "so the build goes out tonight. Keep the onboarding, it's what people see first, and we'll move export to next week, because the copy pass on the menu still needs a day"
         return [
             ("arming", make(.arming)),
@@ -645,6 +665,12 @@ struct SettingsCapture {
                     sentence: "Recording stopped because the Mac went to sleep, so I kept the first 31 minutes.",
                     detail: "slept at 10:31", canRecordRest: true)))),
                 ("meeting-quiet\(suffix)", make(.meetingQuiet(minutes: 10))),
+                ("inserted-profile\(suffix)", make(.inserted(OverlayResult(application: "Ghostty", words: 23, seconds: 0.59, profile: "Code")))),
+                ("polishing-profile\(suffix)", make(.polishing, committed: "run slash review triage on PR hash nine seven five") { $0.cleanupLabel = "Code · Light · Cerebras" }),
+                ("profile-guess\(suffix)", make(.profileQuestion(ProfileQuestion(bundleIdentifier: "com.linear", application: "Linear",
+                    guess: .init(id: "code", name: "Code"), choices: choices)))),
+                ("profile-choose\(suffix)", make(.profileQuestion(ProfileQuestion(bundleIdentifier: "com.figma.Desktop", application: "Figma",
+                    guess: nil, choices: choices)))),
                 ("treasure\(suffix)", make(.treasure(Hoard.treasure("words-100000")!))),
                 ("treasure-secret\(suffix)", make(.treasure(Hoard.treasure("secret-cackle")!))),
             ]

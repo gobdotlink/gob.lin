@@ -16,6 +16,8 @@ enum OverlayPhase: Equatable {
     case termSuggestion(TermSuggestion)
     /// The confirmation after Add.
     case termAdded(TermSuggestion)
+    /// After a take in an app with no profile yet: keep the profile gob.lin guessed, or choose one.
+    case profileQuestion(ProfileQuestion)
     /// A call app took the mic: "Zoom is using your mic. Should I record this call?"
     case meetingOffer(MeetingOffer)
     /// A recording started without the Sidekick on screen: "Recording Weekly sync".
@@ -41,6 +43,7 @@ enum OverlayPhase: Equatable {
         case .newMicrophone: "New microphone"
         case .termSuggestion: "New word"
         case .termAdded: "Word added"
+        case .profileQuestion: "Which profile?"
         case .meetingOffer: "Record this call?"
         case .meetingRecording: "Recording"
         case .meetingReady: "Meeting ready"
@@ -65,7 +68,7 @@ enum OverlayPhase: Equatable {
     /// Asks something, so a take that interrupts it brings it back afterwards and hovering holds it.
     var isQuestion: Bool {
         switch self {
-        case .newMicrophone, .termSuggestion, .meetingOffer, .meetingReady, .meetingInterrupted, .meetingQuiet: true
+        case .newMicrophone, .termSuggestion, .profileQuestion, .meetingOffer, .meetingReady, .meetingInterrupted, .meetingQuiet: true
         default: false
         }
     }
@@ -84,6 +87,18 @@ struct MeetingOffer: Equatable {
     var title: String?
     /// System Audio Recording is off, so only your side of the call would record.
     var systemAudioOff = false
+}
+
+/// "I used Code for Linear. Keep it there?", or, without a guess, "Which profile should I use for Figma?"
+struct ProfileQuestion: Equatable {
+    struct Choice: Equatable, Hashable { var id: String; var name: String }
+
+    var bundleIdentifier: String
+    var application: String
+    /// The guessed profile this take used; nil when gob.lin couldn't tell and used Everywhere.
+    var guess: Choice?
+    /// Every profile, Everywhere first.
+    var choices: [Choice]
 }
 
 struct MeetingReady: Equatable {
@@ -108,6 +123,8 @@ struct OverlayResult: Equatable {
     /// Key-up to text, in seconds.
     var seconds: Double
     var notice: OverlayNotice? = nil
+    /// The profile it was written with, unless Everywhere.
+    var profile: String? = nil
 }
 
 struct OverlayNotice: Equatable {
@@ -122,6 +139,8 @@ struct OverlayNotice: Equatable {
 enum OverlayAction {
     case setup, audioSettings, cleanupSettings, useMicrophone(uid: String), dismiss
     case addTerm(TermSuggestion), dismissTerm(TermSuggestion)
+    /// Puts the question's app in a profile; nil leaves it for now.
+    case placeApp(ProfileQuestion, profile: String?)
     case recordMeeting(bundleID: String), dismissMeetingOffer, systemAudioSettings
     case openMeeting(id: String), recordRest, dismissInterruption, keepGoing, stopMeeting
 }
@@ -347,7 +366,7 @@ final class OverlayController {
         case .meetingQuiet: 20
         case .meetingReady: 4
         case .meetingRecording: 2.5
-        case .termSuggestion: suggestionSeconds
+        case .termSuggestion, .profileQuestion: suggestionSeconds
         default: 3
         }
     }

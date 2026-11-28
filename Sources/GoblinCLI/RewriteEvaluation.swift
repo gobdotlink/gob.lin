@@ -50,7 +50,10 @@ enum RewriteEvaluation {
                    "provider": configuration.rewrite.provider.rawValue, "model": configuration.rewrite.model,
                    "cleanup": configuration.rewrite.cleanup.rawValue, "reasoning": configuration.rewrite.reasoning.rawValue,
                    "temperature": configuration.rewrite.temperature ?? NSNull(), "tone": configuration.tone.rawValue,
-                   "promptSHA256": sha256(Data(RewritePrompt.predefined.utf8)),
+                   // The instructions actually sent: a custom prompt, or the ones built for this level, formatting and tone.
+                   "promptSHA256": sha256(Data((configuration.customPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? RewritePrompt.instructions(cleanup: configuration.rewrite.cleanup,
+                       formatting: configuration.rewrite.formatting, tone: configuration.tone)).utf8)),
+                   "formatsTone": configuration.formatsTone,
                    "deduplicated": configuration.rewrite.temperature == 0, "goblinVersion": GoblinMetadata.version])
 
         struct Job: Sendable { let order: Int; let input: String }
@@ -75,7 +78,8 @@ enum RewriteEvaluation {
                     var attempt = 1
                     while true {
                         let result = await processor.process(job.input, dictionaryEntries: settings.entries, tone: settings.tone,
-                            rewriteSettings: settings.rewrite, apiKey: settings.apiKey)
+                            rewriteSettings: settings.rewrite, apiKey: settings.apiKey, customPrompt: settings.customPrompt,
+                            formatsTone: settings.formatsTone)
                         // Rate limits and timeouts are retried; the app would show the raw text instead.
                         guard result.warning != nil, attempt < 4 else { return (key, result, attempt) }
                         try await Task.sleep(for: .seconds(Double(attempt) * 2))

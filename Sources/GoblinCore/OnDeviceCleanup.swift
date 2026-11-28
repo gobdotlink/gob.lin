@@ -57,15 +57,15 @@ public enum OnDeviceCleanup {
 
     /// Estimates with characters per token; the framework offers no token counter.
     /// The output is a cleaned copy, so the transcript counts twice.
-    static func exceedsContext(instructions: String, transcript: String) -> Bool {
+    public static func exceedsContext(instructions: String, transcript: String) -> Bool {
         func tokens(_ text: String) -> Int { (text.count * 2 + 6) / 7 }
         return tokens(instructions) + 2 * tokens(transcript) > 4_000
     }
 
     static func rewrite(_ rawText: String, cleanup: RewriteCleanup, formatting: RewriteFormatting = .init(), tone: DictationTone,
-                        preferredSpellings: [String]) async -> RewriteResult {
+                        preferredSpellings: [String], customPrompt: String? = nil) async -> RewriteResult {
         guard let messages = try? RewritePrompt.messages(transcript: rawText, cleanup: cleanup, formatting: formatting, tone: tone,
-                                                         preferredSpellings: preferredSpellings),
+                                                         preferredSpellings: preferredSpellings, customPrompt: customPrompt),
               let instructions = messages.first(where: { $0["role"] == "system" })?["content"],
               let payload = messages.first(where: { $0["role"] == "user" })?["content"] else {
             return RewriteResult(rawText: rawText, failure: .invalidResponse)

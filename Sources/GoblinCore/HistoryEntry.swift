@@ -43,6 +43,10 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
     public var latencies: DictationTimings
     public var starred: Bool
     public var processingWarning: String?
+    /// The name of the cleanup profile it was written with, as shown; nil before profiles, or from a device without them.
+    public var profile: String?
+    /// That profile's ID: names can repeat, so reprocessing finds the profile by this.
+    public var profileID: String?
     /// Post-paste edit observation, filled in after insertion when the target could be watched.
     public var editOutcome: EditOutcome?
     public var editDistance: Int?
@@ -59,7 +63,8 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
                 polished: Bool = false, targetBundleIdentifier: String? = nil,
                 targetApplicationName: String? = nil, dictionaryBundleIdentifier: String? = nil, dictionaryProject: String? = nil, createdAt: Date = Date(),
                 completedAt: Date = Date(), audioDuration: Double = 0, model: String = "",
-                latencies: DictationTimings = DictationTimings(), starred: Bool = false, processingWarning: String? = nil) {
+                latencies: DictationTimings = DictationTimings(), starred: Bool = false, processingWarning: String? = nil,
+                profile: String? = nil, profileID: String? = nil) {
         self.id = id
         self.rawText = rawText
         self.finalText = finalText
@@ -77,6 +82,8 @@ public struct HistoryEntry: Codable, Sendable, Equatable, Identifiable {
         self.latencies = latencies
         self.starred = starred
         self.processingWarning = processingWarning
+        self.profile = profile
+        self.profileID = profileID
         self.audioFilename = nil
     }
 }

@@ -26,6 +26,10 @@ final class DictationSession {
     var contextField: FocusedText?
     var projectDetection: Task<DetectedProject?, Never>?
     var dictionaryContext: DictionaryScope { DictionaryScope(application: dictionaryScope, project: dictionaryProject?.name) }
+    /// The profile the take is written with, chosen while the user speaks; see `ProfileRouter`.
+    var route: Task<ProfileRoute, Never>?
+    /// The process `route` was chosen for.
+    var routedProcess: pid_t?
 
     /// Waits briefly for project detection, which normally finished while the user was speaking.
     func resolveProject(within timeout: Duration = .milliseconds(300)) async {
@@ -38,8 +42,12 @@ final class DictationSession {
     /// What that reading found, once `currentContext()` has waited for it; sizes go to the development log.
     private(set) var nearby: NearbyText?
 
+    static func value<T: Sendable>(of task: Task<T, Never>, within timeout: Duration) async -> T? {
+        await value(of: Task<T?, Never> { await task.value }, within: timeout)
+    }
+
     /// `task`'s value, or nil if `timeout` passes first.
-    private static func value<T: Sendable>(of task: Task<T?, Never>, within timeout: Duration) async -> T? {
+    static func value<T: Sendable>(of task: Task<T?, Never>, within timeout: Duration) async -> T? {
         // Unstructured racers: a task group would wait for a slow task even after the timeout won.
         let race = AsyncStream<T?> { continuation in
             let result = Task { continuation.yield(await task.value); continuation.finish() }

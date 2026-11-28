@@ -87,8 +87,11 @@ public actor TranscriptPostprocessor {
     public func prewarm(_ settings: RewriteSettings) async { await rewriteClient.prewarm(settings) }
 
     /// `context` fits the text to where it lands. It leaves the Mac only when the settings allow it for their provider.
+    /// `customPrompt` replaces gob.lin's cleanup instructions; `formatsTone: false` then types cleanup's text as written,
+    /// without the tone's own pass.
     public func process(_ rawText: String, dictionaryEntries: [DictionaryEntry], tone: DictationTone,
-                        rewriteSettings: RewriteSettings, apiKey: String = "", context: DictationContext? = nil) async -> TranscriptProcessingResult {
+                        rewriteSettings: RewriteSettings, apiKey: String = "", context: DictationContext? = nil,
+                        customPrompt: String? = nil, formatsTone: Bool = true) async -> TranscriptProcessingResult {
         let start = ContinuousClock.now
         let entries: [DictionaryEntry]
         do { entries = try DictionaryRepository.validated(dictionaryEntries) }
@@ -101,13 +104,18 @@ public actor TranscriptPostprocessor {
         if rewriteSettings.enabled && rewriteSettings.cleanup != .none {
             // Callers pass the active terms most important first; the prompt gets the same limit as recognition.
             let rewritten = await rewriteClient.rewrite(corrected, settings: rewriteSettings, apiKey: apiKey, tone: tone,
-                                                        preferredSpellings: Array(preferred.prefix(DictionaryScope.activeLimit)), context: context)
+                                                        preferredSpellings: Array(preferred.prefix(DictionaryScope.activeLimit)), context: context,
+                                                        customPrompt: customPrompt)
             if let failure = rewritten.failure {
                 // A failed rewrite must recover the original ASR output, before dictionary or tone edits.
                 return result(rawText, final: rawText, tone: tone, polished: false, warning: .rewrite(failure), start: start)
             }
             // Cleanup may lower a first word to fit the previous take; outside `continues` this pass gives it its capital back.
             let output = rewritten.outputText
+            guard formatsTone else {
+                return result(rawText, final: output, tone: tone, polished: rewritten.wasRewritten, warning: nil, start: start,
+                              restoresFullStop: restores(output))
+            }
             let formatted = ToneFormatter.formatted(output, tone: tone, protectedTerms: preferred, continuesSentence: continues(output))
             // Cleanup is told the tone too, so it usually leaves a casual take's full stop out itself.
             let finished = formatted.removedFullStop || ToneFormatter.leftOutFullStop(said: corrected, typed: formatted.text, tone: tone)

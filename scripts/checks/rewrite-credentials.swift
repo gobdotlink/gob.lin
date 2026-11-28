@@ -69,10 +69,12 @@ struct RewriteCredentialChecks {
         settings.enabled = false
         try credentials.prepare(for: settings)
         rejected { _ = try credentials.key(for: settings) }
+        require(reads.count == readsAfterDenial + 1, "Disabled cleanup must not access Keychain")
+        // The level belongs to each take's profile, so a saved None level doesn't turn cleanup off: the switch does.
         settings.enabled = true
         settings.cleanup = .none
         try credentials.prepare(for: settings)
-        require(reads.count == readsAfterDenial + 1, "Disabled cleanup must not access Keychain")
+        require(reads.count == readsAfterDenial + 2, "Cleanup that's on authorizes even with a saved None level")
 
         settings.cleanup = .light
         var relaunchReads = 0

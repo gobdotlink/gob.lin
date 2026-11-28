@@ -45,6 +45,22 @@ extension AppModel {
         openWindow?("settings")
     }
 
+    /// The Cleanup page with `profile` selected.
+    func openProfile(_ profile: String) {
+        cleanupProfileFocus = profile
+        cleanupProfileRequest = UUID()
+        openSettings(.cleanup)
+    }
+
+    /// Changes one saved profile, from the menu bar.
+    func editProfile(_ id: String, _ change: (inout CleanupProfile) -> Void) {
+        var profiles = profileRouter.profiles
+        guard var profile = profiles.profile(id) else { return }
+        change(&profile)
+        profiles.put(profile)
+        do { try CleanupProfileStore.save(profiles, defaults: defaults) } catch { showFailure(.settingsSaveFailed) }
+    }
+
     /// The Meetings page, on `meetingID` when given; `askWho` opens Who's this? on its first voice without a name.
     func openMeeting(_ meetingID: String? = nil, askWho: Bool = false) {
         if let meetingID { meetings.show(meetingID: meetingID, askWho: askWho) }

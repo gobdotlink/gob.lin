@@ -393,7 +393,12 @@ private struct EntryDetail: View {
             Button("Re-transcribe", systemImage: "arrow.clockwise") { Task { await history.reprocess(entry, transcribe: true) } }
                 .disabled(history.retranscribeAction == nil || entry.audioFilename == nil)
                 .help(history.retranscribeAction == nil ? "Available once the speech model is ready." : "Make a new dictation from the original recording.")
-            Button("Rewrite", systemImage: "wand.and.stars") { Task { await history.reprocess(entry, transcribe: false) } }
+            // The button rewrites with the profile the dictation used; its menu picks another.
+            Menu("Rewrite", systemImage: "wand.and.stars") {
+                ForEach(CleanupProfileStore.load(defaults: history.defaults).profiles) { profile in
+                    Button("Rewrite as \(profile.name)") { Task { await history.reprocess(entry, transcribe: false, profile: profile.id) } }
+                }
+            } primaryAction: { Task { await history.reprocess(entry, transcribe: false) } }
                 .disabled(history.rewriteAction == nil)
                 .help(history.rewriteAction == nil ? "Turn on Cleanup to rewrite dictations." : "Save a cleaned-up copy as a new dictation. This one stays.")
         }
@@ -449,7 +454,11 @@ private struct EntryDetail: View {
         HStack(spacing: 0) {
             fact("Words", entry.wordCount.formatted())
             Divider()
-            fact("Tone", entry.tone.isEmpty ? "—" : entry.tone.capitalized)
+            if let profile = entry.profile {
+                fact("Profile", profile)
+                Divider()
+            }
+            fact("Tone", DictationTone(rawValue: entry.tone)?.title ?? (entry.tone.isEmpty ? "—" : entry.tone.capitalized))
             Divider()
             fact("Cleanup", entry.polished ? "Cleaned up" : "As spoken")
             Divider()
