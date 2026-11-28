@@ -265,8 +265,7 @@ struct CorrectSpellingView: View {
     /// Lines a correction really changes, by the same rules the transcript text is respelled with: a line that
     /// already has the right spelling doesn't count.
     static func changedLines(heard: String, meant: String, in turns: [TranscriptTurn]) -> Int {
-        let fix = [MeetingNotes.SpellingFix(heard: heard, meant: meant, count: 0, kind: .applied)]
-        return turns.filter { MeetingNotesFixer.respell($0.text, with: fix) != $0.text }.count
+        MeetingNotesFixer.changedCount(turns.map(\.text), with: [MeetingNotes.SpellingFix(heard: heard, meant: meant, count: 0, kind: .applied)])
     }
     /// Lines the typed correction changes, counted once per redraw for the line, the button and its title.
     private var lines: Int {

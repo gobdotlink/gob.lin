@@ -160,8 +160,8 @@ struct MeetingDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if !lanes.isEmpty { cast(colors).padding(.top, 12).id("cast") }
-            // While notes are written, the line's buttons wait: an Undo then would be overwritten by the write.
-            if let undo { MeetingChangeLine(undo).disabled(notesModel.writing.contains(meeting.id)).padding(.top, 14) }
+            // While notes are written, Undo waits (the write would land on top of it); Save as Template stays.
+            if let undo { MeetingChangeLine(undo, undoDisabled: notesModel.writing.contains(meeting.id)).padding(.top, 14) }
             notices
             MeetingNeedsYou(meeting: meeting, notes: savedNotes, turns: turns, unnamed: unnamed, model: notesModel, player: player,
                             onWho: { who(nil) }, addToDictionary: addToDictionary) {
@@ -798,17 +798,21 @@ struct MeetingChangeLine: View {
     var action: String? = nil
     var onAction: (() -> Void)? = nil
     var onUndo: (() -> Void)?
+    var undoDisabled = false
 
-    init(message: String, warning: String? = nil, action: String? = nil, onAction: (() -> Void)? = nil, onUndo: (() -> Void)? = nil) {
+    init(message: String, warning: String? = nil, action: String? = nil, onAction: (() -> Void)? = nil, onUndo: (() -> Void)? = nil,
+         undoDisabled: Bool = false) {
         self.message = message
         self.warning = warning
         self.action = action
         self.onAction = onAction
         self.onUndo = onUndo
+        self.undoDisabled = undoDisabled
     }
 
-    init(_ undo: MeetingDetailView.Undo) {
-        self.init(message: undo.message, warning: undo.warning, action: undo.action, onAction: undo.onAction, onUndo: undo.revert)
+    init(_ undo: MeetingDetailView.Undo, undoDisabled: Bool = false) {
+        self.init(message: undo.message, warning: undo.warning, action: undo.action, onAction: undo.onAction, onUndo: undo.revert,
+                  undoDisabled: undoDisabled)
     }
 
     var body: some View {
@@ -822,7 +826,7 @@ struct MeetingChangeLine: View {
             }
             Spacer(minLength: 8)
             if let action, let onAction { Button(action, action: onAction).font(.status) }
-            if let onUndo { Button("Undo", action: onUndo).font(.status) }
+            if let onUndo { Button("Undo", action: onUndo).font(.status).disabled(undoDisabled) }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(GoblinBrand.selection, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))

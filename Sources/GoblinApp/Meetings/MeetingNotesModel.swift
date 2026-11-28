@@ -266,11 +266,14 @@ final class MeetingNotesModel: ObservableObject {
         guard !writing.contains(meetingID) else { return false }
         guard let settings = override ?? settings else {
             failures[meetingID] = "There's no notes model to write with. Choose one in Settings › Meeting Recording."
+            failedRequests[meetingID] = nil
             return false
         }
         guard let install = tools[settings.tool]?.install, case .ready = tools[settings.tool] else {
             failures[meetingID] = (tools[settings.tool] == .notInstalled ? MeetingNotesError.notInstalled(settings.tool)
                 : MeetingNotesError.signedOut(settings.tool)).localizedDescription
+            // Try Again, once the tool is back, asks for this same template and ask.
+            failedRequests[meetingID] = settings
             return false
         }
         if consent { consented = true }

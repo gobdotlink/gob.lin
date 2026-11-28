@@ -190,9 +190,11 @@ public enum MeetingNotesFixer {
         return notes
     }
 
-    /// `text` with the active fixes applied, as a transcript line's text is respelled; word timings aren't touched.
-    public static func respell(_ text: String, with fixes: [MeetingNotes.SpellingFix]) -> String {
-        settle(text, compile(fixes))
+    /// How many of `texts` the active fixes change, as transcript lines are respelled; the fixes compile once.
+    public static func changedCount(_ texts: [String], with fixes: [MeetingNotes.SpellingFix]) -> Int {
+        let compiled = compile(fixes)
+        guard !compiled.isEmpty else { return 0 }
+        return texts.filter { settle($0, compiled) != $0 }.count
     }
 
     /// The turns with every active fix applied to their text, and to the words of one-word fixes.
