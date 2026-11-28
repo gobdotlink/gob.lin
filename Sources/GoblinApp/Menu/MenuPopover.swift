@@ -22,7 +22,7 @@ struct MenuPopover: View {
             VStack(spacing: 2) {
                 PopoverMicrophone(preview: model.audioPreview, microphones: model.microphones) { dismiss.then { model.openSettings(.audio) } }
                 PopoverCleanup(model: model)
-                PopoverTone()
+                PopoverProfile(model: model)
             }
             .padding(.horizontal, PopoverModule.inset - PopoverModule.bleed).padding(.vertical, 6)
             .moduleBackground(padded: false)
@@ -314,15 +314,23 @@ private struct PopoverMicrophone: View {
 
 // MARK: Cleanup and tone
 
-/// The circle switches cleanup on or off; the rest of the row opens the level menu.
+/// The app the profile rows are about: the last one in front before gob.lin, and its profile.
+@MainActor
+private func frontProfile(_ model: AppModel) -> (app: NSRunningApplication?, profile: CleanupProfile) {
+    let app = model.insertion.previousApplication.flatMap { $0.isTerminated ? nil : $0 }
+    return (app, model.profileRouter.knownProfile(for: app?.bundleIdentifier))
+}
+
+/// The circle switches cleanup on or off; the rest of the row opens the level menu for the front app's profile.
 private struct PopoverCleanup: View {
-    /// Observed for refreshConfiguration, which announces saved cleanup settings.
+    /// Observed for refreshConfiguration, which announces saved cleanup settings and profiles.
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let settings = RewriteSettingsStore.load(defaults: model.defaults)
-        let on = settings.enabled && settings.cleanup != .none
+        let on = settings.enabled
+        let profile = frontProfile(model).profile
         return HStack(spacing: 0) {
             Button { toggleCleanup(settings) } label: {
                 circle("wand.and.stars", on: on, size: SettingRow.circle)
@@ -331,20 +339,19 @@ private struct PopoverCleanup: View {
             }
             .buttonStyle(.plain).accessibilityLabel(on ? "Turn cleanup off" : "Turn cleanup on")
             Menu {
-                Picker("Level", selection: Binding(get: { settings.cleanup }, set: { level in
-                    var changed = settings
-                    changed.cleanup = level
-                    save(changed)
+                Picker("Level for \(profile.name)", selection: Binding(get: { profile.cleanup }, set: { level in
+                    edit(profile) { $0.cleanup = level }
                 })) {
                     ForEach(RewriteCleanup.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.inline).labelsHidden()
+                .pickerStyle(.inline)
+                .disabled(profile.customPrompt != nil)
                 Divider()
-                Button("Cleanup Settings…") { dismiss.then { model.openSettings(.cleanup) } }
+                Button("Cleanup Settings…") { dismiss.then { model.openProfile(profile.id) } }
             } label: {
                 HStack(spacing: 10) {
                     Text("Cleanup").fixedSize()
-                    settingValue(on ? "\(settings.cleanup.title) · \(settings.provider.title)" : "Off")
+                    settingValue(on ? "\(profile.customPrompt == nil ? profile.cleanup.title : "Custom") · \(settings.provider.title)" : "Off")
                 }
                 .padding(.trailing, PopoverModule.bleed).frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
@@ -358,7 +365,7 @@ private struct PopoverCleanup: View {
 
     private func toggleCleanup(_ settings: RewriteSettings) {
         var changed = settings
-        if settings.enabled && settings.cleanup != .none { changed.enabled = false; save(changed); return }
+        if settings.enabled { changed.enabled = false; save(changed); return }
         // Turning it on needs a model and, for remote providers, a saved key; Settings explains what's missing.
         let local = (settings.provider.runsOnDevice && OnDeviceCleanup.availability == .available) || ["localhost", "127.0.0.1", "[::1]", "::1"].contains((try? settings.endpoint())?.host ?? "")
         let hasKey = local || (model.servicesEnabled && (try? RewriteKeyStore.load(for: settings, defaults: model.defaults))?.isEmpty == false)
@@ -367,7 +374,6 @@ private struct PopoverCleanup: View {
             return
         }
         changed.enabled = true
-        if changed.cleanup == .none { changed.cleanup = .light }
         save(changed)
     }
 
@@ -377,24 +383,42 @@ private struct PopoverCleanup: View {
             model.reloadRewriteCredentials()
         } catch { model.showFailure(.settingsSaveFailed) }
     }
+
+    private func edit(_ profile: CleanupProfile, _ change: (inout CleanupProfile) -> Void) {
+        model.editProfile(profile.id, change)
+    }
 }
 
-/// The whole row opens the tone menu.
-private struct PopoverTone: View {
-    @AppStorage(DictationTone.preferenceKey) private var toneRaw = DictationTone.formal.rawValue
+/// The whole row opens the profile menu: which profile the front app uses, and that profile's tone.
+private struct PopoverProfile: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let selected = DictationTone(rawValue: toneRaw) ?? .formal
+        let (app, profile) = frontProfile(model)
+        let profiles = model.profileRouter.profiles
         return Menu {
-            Picker("Tone", selection: $toneRaw) {
-                ForEach(DictationTone.allCases) { Text($0.title).tag($0.rawValue) }
+            if let app, let bundle = app.bundleIdentifier {
+                Picker("\(app.localizedName ?? "This app") uses", selection: Binding(get: { profile.id }, set: { id in
+                    model.profileRouter.place(bundle, in: id)
+                })) {
+                    ForEach(profiles.profiles) { Text($0.name).tag($0.id) }
+                }
+                .pickerStyle(.inline)
             }
-            .pickerStyle(.inline).labelsHidden()
+            Picker("Tone for \(profile.name)", selection: Binding(get: { profile.tone }, set: { tone in
+                model.editProfile(profile.id) { $0.tone = tone }
+            })) {
+                ForEach(DictationTone.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Button("Profile Settings…") { dismiss.then { model.openProfile(profile.id) } }
         } label: {
             HStack(spacing: 10) {
                 circle("textformat", on: false, size: SettingRow.circle)
-                Text("Tone").fixedSize()
-                settingValue(selected.title)
+                Text("Profile").fixedSize()
+                settingValue(profile.name + " · " + profile.tone.title)
             }
             .padding(.horizontal, PopoverModule.bleed).frame(height: SettingRow.height)
             .contentShape(Rectangle())

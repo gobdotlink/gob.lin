@@ -8,7 +8,7 @@ import SwiftUI
 enum SettingsSection: String, CaseIterable, Identifiable {
     case insights = "Insights", hoard = "Hoard", history = "History", meetings = "Meetings", people = "People"
     case general = "General", audio = "Audio", model = "Model", dictionary = "Dictionary"
-    case cleanup = "Cleanup", tone = "Tone", meetingRecording = "Meeting Recording", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
+    case cleanup = "Cleanup", meetingRecording = "Meeting Recording", overlay = "Overlay", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
     /// Pages that show only while Meetings is on.
     var needsMeetings: Bool { self == .meetings || self == .people || self == .meetingRecording }
@@ -23,7 +23,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .model: "cpu"
         case .dictionary: "character.book.closed"
         case .cleanup: "wand.and.stars"
-        case .tone: "textformat"
         case .history: "clock"
         case .overlay: "rectangle.bottomhalf.inset.filled"
         case .meetings: "person.2.wave.2"
@@ -67,7 +66,8 @@ struct SettingsView: View {
                         .formStyle(PlateFormStyle(maxWidth: section == .dictionary ? 920 : 760))
                 }
             }
-                .id(section)
+                // The Cleanup page opens on the profile asked for, even when it's already showing.
+                .id(section == .cleanup ? section.rawValue + (model.cleanupProfileFocus ?? "") : section.rawValue)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(.rect)
                 .onContinuousHover(coordinateSpace: .global, perform: eyes.follow)
@@ -94,9 +94,9 @@ struct SettingsView: View {
             else { Section { Text("The speech model service is not connected.").foregroundStyle(.secondary) } }
         case .dictionary: DictionarySettingsView(model: model.dictionary, service: speechModels ?? model.speechModels, defaults: model.defaults)
         case .cleanup: RewriteSettingsView(defaults: model.defaults, inspectCredentials: model.servicesEnabled,
+                                           profile: model.cleanupProfileFocus ?? CleanupProfile.everywhereID,
                                            onSaved: { model.reloadRewriteCredentials(); model.diagnostics.resolve(.settings) },
                                            onFailure: { model.showFailure($0) })
-        case .tone: ToneSettingsView()
         case .history, .insights, .hoard, .meetings: EmptyView()
         case .overlay: OverlaySettingsView(overlay: model.overlay)
         case .meetingRecording: MeetingRecordingSettingsView(meetings: model.meetings, openPeople: { model.settingsSelection = .people })

@@ -10,6 +10,7 @@ struct HistoryReprocessResult {
     var model: String
     var latencies: DictationTimings
     var warning: String? = nil
+    var profile: String? = nil
 }
 
 struct PendingHistoryEntry: Identifiable {
@@ -21,7 +22,8 @@ struct PendingHistoryEntry: Identifiable {
 
 @MainActor
 final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
-    typealias ReprocessAction = (HistoryEntry, URL?) async throws -> HistoryReprocessResult
+    /// The entry, its audio, and for a rewrite the profile to write it with (nil: the one it used, or its app's).
+    typealias ReprocessAction = (HistoryEntry, URL?, String?) async throws -> HistoryReprocessResult
 
     @Published private(set) var entries: [HistoryEntry] = []
     @Published private(set) var revision = 0
@@ -42,7 +44,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     weak var sync: HistorySyncModel?
     private(set) var store: HistoryStore?
     private let directory: URL?
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private var requestID = UUID()
     private var player: AVAudioPlayer?
 
@@ -257,14 +259,14 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
-    func reprocess(_ entry: HistoryEntry, transcribe: Bool) async {
+    func reprocess(_ entry: HistoryEntry, transcribe: Bool, profile: String? = nil) async {
         guard let action = transcribe ? retranscribeAction : rewriteAction else {
             errorMessage = transcribe ? "Re-transcription is unavailable until a speech engine is selected." : "Enable and configure AI cleanup to rewrite this dictation."
             return
         }
         do {
             let audioURL = try await store?.audioFileURL(for: entry.id)
-            let result = try await action(entry, audioURL)
+            let result = try await action(entry, audioURL, profile)
             let revised = HistoryEntry(rawText: result.rawText, finalText: result.finalText,
                                        tone: result.tone, polished: result.polished,
                                        targetBundleIdentifier: entry.targetBundleIdentifier,
@@ -272,7 +274,7 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                                        dictionaryBundleIdentifier: entry.dictionaryBundleIdentifier,
                                        dictionaryProject: entry.dictionaryProject,
                                        audioDuration: entry.audioDuration, model: result.model,
-                                       latencies: result.latencies, processingWarning: result.warning)
+                                       latencies: result.latencies, processingWarning: result.warning, profile: result.profile)
             let saved = await record(revised, untrimmedAudioURL: audioURL)
             if saved, let warning = result.warning { errorMessage = warning }
         } catch { lastFailure = .historyOperationFailed; errorMessage = "History reprocessing failed: \(error.localizedDescription)" }

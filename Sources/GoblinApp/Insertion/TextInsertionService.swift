@@ -38,7 +38,8 @@ final class TextInsertionService: ObservableObject {
     /// The clipboard saved ahead of a paste, valid while its change count still matches.
     private var prepared: (changeCount: Int, snapshot: ClipboardSnapshot)?
     private var providers: [TranscriptDataProvider] = []
-    private var previousApplication: NSRunningApplication?
+    /// The last app in front other than gob.lin: the one the menu bar's profile row is about.
+    private(set) var previousApplication: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
     private var layoutObserver: NSObjectProtocol?
     private var carbonHandler: EventHandlerRef?

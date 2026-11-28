@@ -49,13 +49,19 @@ struct CLIProcessingConfiguration: Sendable {
     var tone: DictationTone
     var rewrite: RewriteSettings
     var apiKey: String
+    /// The Everywhere profile's, when it has one: the command line dictates into no app.
+    var customPrompt: String?
+    var formatsTone = true
 
     init(options: CLIProcessingOptions) throws {
         let defaults = UserDefaults(suiteName: GoblinMetadata.bundleIdentifier) ?? .standard
         entries = try (options.dictionaryURL.map(DictionaryRepository.init(url:)) ?? .applicationDefault).load()
             .active(in: DictionaryScope(application: options.application, project: options.project))
-        tone = options.tone ?? DictationTone(rawValue: defaults.string(forKey: DictationTone.preferenceKey) ?? "") ?? .formal
-        rewrite = RewriteSettingsStore.load(defaults: defaults)
+        let everywhere = CleanupProfileStore.load(defaults: defaults).everywhere
+        tone = options.tone ?? everywhere.tone
+        rewrite = everywhere.applied(to: RewriteSettingsStore.load(defaults: defaults))
+        customPrompt = everywhere.customPrompt
+        formatsTone = everywhere.formatsTone
         apiKey = ""
         if options.allowRewrite {
             guard rewrite.enabled, rewrite.cleanup != .none else {
@@ -66,7 +72,8 @@ struct CLIProcessingConfiguration: Sendable {
     }
 
     func process(_ raw: String, using processor: TranscriptPostprocessor) async -> TranscriptProcessingResult {
-        await processor.process(raw, dictionaryEntries: entries, tone: tone, rewriteSettings: rewrite, apiKey: apiKey)
+        await processor.process(raw, dictionaryEntries: entries, tone: tone, rewriteSettings: rewrite, apiKey: apiKey,
+                                customPrompt: customPrompt, formatsTone: formatsTone)
     }
 
     private static func loadKey(for settings: RewriteSettings, defaults: UserDefaults) throws -> String {

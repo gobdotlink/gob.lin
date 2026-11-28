@@ -38,6 +38,15 @@ public enum RewriteKeyStore {
         defaults.set(keys, forKey: preferenceKey)
     }
 
+    /// A key saved under `account`, such as a decision model's; see `ProfileSorter.keyAccount`.
+    public static func load(account: String, defaults: UserDefaults = .standard) -> String { keys(defaults)[account] ?? "" }
+
+    public static func save(_ key: String, account: String, defaults: UserDefaults = .standard) {
+        var keys = keys(defaults)
+        keys[account] = key.isEmpty ? nil : key
+        defaults.set(keys, forKey: preferenceKey)
+    }
+
     /// The name each provider's key is stored under: `load` and `save` use it here, and the iPhone's Keychain uses it.
     public static func account(_ settings: RewriteSettings) throws -> String {
         settings.provider == .custom ? "custom " + (try settings.endpoint().absoluteString) : settings.provider.rawValue

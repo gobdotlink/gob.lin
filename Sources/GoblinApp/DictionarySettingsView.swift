@@ -255,7 +255,7 @@ struct DictionarySettingsView: View {
     }
     private var cleanupEnabled: Bool {
         guard let settings = try? JSONDecoder().decode(RewriteSettings.self, from: rewriteData) else { return false }
-        return settings.enabled && settings.cleanup != .none
+        return settings.enabled
     }
 
     private static func describe(_ source: DetectedProject.Source) -> String {

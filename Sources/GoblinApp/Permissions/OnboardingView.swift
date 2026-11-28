@@ -303,7 +303,7 @@ struct OnboardingView: View {
 
     private var cleanupOn: Bool {
         let settings = RewriteSettingsStore.load(defaults: model.defaults)
-        return settings.enabled && settings.cleanup != .none
+        return settings.enabled
     }
 }
 

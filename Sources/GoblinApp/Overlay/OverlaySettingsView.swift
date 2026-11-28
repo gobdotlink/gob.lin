@@ -5,6 +5,7 @@ struct OverlaySettingsView: View {
     @AppStorage("overlayPosition") private var position = OverlayPosition.bottom.rawValue
     @AppStorage("overlay.milestones") private var milestones = true
     @AppStorage("overlay.termSuggestions") private var termSuggestions = true
+    @AppStorage("overlay.profileQuestions") private var profileQuestions = true
 
     var body: some View {
         Section {
@@ -35,6 +36,10 @@ struct OverlaySettingsView: View {
             Toggle(isOn: $termSuggestions) {
                 Text("Offer words from your fixes")
                 Text("When you fix a misheard word, I ask to add it to the dictionary.").rowDetail()
+            }
+            Toggle(isOn: $profileQuestions) {
+                Text("Ask about new apps")
+                Text("When sorting isn't sure which profile an app belongs in, I ask after the take.").rowDetail()
             }
         } header: { Text("Moments") }
         .onChange(of: position) { _, value in overlay.position = OverlayPosition(rawValue: value) ?? .bottom }

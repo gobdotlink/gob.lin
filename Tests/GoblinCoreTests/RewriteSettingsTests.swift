@@ -104,22 +104,19 @@ struct RewriteSettingsTests {
         #expect(throws: RewriteFailure.self) { try settings.extraRequestParameters() }
     }
 
-    @Test func formattingStartsOffAndCodingAgentKeepsTheParagraphsItAlwaysHad() throws {
-        func decoded(_ cleanup: String) throws -> RewriteSettings {
-            try JSONDecoder().decode(RewriteSettings.self, from: Data(#"{"enabled":true,"baseURL":"https://api.cerebras.ai/v1","model":"m","cleanup":"\#(cleanup)"}"#.utf8))
+    @Test func formattingStartsOffAndCodingAgentBecomesLightWithCommands() throws {
+        func decoded(_ cleanup: String, formatting: String? = nil) throws -> RewriteSettings {
+            let field = formatting.map { #","formatting":\#($0)"# } ?? ""
+            return try JSONDecoder().decode(RewriteSettings.self, from: Data(#"{"enabled":true,"baseURL":"https://api.cerebras.ai/v1","model":"m","cleanup":"\#(cleanup)"\#(field)}"#.utf8))
         }
         #expect(try decoded("light").formatting == RewriteFormatting() && RewriteSettings().formatting.isPlain)
-        #expect(try decoded("codingAgent").formatting == RewriteFormatting(paragraphs: true))
-        var settings = try decoded("codingAgent")
+        // Coding agent was Light with paragraphs, before paragraphs were a choice, and commands.
+        let legacy = try decoded("codingAgent")
+        #expect(legacy.cleanup == .light && legacy.formatting == RewriteFormatting(paragraphs: true, commands: true))
+        #expect(try decoded("codingAgent", formatting: #"{"lists":true}"#).formatting == RewriteFormatting(lists: true, commands: true))
+        var settings = legacy
         settings.formatting = RewriteFormatting(lists: true, spokenBreaks: true)
         let restored = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
         #expect(restored.formatting == RewriteFormatting(lists: true, spokenBreaks: true))
-    }
-
-    @Test func codingAgentPresetPersistsWithoutChangingProviderTuning() throws {
-        var settings = RewriteSettings(enabled: true, cleanup: .codingAgent, reasoning: .off)
-        settings.selectProvider(.cerebras)
-        let restored = try JSONDecoder().decode(RewriteSettings.self, from: JSONEncoder().encode(settings))
-        #expect(restored == settings && restored.cleanup == .codingAgent && restored.reasoning == .off)
     }
 }

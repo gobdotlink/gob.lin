@@ -166,8 +166,8 @@ struct DictationContextTests {
         let plain = try system(.light)
         #expect(plain.contains("Do not start paragraphs on your own.") && plain.contains("Do not make lists."))
         #expect(!plain.contains("new paragraph") && !plain.contains("\"1.\""))
-        // Coding agent's paragraphs come from its saved formatting now, not from the level.
-        #expect(try system(.codingAgent).contains("Do not start paragraphs on your own."))
+        #expect(!plain.contains("command syntax"))
+        #expect(try system(.light, RewriteFormatting(commands: true)).contains("Run /review-triage on PR #975."))
         let all = try system(.medium, RewriteFormatting(paragraphs: true, lists: true, spokenBreaks: true))
         #expect(all.contains("Start a new paragraph") && all.contains("write them as a list") && all.contains("\"New line\" and \"new paragraph\""))
         #expect(!all.contains("Do not start paragraphs") && !all.contains("Do not make lists"))

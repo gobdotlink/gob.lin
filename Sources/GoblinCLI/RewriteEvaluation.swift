@@ -75,7 +75,8 @@ enum RewriteEvaluation {
                     var attempt = 1
                     while true {
                         let result = await processor.process(job.input, dictionaryEntries: settings.entries, tone: settings.tone,
-                            rewriteSettings: settings.rewrite, apiKey: settings.apiKey)
+                            rewriteSettings: settings.rewrite, apiKey: settings.apiKey, customPrompt: settings.customPrompt,
+                            formatsTone: settings.formatsTone)
                         // Rate limits and timeouts are retried; the app would show the raw text instead.
                         guard result.warning != nil, attempt < 4 else { return (key, result, attempt) }
                         try await Task.sleep(for: .seconds(Double(attempt) * 2))

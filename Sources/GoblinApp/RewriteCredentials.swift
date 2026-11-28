@@ -15,7 +15,8 @@ final class RewriteCredentials {
     }
 
     func prepare(for settings: RewriteSettings) throws {
-        guard settings.enabled, settings.cleanup != .none else { reset(); return }
+        // The level is per profile, so any take may clean up while the switch is on.
+        guard settings.enabled else { reset(); return }
         let scope = try Self.scope(settings)
         guard self.scope != scope else { return }
         self.scope = scope
