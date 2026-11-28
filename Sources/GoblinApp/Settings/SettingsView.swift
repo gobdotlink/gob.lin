@@ -67,7 +67,7 @@ struct SettingsView: View {
                 }
             }
                 // The Cleanup page opens on the profile asked for, even when it's already showing.
-                .id(section == .cleanup ? section.rawValue + (model.cleanupProfileFocus ?? "") : section.rawValue)
+                .id(section == .cleanup ? section.rawValue + model.cleanupProfileRequest.uuidString : section.rawValue)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .contentShape(.rect)
                 .onContinuousHover(coordinateSpace: .global, perform: eyes.follow)

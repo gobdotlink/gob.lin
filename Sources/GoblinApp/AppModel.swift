@@ -40,6 +40,8 @@ final class AppModel: ObservableObject {
     @Published var settingsSelection: SettingsSection? = .general
     /// The profile the Cleanup page opens on; see `openProfile`.
     @Published var cleanupProfileFocus: String?
+    /// New for each request, so asking for the same profile again reopens it on that profile.
+    @Published var cleanupProfileRequest = UUID()
     @Published var lastTranscript: String?
     /// A dictation History should select when it opens, e.g. from a popover row.
     @Published var historyFocus: UUID?
@@ -296,6 +298,8 @@ final class AppModel: ObservableObject {
         guard !shuttingDown else { return }
         let configuration = Configuration(defaults)
         guard configuration != appliedConfiguration else { return }
+        // Profile edits land here too, a keystroke at a time; only a change to cleanup itself warms the model again.
+        let cleanupChanged = configuration.rewriteSettings != appliedConfiguration?.rewriteSettings
         appliedConfiguration = configuration
         overlay.position = OverlayPosition(rawValue: defaults.string(forKey: "overlayPosition") ?? "") ?? .bottom
         let settings = RewriteSettingsStore.load(defaults: defaults)
@@ -303,7 +307,7 @@ final class AppModel: ObservableObject {
             do { try rewriteCredentials.prepare(for: settings) }
             catch { showFailure(.rewriteConfiguration) }
         }
-        if settings.provider.runsOnDevice, settings.enabled { OnDeviceCleanup.prewarm() }
+        if cleanupChanged, settings.provider.runsOnDevice, settings.enabled { OnDeviceCleanup.prewarm() }
         if settings.enabled {
             history.rewriteAction = { [weak self] entry, _, profile in
                 guard let self, !self.shuttingDown else { throw CancellationError() }
@@ -311,7 +315,7 @@ final class AppModel: ObservableObject {
                 let result = await self.processTranscript(entry.rawText, scope: entry.dictionaryContext, inputs: inputs)
                 return HistoryReprocessResult(rawText: result.rawText, finalText: result.finalText,
                     tone: result.tone.rawValue, polished: result.polished, model: entry.model,
-                    latencies: result.timings, warning: result.warning?.message, profile: inputs.profile.name)
+                    latencies: result.timings, warning: result.warning?.message, profile: inputs.profile.name, profileID: inputs.profile.id)
             }
         } else { history.rewriteAction = nil }
         history.retranscribeAction = servicesEnabled ? { [weak self] entry, audioURL, _ in
@@ -333,7 +337,7 @@ final class AppModel: ObservableObject {
             timings.rewriteMilliseconds = result.timings.rewriteMilliseconds
             return HistoryReprocessResult(rawText: run.rawText, finalText: result.finalText,
                 tone: result.tone.rawValue, polished: result.polished, model: engine.identifier,
-                latencies: timings, warning: result.warning?.message, profile: inputs.profile.name)
+                latencies: timings, warning: result.warning?.message, profile: inputs.profile.name, profileID: inputs.profile.id)
         } : nil
         applyWarmMicrophone()
         objectWillChange.send()
@@ -398,7 +402,7 @@ final class AppModel: ObservableObject {
         if rewriting { diagnostics.developmentLog.record(.rewriteStarted, area: .rewrite, operation: operation) }
         let result = await processor.process(raw, dictionaryEntries: inputs.entries.active(in: scope), tone: tone,
                                              rewriteSettings: settings, apiKey: key, context: context,
-                                             customPrompt: inputs.profile.customPrompt, formatsTone: inputs.profile.formatsTone)
+                                             customPrompt: inputs.profile.prompt, formatsTone: inputs.profile.formatsTone)
         // A draft's cleanup cancelled for the final transcript is not a provider failure.
         let cancelled = Task.isCancelled
         completed.failure = cancelled ? nil : result.warning
@@ -429,15 +433,28 @@ final class AppModel: ObservableObject {
             session.routedProcess = now.processIdentifier
         }
         guard let route = session.route else { return ProfileRoute(profile: profileRouter.profiles.everywhere) }
-        return await DictationSession.value(of: route, within: .milliseconds(400))
-            ?? ProfileRoute(profile: profileRouter.profiles.everywhere, processID: session.routedProcess)
+        // Chosen at key-down; a long take reads the profile again, so edits made meanwhile apply.
+        return profileRouter.current(await DictationSession.value(of: route, within: .milliseconds(400))
+            ?? ProfileRoute(profile: profileRouter.profiles.everywhere, processID: session.routedProcess))
     }
 
     /// A History dictation's profile: the one chosen, else the one it was written with, else its app's.
     private func profile(for entry: HistoryEntry, choosing id: String? = nil) -> CleanupProfile {
         let profiles = profileRouter.profiles
-        return id.flatMap(profiles.profile) ?? entry.profile.flatMap { name in profiles.profiles.first { $0.name == name } }
-            ?? profileRouter.knownProfile(for: entry.targetBundleIdentifier)
+        return (id ?? entry.profileID).flatMap(profiles.profile) ?? profileRouter.knownProfile(for: entry.targetBundleIdentifier)
+    }
+
+    /// Whether a take may clean up, for starting cleanup before the final transcript: the switch is on, and the profile
+    /// of the app it started in, when that's settled already, isn't None. Text typed into the current field may land
+    /// anywhere, so it always may.
+    private func mayClean(_ session: DictationSession, _ settings: RewriteSettings) -> Bool {
+        guard servicesEnabled, settings.enabled else { return false }
+        guard session.destination == .originalField else { return true }
+        let profiles = profileRouter.profiles
+        guard let known = profiles.placedProfile(for: session.target?.bundleIdentifier) ?? (profiles.sortsApps ? nil : profiles.everywhere) else {
+            return true
+        }
+        return known.applied(to: settings).cleanup != .none
     }
 
     /// Saves the profiles once, so a new install's starters come with the apps it has, and an update keeps the level,
@@ -548,8 +565,8 @@ final class AppModel: ObservableObject {
         let treeRequested = quirks?.requestsAccessibilityTree == true && frontmost.map { FocusedText.requestAccessibilityTree(pid: $0.processIdentifier) } == true
         let session = DictationSession(target: frontmost, destination: insertion.destination)
         // The profile is picked while the user speaks, for the app the take started in; typing into the focused field
-        // picks again if focus moves. Never for a password manager, whose name is all a decision model would get.
-        session.route = quirks?.credentialManager == true ? nil : profileRouter.route(session.target)
+        // picks again if focus moves.
+        session.route = profileRouter.route(session.target)
         session.routedProcess = session.target?.processIdentifier
         let cleanup = RewriteSettingsStore.load(defaults: defaults)
         // Normally opened at key-down already; one opened in the last 10 s is skipped.
@@ -611,7 +628,7 @@ final class AppModel: ObservableObject {
                     previewUnavailable: text.recoveryReason == .decodeUnavailable || text.recoveryReason == .modelPreviewUnavailable, session: overlayID)
             }
         }
-        if servicesEnabled, cleanup.enabled {
+        if mayClean(session, cleanup) {
             // Each pause settles text; its AI cleanup starts while the talk key is still held. At key-up it is kept only
             // when the final transcript has the same words, so a take that ends at a pause pastes almost at once.
             active.earlyCleanupTask = Task { @MainActor [weak self, weak active] in
@@ -619,7 +636,7 @@ final class AppModel: ObservableObject {
                 for await text in stream {
                     guard let self, let active, !session.cancelled, !active.stopping else { break }
                     if let current = active.earlyCleanup, DraftTranscriptMatch(draft: current.text, final: text) == .same { continue }
-                    active.earlyCleanup?.task.cancel()
+                    active.earlyCleanup?.cancel()
                     active.earlyCleanup = self.draftCleanup(text, session: session, showsProgress: false)
                 }
             }
@@ -726,8 +743,8 @@ final class AppModel: ObservableObject {
         // The audio received so far is decoded at once and its AI cleanup starts while capture closes, instead of after.
         // People stop talking before they let go, so it usually has the final transcript's words; see `completeDictation`.
         let settings = RewriteSettingsStore.load(defaults: defaults)
-        let speculates = servicesEnabled && settings.enabled
         let session = active.session
+        let speculates = mayClean(session, settings)
         active.releaseCleanup = Task { @MainActor [weak self] in
             guard speculates, let text = await active.live.releaseText(), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   let self, !session.cancelled else { return nil }
@@ -811,8 +828,8 @@ final class AppModel: ObservableObject {
                 // for anything said since, then from the window's draft if the recording itself is recognized. A
                 // draft's cleanup is kept only when the final transcript has the same words; see `completeDictation`.
                 let settings = RewriteSettingsStore.load(defaults: self.defaults)
-                let speculates = self.servicesEnabled && settings.enabled
                 let session = active.session
+                let speculates = self.mayClean(session, settings)
                 active.earlyCleanupTask?.cancel()
                 if let early = active.earlyCleanup { drafts.append(early); active.earlyCleanup = nil }
                 @MainActor func startDraftCleanup(_ text: String) {
@@ -1034,10 +1051,13 @@ final class AppModel: ObservableObject {
         let route = await profileRoute(for: session)
         let inputs = processingInputs(route.profile)
         var candidates: [(draft: DraftCleanup, match: DraftTranscriptMatch)] = []
-        for draft in drafts where await draft.inputs.value == inputs {
+        for draft in drafts {
+            // Words first: a draft of other words is never waited for.
             let match = DraftTranscriptMatch(draft: draft.text, final: raw)
-            if match == .same { candidates.insert((draft, match), at: 0) }
-            else if match != .different { candidates.append((draft, match)) }
+            guard match != .different else { draft.cancel(); continue }
+            let inputsTask = draft.inputs
+            guard await withTaskCancellationHandler(operation: { await inputsTask.value }, onCancel: { draft.cancel() }) == inputs else { continue }
+            if match == .same { candidates.insert((draft, match), at: 0) } else { candidates.append((draft, match)) }
         }
         var drafted: TranscriptProcessingResult?
         for (draft, match) in candidates {
@@ -1074,11 +1094,12 @@ final class AppModel: ObservableObject {
     /// A cleanup started before the final transcript, with the profile for where the text would land now.
     private func draftCleanup(_ text: String, session: DictationSession, showsProgress: Bool = true) -> DraftCleanup {
         let inputs = Task { @MainActor [weak self] () -> ProcessingInputs? in
-            guard let self else { return nil }
+            guard let self, !Task.isCancelled, !session.cancelled else { return nil }
             return self.processingInputs(await self.profileRoute(for: session).profile)
         }
         return DraftCleanup(text: text, inputs: inputs, task: Task { @MainActor [weak self] in
-            guard let used = await inputs.value else { return nil }
+            // A draft replaced or cancelled while its profile was being picked never starts cleanup.
+            guard let used = await inputs.value, !Task.isCancelled, !session.cancelled else { return nil }
             return await self?.cleanup(text, session: session, inputs: used, reportsOutcome: false, showsProgress: showsProgress)
         })
     }
@@ -1088,7 +1109,7 @@ final class AppModel: ObservableObject {
     private func cleanup(_ raw: String, session: DictationSession, inputs: ProcessingInputs, reportsOutcome: Bool,
                          showsProgress: Bool = true) async -> TranscriptProcessingResult {
         let settings = inputs.settings
-        if showsProgress, let overlayID = session.overlayID, !session.cancelled, settings.enabled, settings.cleanup != .none,
+        if showsProgress, let overlayID = session.overlayID, overlay.owns(overlayID), !session.cancelled, settings.enabled, settings.cleanup != .none,
            !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             overlay.model.cleanupLabel = Self.cleanupLabel(inputs)
             overlay.update(.polishing, committed: raw, tentative: "", session: overlayID)
@@ -1101,7 +1122,7 @@ final class AppModel: ObservableObject {
     static func cleanupLabel(_ inputs: ProcessingInputs) -> String {
         let profile = inputs.profile
         let parts = (profile.isEverywhere ? [] : [profile.name])
-            + [profile.customPrompt == nil ? profile.cleanup.title : "Custom", inputs.settings.provider.title]
+            + [profile.prompt == nil ? profile.cleanup.title : "Custom", inputs.settings.provider.title]
         return parts.joined(separator: " · ")
     }
 
@@ -1241,7 +1262,7 @@ final class AppModel: ObservableObject {
             targetBundleIdentifier: deliveryApplication?.bundleIdentifier,
             targetApplicationName: deliveryApplication?.localizedName, dictionaryBundleIdentifier: session.dictionaryScope,
             dictionaryProject: session.dictionaryProject?.name, createdAt: session.createdAt, completedAt: Date(), audioDuration: duration, model: model, latencies: timings,
-            processingWarning: warning, profile: route?.profile.name)
+            processingWarning: warning, profile: route?.profile.name, profileID: route?.profile.id)
         let saved = await history.record(entry, untrimmedAudioURL: audioURL, ownsAudioSource: true)
         if saved, pendingEditObservationID == session.id, insertion.watchEdits, !shuttingDown,
            let anchor = insertionAnchor {
@@ -1274,8 +1295,7 @@ final class AppModel: ObservableObject {
                 }
                 // Only about the app the text landed in, never one glanced at mid-take.
                 if let question = route?.question, deliveryApplication?.bundleIdentifier == question.bundleIdentifier,
-                   defaults.object(forKey: "overlay.profileQuestions") as? Bool ?? true {
-                    profileRouter.didAsk(question)
+                   defaults.object(forKey: "overlay.profileQuestions") as? Bool ?? true, profileRouter.didAsk(question) {
                     overlay.showCompletion(.profileQuestion(question), session: UUID())
                 }
                 if saved, warning == nil { await celebrateTreasure(overlay: overlayID) }

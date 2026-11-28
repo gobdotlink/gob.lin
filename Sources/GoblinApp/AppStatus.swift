@@ -48,6 +48,7 @@ extension AppModel {
     /// The Cleanup page with `profile` selected.
     func openProfile(_ profile: String) {
         cleanupProfileFocus = profile
+        cleanupProfileRequest = UUID()
         openSettings(.cleanup)
     }
 

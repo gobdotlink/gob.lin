@@ -50,7 +50,10 @@ enum RewriteEvaluation {
                    "provider": configuration.rewrite.provider.rawValue, "model": configuration.rewrite.model,
                    "cleanup": configuration.rewrite.cleanup.rawValue, "reasoning": configuration.rewrite.reasoning.rawValue,
                    "temperature": configuration.rewrite.temperature ?? NSNull(), "tone": configuration.tone.rawValue,
-                   "promptSHA256": sha256(Data(RewritePrompt.predefined.utf8)),
+                   // The instructions actually sent: a custom prompt, or the ones built for this level, formatting and tone.
+                   "promptSHA256": sha256(Data((configuration.customPrompt ?? RewritePrompt.instructions(cleanup: configuration.rewrite.cleanup,
+                       formatting: configuration.rewrite.formatting, tone: configuration.tone)).utf8)),
+                   "formatsTone": configuration.formatsTone,
                    "deduplicated": configuration.rewrite.temperature == 0, "goblinVersion": GoblinMetadata.version])
 
         struct Job: Sendable { let order: Int; let input: String }

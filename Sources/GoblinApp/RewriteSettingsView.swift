@@ -51,13 +51,7 @@ struct RewriteSettingsView: View {
                 Text("AI cleanup")
                 Text("Sends text only, never audio.").rowDetail()
             }
-            StatusRow(settings.enabled ? .ready : .off,
-                      Text(settings.enabled ? (settings.provider.runsOnDevice
-                                   ? "Cleanup runs on this Mac with \(Text(settings.provider.title).fontWeight(.semibold)). Nothing is sent anywhere."
-                                   : settings.usesScreenContext
-                                   ? "Your text and the text near your cursor go to \(Text(settings.provider.title).fontWeight(.semibold)). Everything else stays on this Mac."
-                                   : "Your text goes to \(Text(settings.provider.title).fontWeight(.semibold)). Everything else stays on this Mac.")
-                                : "Off. Tone still applies, and everything stays on this Mac."))
+            StatusRow(settings.enabled ? .ready : .off, cleanupStatus(profiles))
             if let message { StatusRow(.problem, Text(message)) }
         }
         Section {
@@ -95,7 +89,8 @@ struct RewriteSettingsView: View {
         tryIt(profile)
             .onAppear { refreshKeyStatus() }
             .onDisappear { testTask?.cancel(); testTask = nil; testing = false }
-            .onChange(of: selectedID) { resetTest() }
+            // The profile can change from the menu bar too; a result must stay beside the settings it came from.
+            .onChange(of: profile) { resetTest() }
             .sheet(isPresented: $editingProvider, onDismiss: { turnOnAfterEdit = false }) {
                 CleanupProviderSheet(settings: settings, defaults: defaults, inspectCredentials: inspectCredentials, turnOn: turnOnAfterEdit,
                                      onSave: { saved in
@@ -115,6 +110,22 @@ struct RewriteSettingsView: View {
             }
     }
 
+    /// Where cleanup's text goes, and app names too while a cloud model sorts them.
+    private func cleanupStatus(_ profiles: CleanupProfiles) -> Text {
+        let provider = Text(settings.provider.title).fontWeight(.semibold)
+        let sorting = profiles.sortsApps ? resolvedSorter(profiles).flatMap { $0 == .appleIntelligence ? nil : $0 } : nil
+        let rest = sorting.map { Text("App names go to \(Text($0.title).fontWeight(.semibold)) for sorting.") } ?? Text("Everything else stays on this Mac.")
+        guard settings.enabled else {
+            return sorting == nil ? Text("Off. Tone still applies, and everything stays on this Mac.") : Text("Off. Tone still applies. \(rest)")
+        }
+        if settings.provider.runsOnDevice {
+            return sorting == nil ? Text("Cleanup runs on this Mac with \(provider). Nothing is sent anywhere.")
+                                  : Text("Cleanup runs on this Mac with \(provider). \(rest)")
+        }
+        return settings.usesScreenContext ? Text("Your text and the text near your cursor go to \(provider). \(rest)")
+                                          : Text("Your text goes to \(provider). \(rest)")
+    }
+
     // MARK: Sorting
 
     @ViewBuilder private func sorting(_ profiles: CleanupProfiles) -> some View {
@@ -122,9 +133,9 @@ struct RewriteSettingsView: View {
         Section {
             Toggle(isOn: profileBinding(\.sortsApps)) {
                 Text("Sort new apps")
-                Text("The first time you dictate into an app, \(sorter?.title ?? "a decision model") picks its profile from the app's name.").rowDetail()
+                Text("The first time you dictate into an app, sends its name to \(sorter?.title ?? "a decision model") to pick its profile.").rowDetail()
+                Text("What goes: the app's name and bundle ID, and your profiles' names and When to use lines. Never what you say or what's on screen.")
                 Text("When it's sure, the app stays in that profile. When it's unsure, I use its pick once and ask you. Apps it can't place use Everywhere until you choose.")
-                Text("Only the app's name goes, never what you say.")
             }
             Toggle(isOn: profileBinding(\.sortsBrowserTabs)) {
                 Text("Sort browser tabs")
@@ -185,7 +196,7 @@ struct RewriteSettingsView: View {
         case .openAI: "OpenAI's Decisions API, with your OpenAI key."
         case .openRouter: "A decision model through OpenRouter, with your OpenRouter key."
         case .typeSafe: "TypeSafe Jev, with its own key."
-        case .automatic, nil: "Your OpenAI or OpenRouter key, else Apple Intelligence."
+        case .automatic, nil: "Your OpenAI, OpenRouter or TypeSafe key, else Apple Intelligence."
         }
     }
 
@@ -315,7 +326,7 @@ struct RewriteSettingsView: View {
     }
 
     @ViewBuilder private func level(_ profile: CleanupProfile) -> some View {
-        let custom = profile.customPrompt != nil
+        let custom = profile.prompt != nil
         Section {
             ForEach(RewriteCleanup.allCases) { level in
                 CheckRow(title: level.title, selected: !custom && profile.cleanup == level) {
@@ -336,7 +347,7 @@ struct RewriteSettingsView: View {
     }
 
     @ViewBuilder private func formatting(_ profile: CleanupProfile) -> some View {
-        let off = profile.cleanup == .none || profile.customPrompt != nil
+        let off = profile.cleanup == .none || profile.prompt != nil
         Section {
             formattingToggle(\.paragraphs, off: off) {
                 Text("Paragraphs")
@@ -359,7 +370,7 @@ struct RewriteSettingsView: View {
                 Text("“Slash review” becomes /review, “OLY four two four” becomes OLY-424.").rowDetail()
                 Text("Also “PR hash nine seven five” as PR #975. Anything ambiguous stays as words, and model names are never expanded.")
             }
-            if profile.customPrompt != nil {
+            if profile.prompt != nil {
                 StatusRow(.off, Text("Your prompt decides the formatting too."))
             }
         } header: { Text("Formatting") }
@@ -578,7 +589,7 @@ struct RewriteSettingsView: View {
                 let key = try RewriteKeyStore.load(for: snapshot, defaults: defaults)
                 let start = ContinuousClock.now
                 let result = await RewriteClient().rewrite(sample, settings: snapshot, apiKey: key, tone: profile.tone,
-                                                           customPrompt: profile.customPrompt)
+                                                           customPrompt: profile.prompt)
                 try Task.checkCancellation()
                 if let failure = result.failure { throw failure }
                 guard result.wasRewritten else { throw RewriteFailure.invalidResponse }

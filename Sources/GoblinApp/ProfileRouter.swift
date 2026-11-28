@@ -31,14 +31,33 @@ final class ProfileRouter {
 
     var profiles: CleanupProfiles { CleanupProfileStore.load(defaults: defaults) }
 
-    /// The profile an app uses without asking a model: its placement, a sure guess already made, or Everywhere.
+    /// The profile an app uses without asking a model: its placement, a guess already made while sorting is on, or
+    /// Everywhere.
     func knownProfile(for bundleIdentifier: String?) -> CleanupProfile {
         let profiles = profiles
         if let placed = profiles.placedProfile(for: bundleIdentifier) { return placed }
-        if let bundleIdentifier, let guess = guesses[bundleIdentifier], guess.certainty != .lost, let profile = profiles.profile(guess.profile) {
+        if profiles.sortsApps, let bundleIdentifier, let guess = guesses[bundleIdentifier], guess.certainty != .lost,
+           let profile = profiles.profile(guess.profile) {
             return profile
         }
         return profiles.everywhere
+    }
+
+    /// `route` as the profiles stand now, for a take whose route was chosen a while ago: a placement made since wins, the
+    /// profile is read again so edits apply, and a guess gives way to Everywhere once sorting is off or its profile is gone.
+    func current(_ route: ProfileRoute) -> ProfileRoute {
+        var route = route
+        let profiles = profiles
+        if let placed = profiles.placedProfile(for: route.bundleIdentifier) {
+            route.profile = placed
+            route.question = nil
+        } else if route.profile.isEverywhere || !profiles.sortsApps {
+            route.profile = profiles.everywhere
+            if !profiles.sortsApps { route.question = nil }
+        } else {
+            route.profile = profiles.profile(route.profile.id) ?? profiles.everywhere
+        }
+        return route
     }
 
     /// The decision model sorting would use and its key, or nil when there's none to ask.
@@ -63,6 +82,8 @@ final class ProfileRouter {
         guard let app, let bundle = app.bundleIdentifier, app.processIdentifier != getpid() else {
             return Task { ProfileRoute(profile: profiles.everywhere) }
         }
+        // A password manager's name is all a decision model would get, and it isn't sent.
+        if AppInsertionQuirks.forBundle(bundle, at: app.bundleURL).credentialManager { return Task { routed(profiles.everywhere) } }
         if let placed = profiles.placedProfile(for: bundle) { return Task { routed(placed) } }
         let name = app.localizedName ?? DictionaryApps.name(bundle)
         guard profiles.sortsApps, profiles.profiles.count > 1, let (sorter, key) = sorter(profiles) else {
@@ -76,17 +97,22 @@ final class ProfileRouter {
                 guard let self, let title else { return routed(profiles.everywhere) }
                 let guess = await self.guess(bundle + "\n" + title, application: name, bundle: bundle, title: title,
                                              profiles: profiles, sorter: sorter, key: key)
+                // Placed by hand, or sorting turned off, while the model thought: that wins.
+                let current = self.profiles
+                if let placed = current.placedProfile(for: bundle) { return routed(placed) }
                 // A tab is never saved or asked about: the next one may be a different kind of page.
-                guard let guess, guess.certainty != .lost, let profile = profiles.profile(guess.profile) else { return routed(profiles.everywhere) }
+                guard current.sortsApps, current.sortsBrowserTabs, let guess, guess.certainty != .lost,
+                      let profile = current.profile(guess.profile) else { return routed(current.everywhere) }
                 return routed(profile)
             }
         }
         return Task { [weak self] in
             guard let self else { return routed(profiles.everywhere) }
             let guess = await self.guess(bundle, application: name, bundle: bundle, title: nil, profiles: profiles, sorter: sorter, key: key)
-            // Placed by hand while the model thought: that wins.
+            // Placed by hand, or sorting turned off, while the model thought: that wins.
             let current = self.profiles
             if let placed = current.placedProfile(for: bundle) { return routed(placed) }
+            guard current.sortsApps else { return routed(current.everywhere) }
             let choices = current.profiles.map { ProfileQuestion.Choice(id: $0.id, name: $0.name) }
             let ask = !self.asked.contains(bundle)
             switch (guess?.certainty, guess.flatMap { current.profile($0.profile) }) {
@@ -111,8 +137,8 @@ final class ProfileRouter {
         }
     }
 
-    /// The question is on screen: it isn't asked again this launch.
-    func didAsk(_ question: ProfileQuestion) { asked.insert(question.bundleIdentifier) }
+    /// Marks the question asked, so it isn't again this launch. False when it already was, by an overlapping take.
+    func didAsk(_ question: ProfileQuestion) -> Bool { asked.insert(question.bundleIdentifier).inserted }
 
     /// Puts an app in a profile. Yours unless `automatic`.
     func place(_ bundle: String, in profile: String, automatic: Bool = false) {
@@ -123,7 +149,7 @@ final class ProfileRouter {
     }
 
     private func forgetStaleGuesses(_ profiles: CleanupProfiles) {
-        let among = [profiles.openRouterModel] + profiles.profiles.map { $0.id + "\u{1F}" + $0.name + "\u{1F}" + $0.purpose }
+        let among = [profiles.sorter.rawValue, profiles.openRouterModel] + profiles.profiles.map { $0.id + "\u{1F}" + $0.name + "\u{1F}" + $0.purpose }
         guard among != guessedAmong else { return }
         guessedAmong = among
         guesses.removeAll()
@@ -133,6 +159,7 @@ final class ProfileRouter {
                        sorter: ProfileSorter, key: String) async -> ProfileGuess? {
         if let known = guesses[cacheKey] { return known }
         if let pending = guessing[cacheKey] { return await pending.value }
+        let among = guessedAmong
         let decisions = decisions, options = profiles.profiles, model = profiles.openRouterModel
         let task = Task { await decisions.guess(application: application, bundleIdentifier: bundle, windowTitle: title,
                                                 profiles: options, sorter: sorter, model: model, apiKey: key) }
@@ -140,7 +167,8 @@ final class ProfileRouter {
         let result = await task.value
         guessing[cacheKey] = nil
         // ponytail: browser titles pile up for the launch; a few hundred short strings at most.
-        if let result { guesses[cacheKey] = result }
+        // A guess made among profiles or a sorter that changed meanwhile isn't kept.
+        if let result, among == guessedAmong { guesses[cacheKey] = result }
         return result
     }
 }

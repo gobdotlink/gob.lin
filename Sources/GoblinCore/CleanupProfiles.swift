@@ -26,26 +26,32 @@ public struct CleanupProfile: Codable, Equatable, Identifiable, Sendable {
 
     public var isEverywhere: Bool { id == Self.everywhereID }
 
+    /// The custom prompt in effect: none while it's blank, which leaves the level, formatting and tone pass as they are.
+    /// The blank text stays in `customPrompt`, so the editor keeps it.
+    public var prompt: String? {
+        customPrompt.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+
     /// The instructions this profile sends: its custom prompt, or the ones gob.lin writes from its settings.
     public var instructions: String {
-        customPrompt ?? RewritePrompt.instructions(cleanup: cleanup, formatting: formatting, tone: tone)
+        prompt ?? RewritePrompt.instructions(cleanup: cleanup, formatting: formatting, tone: tone)
     }
 
     /// Whether the tone's own pass runs on what cleanup wrote.
-    public var formatsTone: Bool { customPrompt == nil || tonesCustomPrompt }
+    public var formatsTone: Bool { prompt == nil || tonesCustomPrompt }
 
     /// `settings` with this profile's level and formatting, for one take.
     public func applied(to settings: RewriteSettings) -> RewriteSettings {
         var settings = settings
         // ponytail: a custom prompt decides how much to change, so any level that runs cleanup will do; Light is never shown.
-        settings.cleanup = customPrompt == nil ? cleanup : .light
+        settings.cleanup = prompt == nil ? cleanup : .light
         settings.formatting = formatting
         return settings
     }
 
     /// "Light · Casual", or "Custom prompt · Casual".
     public var summary: String {
-        (customPrompt == nil ? cleanup.title : "Custom prompt") + " · " + tone.title
+        (prompt == nil ? cleanup.title : "Custom prompt") + " · " + tone.title
     }
 
     public static func everywhere(tone: DictationTone = .formal, cleanup: RewriteCleanup = .light, formatting: RewriteFormatting = .init()) -> Self {
@@ -225,8 +231,10 @@ public enum CleanupProfileStore {
         defaults.set(try JSONEncoder().encode(profiles), forKey: CleanupProfiles.preferenceKey)
     }
 
-    /// Nothing about cleanup or tone was ever saved: a new install, whose starter profiles may come with their apps.
+    /// Nothing about cleanup or tone was ever saved and nothing was ever dictated (a take saves the microphone it used):
+    /// a new install, whose starter profiles may come with their apps. Someone who dictated with the defaults isn't.
     public static func isNewInstall(defaults: UserDefaults = .standard) -> Bool {
-        [CleanupProfiles.preferenceKey, RewriteSettingsStore.preferenceKey, DictationTone.preferenceKey].allSatisfy { defaults.object(forKey: $0) == nil }
+        [CleanupProfiles.preferenceKey, RewriteSettingsStore.preferenceKey, DictationTone.preferenceKey, "audio.lastMicrophoneUID"]
+            .allSatisfy { defaults.object(forKey: $0) == nil }
     }
 }

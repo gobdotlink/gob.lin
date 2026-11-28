@@ -60,8 +60,9 @@ struct CLIProcessingConfiguration: Sendable {
         let everywhere = CleanupProfileStore.load(defaults: defaults).everywhere
         tone = options.tone ?? everywhere.tone
         rewrite = everywhere.applied(to: RewriteSettingsStore.load(defaults: defaults))
-        customPrompt = everywhere.customPrompt
-        formatsTone = everywhere.formatsTone
+        customPrompt = everywhere.prompt
+        // A tone asked for on the command line is always applied.
+        formatsTone = options.tone != nil || everywhere.formatsTone
         apiKey = ""
         if options.allowRewrite {
             guard rewrite.enabled, rewrite.cleanup != .none else {

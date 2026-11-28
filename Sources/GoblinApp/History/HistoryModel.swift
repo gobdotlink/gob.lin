@@ -11,6 +11,7 @@ struct HistoryReprocessResult {
     var latencies: DictationTimings
     var warning: String? = nil
     var profile: String? = nil
+    var profileID: String? = nil
 }
 
 struct PendingHistoryEntry: Identifiable {
@@ -274,7 +275,8 @@ final class HistoryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
                                        dictionaryBundleIdentifier: entry.dictionaryBundleIdentifier,
                                        dictionaryProject: entry.dictionaryProject,
                                        audioDuration: entry.audioDuration, model: result.model,
-                                       latencies: result.latencies, processingWarning: result.warning, profile: result.profile)
+                                       latencies: result.latencies, processingWarning: result.warning, profile: result.profile,
+                                       profileID: result.profileID)
             let saved = await record(revised, untrimmedAudioURL: audioURL)
             if saved, let warning = result.warning { errorMessage = warning }
         } catch { lastFailure = .historyOperationFailed; errorMessage = "History reprocessing failed: \(error.localizedDescription)" }

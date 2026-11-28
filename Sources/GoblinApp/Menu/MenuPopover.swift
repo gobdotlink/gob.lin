@@ -345,13 +345,13 @@ private struct PopoverCleanup: View {
                     ForEach(RewriteCleanup.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.inline)
-                .disabled(profile.customPrompt != nil)
+                .disabled(profile.prompt != nil)
                 Divider()
                 Button("Cleanup Settings…") { dismiss.then { model.openProfile(profile.id) } }
             } label: {
                 HStack(spacing: 10) {
                     Text("Cleanup").fixedSize()
-                    settingValue(on ? "\(profile.customPrompt == nil ? profile.cleanup.title : "Custom") · \(settings.provider.title)" : "Off")
+                    settingValue(on ? "\(profile.prompt == nil ? profile.cleanup.title : "Custom") · \(settings.provider.title)" : "Off")
                 }
                 .padding(.trailing, PopoverModule.bleed).frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
