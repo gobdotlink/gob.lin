@@ -202,15 +202,17 @@ struct SettingsCapture {
                 if wanted("meetings") {
                     model.meetings.refreshList()
                     let meetingsSize = NSSize(width: 1180, height: 860)
-                    for (name, id) in [("meetings", sampleMeetings.weekly), ("meetings-in-person", sampleMeetings.inPerson),
-                                       ("meetings-stopped", sampleMeetings.stopped)] {
-                        for dark in [false, true] where name == "meetings" || !dark {
+                    for (name, id, transcript) in [("meetings", sampleMeetings.weekly, false), ("meetings-transcript", sampleMeetings.weekly, true),
+                                                   ("meetings-in-person", sampleMeetings.inPerson, true), ("meetings-stopped", sampleMeetings.stopped, false)] {
+                        for dark in [false, true] {
+                            defaults.set(transcript, forKey: MeetingsView.showsTranscriptKey)
                             model.settingsSelection = .meetings
                             model.meetings.focusedMeetingID = id
                             try await shoot(name + (dark ? "-dark" : ""), SettingsView(model: model, speechModels: model.speechModels),
                                             size: meetingsSize, dark: dark, settle: .milliseconds(1_200))
                         }
                     }
+                    defaults.set(false, forKey: MeetingsView.showsTranscriptKey)
                     let store = model.meetings.library.store
                     for (name, id, voice) in [("meetings-who", sampleMeetings.weekly, "Speaker 3"),
                                               ("meetings-who-in-person", sampleMeetings.inPerson, "Speaker 2")] {
@@ -218,12 +220,15 @@ struct SettingsCapture {
                         let lanes = MeetingTimeline.lanes(detail.turns, kind: detail.summary.kind)
                         let player = MeetingPlayer()
                         player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
-                        let sheet = WhoIsThisSheet(meeting: detail.summary, lane: lanes.first { $0.name == voice }!, lanes: lanes, turns: detail.turns,
-                                                   participants: detail.participants, voiceSuggestions: detail.voiceSuggestions[voice] ?? [],
-                                                   remembersVoices: true, player: player, onName: { _ in }, onClose: {})
+                        let unnamed = lanes.filter(\.needsName)
+                        let sheet = WhoIsThisView(meeting: detail.summary, lane: lanes.first { $0.name == voice }!, lanes: lanes, turns: detail.turns,
+                                                  participants: detail.participants, voiceSuggestions: detail.voiceSuggestions[voice] ?? [],
+                                                  people: ["Ana Ruiz", "Mira Sol"], remembersVoices: true,
+                                                  position: unnamed.count > 1 ? (unnamed.firstIndex { $0.name == voice } ?? 0, unnamed.count) : nil,
+                                                  player: player, onName: { _ in }, onSkip: {}, onClose: {})
                             .background(Color(nsColor: .windowBackgroundColor))
                         for dark in [false, true] {
-                            try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: name == "meetings-who" ? 700 : 560), dark: dark)
+                            try await shoot(name + (dark ? "-dark" : ""), sheet, size: NSSize(width: 400, height: name == "meetings-who" ? 520 : 440), dark: dark)
                         }
                     }
                     // Someone heard beside you on the call's own mic: no participant list, no laptop card.
@@ -235,11 +240,18 @@ struct SettingsCapture {
                         let lanes = MeetingTimeline.lanes(turns, kind: .call)
                         let player = MeetingPlayer()
                         player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
-                        let sheet = WhoIsThisSheet(meeting: detail.summary, lane: lanes.first { $0.name == "Speaker 4" }!, lanes: lanes, turns: turns,
-                                                   participants: detail.participants, remembersVoices: true, player: player, onName: { _ in }, onClose: {})
+                        let sheet = WhoIsThisView(meeting: detail.summary, lane: lanes.first { $0.name == "Speaker 4" }!, lanes: lanes, turns: turns,
+                                                  participants: detail.participants, remembersVoices: true, player: player, onName: { _ in }, onClose: {})
                             .background(Color(nsColor: .windowBackgroundColor))
                         for dark in [false, true] {
-                            try await shoot("meetings-who-beside-you" + (dark ? "-dark" : ""), sheet, size: NSSize(width: 540, height: 330), dark: dark)
+                            try await shoot("meetings-who-beside-you" + (dark ? "-dark" : ""), sheet, size: NSSize(width: 400, height: 330), dark: dark)
+                        }
+                        // Correcting a word by hand, from a transcript line's context menu.
+                        let line = detail.turns.first { $0.text.contains("Okafur") } ?? detail.turns[0]
+                        let correct = CorrectSpellingView(turn: line, turns: detail.turns, onCorrect: { _, _, _ in true }, onDone: {})
+                            .background(Color(nsColor: .windowBackgroundColor))
+                        for dark in [false, true] {
+                            try await shoot("meetings-correct" + (dark ? "-dark" : ""), correct, size: NSSize(width: 340, height: 300), dark: dark)
                         }
                     }
                     // Settings › Meeting Recording › AI apps, below the fold of the page shot: connected, not connected, not
@@ -263,16 +275,17 @@ struct SettingsCapture {
                         player.load(microphone: detail.microphoneAudio, system: detail.systemAudio)
                         if name == "meetings-notes-offer" { defaults.set(false, forKey: MeetingNotesModel.consentKey) }
                         let section = MeetingNotesSection(meeting: detail.summary, notes: notes, stale: false, names: detail.speakerNames,
-                                                          model: model.meetings.notes, player: player, onChanged: {})
-                            .padding(28).frame(width: 820, alignment: .topLeading).background(GoblinBrand.caseBackground)
+                                                          typedNotes: detail.typedNotes, unnamed: Set(detail.turns.map(\.speaker).filter(MeetingTimeline.isUnnamed)),
+                                                          model: model.meetings.notes, player: player)
+                            .padding(28).frame(width: 820, alignment: .topLeading).background(GoblinBrand.plate)
                         for dark in [false, true] {
                             try await shoot(name + (dark ? "-dark" : ""), section, size: NSSize(width: 820, height: name == "meetings-notes" ? 880 : 200), dark: dark)
                         }
                         defaults.set(true, forKey: MeetingNotesModel.consentKey)
                     }
-                    let mergeLine = MeetingChangeLine(message: "Merged Speaker 3 into Priya Shah.",
-                                                      warning: SpeakerSuggestions.mergeWarning(unmatched: ["Sam Okafor"]),
-                                                      missing: "Sam Okafor", onUndo: {})
+                    let mergeLine = MeetingChangeLine(message: "Speaker 3 is now part of Priya Shah.",
+                                                      warning: "Sam Okafor doesn't have a voice yet.",
+                                                      action: "Name Speaker 3 Sam Okafor Instead", onAction: {}, onUndo: {})
                         .padding(20).frame(width: 760, alignment: .leading).background(Color(nsColor: .windowBackgroundColor))
                     for dark in [false, true] {
                         try await shoot("meetings-merge" + (dark ? "-dark" : ""), mergeLine, size: NSSize(width: 760, height: 100), dark: dark)
@@ -771,11 +784,11 @@ private enum SampleMeetings {
             ("Speaker 2", 0.62, "All good."),
             ("Speaker 1", 4.03, "Export first. Is it still on for this sprint?"),
             ("You", 4.15, "It's close. The CSV path works, but the PDF one still drops page breaks."),
-            ("Speaker 2", 4.4, "I'd ship CSV on its own and move PDF to next sprint."),
+            ("Speaker 2", 4.4, "I'd ship CSV on its own, Pria, and move PDF to next sprint."),
             ("Speaker 3", 4.52, "I can pick up the page-break fix. I'm next to Sam today, same laptop."),
             ("Speaker 1", 7.3, "Good. Then the release notes say CSV now, PDF in two weeks, and nobody is surprised."),
             ("Speaker 2", 9.1, "I'll write the changelog entry and link the tracking issue so support can point people at it."),
-            ("Speaker 1", 11.67, "Great, let's do that. Sam, how's the API timeline looking?"),
+            ("Speaker 1", 11.67, "Great, let's do that. Sam Okafur, how's the API timeline looking?"),
             ("Speaker 2", 11.8, "Fine, as long as we freeze the schema by Thursday."),
             ("You", 12.07, "Thursday works. I'll send the field list tonight."),
             ("Speaker 2", 15.4, "The one open question is pagination. Cursor or page numbers, I don't mind, but we pick one."),

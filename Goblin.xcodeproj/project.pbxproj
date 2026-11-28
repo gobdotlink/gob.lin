@@ -28,6 +28,7 @@
 		31F53FC24F363D77FADEE514 /* HotkeyShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */; };
 		328878B095DD6E130364C893 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = DDB1197B94259F10AEFE3EFC /* Assets */; };
 		35541FCF88A2E00C72E04897 /* RewriteCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D74D07131206B57D5513E74 /* RewriteCredentials.swift */; };
+		372C3FC891AB4BB3F3F59193 /* MeetingTranscriptPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 728CF072F86E759D5E26FB4E /* MeetingTranscriptPanel.swift */; };
 		388507F7F51ED60801B14808 /* GoblinEngines in Frameworks */ = {isa = PBXBuildFile; productRef = 278BF3C3B3724FBDBA6982BB /* GoblinEngines */; };
 		39E04ED996B89F88F6618AED /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EBD258A804FC8847A87D791 /* OnboardingView.swift */; };
 		422B3F15678598D5A4B01626 /* GoblinApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97ED803CFF2B51DB2FC14939 /* GoblinApp.swift */; };
@@ -124,6 +125,7 @@
 		64FD9CAC227996E36779A580 /* CleanupProviderSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupProviderSheet.swift; sourceTree = "<group>"; };
 		6ADBA79273256BA6DCB71D3B /* MeetingNotesModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotesModel.swift; sourceTree = "<group>"; };
 		7227B5B28B7574DCCA3D6981 /* HotkeyShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyShortcut.swift; sourceTree = "<group>"; };
+		728CF072F86E759D5E26FB4E /* MeetingTranscriptPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingTranscriptPanel.swift; sourceTree = "<group>"; };
 		7465508E4A4AE191BA4D36C9 /* GoblinBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoblinBrand.swift; sourceTree = "<group>"; };
 		7D74D07131206B57D5513E74 /* RewriteCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewriteCredentials.swift; sourceTree = "<group>"; };
 		7EBD258A804FC8847A87D791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -294,6 +296,7 @@
 				C42CB3D6C9FDD49BAE737CFC /* MeetingSurfaces.swift */,
 				E8887DD56C7561311092AC2E /* MeetingsView.swift */,
 				393D22D7144941D86253A4A9 /* MeetingTimelineView.swift */,
+				728CF072F86E759D5E26FB4E /* MeetingTranscriptPanel.swift */,
 				EDA74DAFBF94B56148EB00E8 /* PeopleSettingsView.swift */,
 				3EB7B000EB328973988FFF26 /* PopoverMeeting.swift */,
 				170941D68E687F08630A7E30 /* SidekickPanel.swift */,
@@ -524,6 +527,7 @@
 				6765059D072FE275B0F4A472 /* MeetingSpeechEngine.swift in Sources */,
 				A7A3C06C60529348A1BC1CB2 /* MeetingSurfaces.swift in Sources */,
 				1B40B772F9B222247B2E777C /* MeetingTimelineView.swift in Sources */,
+				372C3FC891AB4BB3F3F59193 /* MeetingTranscriptPanel.swift in Sources */,
 				C26E455E8BEEBF5835E01A66 /* MeetingsController+Settings.swift in Sources */,
 				E464E6BB06F993E3120C3E43 /* MeetingsController.swift in Sources */,
 				54941FF378FFADB9BBA1FE9E /* MeetingsView.swift in Sources */,

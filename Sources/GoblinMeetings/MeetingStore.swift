@@ -70,6 +70,10 @@ public enum MeetingStoreError: Error, LocalizedError, Equatable {
     case destinationNotEmpty(String)
     /// Remember voices was turned off, but these voiceprints couldn't be deleted (meeting titles, or "People").
     case voicesNotForgotten([String])
+    /// A spelling correction with nothing on one side, too long a side, or the same words on both.
+    case invalidCorrection
+    /// No earlier version of the notes to go back to.
+    case noEarlierNotes
 
     public var errorDescription: String? {
         switch self {
@@ -79,6 +83,8 @@ public enum MeetingStoreError: Error, LocalizedError, Equatable {
         case .speakerNotFound(let name): "No speaker called \(name) in this meeting."
         case .destinationNotEmpty(let path): "\(path) already exists and is not empty."
         case .voicesNotForgotten(let places): "Some voiceprints couldn't be deleted: \(places.joined(separator: ", "))."
+        case .invalidCorrection: "Type what was heard and how it should be spelled, up to \(MeetingCorrections.maximumLength) characters each."
+        case .noEarlierNotes: "There's no earlier version of these notes."
         }
     }
 }
@@ -130,7 +136,7 @@ public actor MeetingStore {
     public nonisolated let root: URL
     private let options: MeetingPostProcessOptions
     private var recording: Set<String> = []
-    private var processing: Set<String> = []
+    private(set) var processing: Set<String> = []
     /// Whether each transcript.json decodes, keyed by path and remembered until the file changes.
     private var transcriptChecks: [String: (stamp: TranscriptStamp, readable: Bool)] = [:]
 
@@ -199,6 +205,24 @@ public actor MeetingStore {
     /// The meeting as Markdown with YAML front matter, for a notes vault.
     public func markdown(_ id: String) throws -> String {
         MeetingMarkdown.export(try detail(id))
+    }
+
+    /// The transcript as Markdown, or nil when the meeting has no lines to copy.
+    public func transcriptMarkdown(_ id: String) throws -> String? {
+        let detail = try detail(id)
+        return detail.turns.isEmpty ? nil : MeetingMarkdown.export(detail)
+    }
+
+    /// The notes alone as Markdown, with what was typed during the call; nil without notes.
+    public func notesMarkdown(_ id: String) throws -> String? {
+        let directory = try directory(for: id)
+        guard let notes = MeetingNotesFile.read(directory) else {
+            // Only what was typed during the call: that's the notes there are, as Copy All has them.
+            guard let typed = MeetingTypedNotes.read(from: directory)?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty else { return nil }
+            return "## Your notes\n\n" + typed + "\n"
+        }
+        return MeetingNotesFile.markdown(notes, title: try detail(id).summary.title, names: MeetingNotesFile.names(for: notes, directory: directory),
+                                         typedNotes: MeetingTypedNotes.read(from: directory))
     }
 
     /// The whole meeting as Markdown: the front matter, the notes and what was typed during the call, then the
@@ -292,6 +316,19 @@ public actor MeetingStore {
     }
 
     // MARK: Voices
+
+    /// The person says a voice I named from People is right: it stops reading as a guess. The name, and what People
+    /// learned from it, stay as they are.
+    public func confirmVoice(_ id: String, name: String) throws {
+        let directory = try directory(for: id)
+        guard var voices = MeetingVoices.read(directory) else { return }
+        let names = MeetingPostProcessor.speakerNames(directory)
+        // Only the guesses of this very name: a voice merged in under another guess keeps its own.
+        let guessed = voices.matches.filter { label, match in match.named && match.name == name && names[label] == name }.map(\.key)
+        guard !guessed.isEmpty else { return }
+        for label in guessed { voices.matches[label] = nil }
+        try voices.write(directory)
+    }
 
     /// People learns the meeting's names as they now stand, from its voiceprints; nothing without Remember voices.
     /// After names are saved: People follows them first, then the transcript. The transcript is written even when People

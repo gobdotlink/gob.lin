@@ -350,6 +350,8 @@ enum CodexAppServer {
         var thread: [String: Any] = ["baseInstructions": request.instructions, "ephemeral": true, "cwd": scratch.path,
                                      "sandbox": "read-only", "approvalPolicy": "never"]
         if let model = request.model { thread["model"] = model }
+        // The instructions carry the template and the person's ask, so nothing goes out once the write isn't wanted.
+        guard await request.proceed() else { throw CancellationError() }
         let started = try await server.request("thread/start", thread, timeout: 60)
         guard let threadID = (started["thread"] as? [String: Any])?["id"] as? String else { throw MeetingNotesError.failed(.codex, "it didn't start a conversation.") }
         var turn: [String: Any] = ["threadId": threadID, "input": [["type": "text", "text": request.input]],

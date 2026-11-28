@@ -423,8 +423,8 @@ public enum MeetingPostProcessor {
         let participants = MeetingParticipants.read(directory)
         let vocabulary = MeetingVocabulary(dictionary: MeetingVocabulary.dictionary(),
                                            names: participants.all + names.values + MeetingVocabulary.peopleNames(),
-                                           protecting: MeetingNotesFile.stored(directory)?.fixes
-                                            .flatMap { $0.dismissed ? [$0.heard] : [$0.heard, $0.meant] } ?? [])
+                                           protecting: ((MeetingNotesFile.stored(directory)?.fixes ?? []) + MeetingCorrections.read(directory))
+                                            .flatMap { $0.dismissed ? [$0.heard] : [$0.heard, $0.meant] })
         // Joined into paragraphs first, then corrected: a phrase the notes protect can span two lines.
         let named = merge(base.map { turn in
             var turn = turn

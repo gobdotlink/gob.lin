@@ -91,8 +91,11 @@ private struct PopoverRecording: View {
                 }
                 Spacer(minLength: 6)
                 Elapsed(start: recording.startedAt).font(.cardTitle)
-                Button { meetings.stop() } label: { Label("Stop", systemImage: "stop.fill") }
-                    .buttonBorderShape(.capsule).controlSize(.small)
+                // While the countdown asks, its own Stop Now is the one Stop.
+                if recording.autoStopRemaining() == nil {
+                    Button { meetings.stop() } label: { Label("Stop", systemImage: "stop.fill") }
+                        .buttonBorderShape(.capsule).controlSize(.small)
+                }
             }
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 if recording.inPerson {
@@ -173,12 +176,14 @@ private struct PopoverRecording: View {
             } else {
                 HStack(spacing: 0) {
                     ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
-                        Capsule().fill(level > 0.02 ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.tertiary))
+                        // Quiet stretches sit on the baseline; only sound rises above it.
+                        Capsule().fill(level > 0.02 ? AnyShapeStyle(GoblinBrand.moss) : AnyShapeStyle(.clear))
                             .frame(width: 3, height: 3 + level * 13)
                             .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(height: 16)
+                .background { Capsule().fill(.quaternary).frame(height: 1.5) }
                 .accessibilityHidden(true)
             }
         }
@@ -361,7 +366,7 @@ private struct PopoverMeetingRow: View {
                 if meeting.state == .processing || meeting.state == .interrupted {
                     HStack(spacing: 4) { StatusLight(state: .waiting); Text("Processing") }.font(.meta).foregroundStyle(.secondary)
                 } else if toName > 0 {
-                    HStack(spacing: 4) { StatusLight(state: .waiting); Text("\(toName) to name") }.font(.meta).foregroundStyle(.secondary)
+                    HStack(spacing: 4) { StatusLight(state: .waiting); Text(toName == 1 ? "1 voice to name" : "\(toName) voices to name") }.font(.meta).foregroundStyle(.secondary)
                 }
             }
             .font(.row)

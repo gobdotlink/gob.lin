@@ -46,7 +46,7 @@ public struct MeetingVocabulary: Sendable {
     private let protectedPatterns: [NSRegularExpression]
 
     public init(dictionary: [DictionaryEntry], names: [String], protecting phrases: [String] = []) {
-        protectedPatterns = phrases.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.map(MeetingNotesFixer.pattern)
+        protectedPatterns = phrases.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.map { MeetingNotesFixer.pattern(for: $0) }
         entries = dictionary.filter { $0.apps.isEmpty && $0.projects.isEmpty }
         var targets: [String: String] = [:]
         let nameWords = names.flatMap { $0.split(whereSeparator: { !$0.isLetter && $0 != "'" && $0 != "-" }).map(String.init) }

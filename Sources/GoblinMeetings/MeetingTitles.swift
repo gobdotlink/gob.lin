@@ -68,12 +68,12 @@ extension MeetingNotes {
 /// Applies a meeting's spelling fixes to its transcript.
 public enum MeetingNotesFixer {
     /// `heard` as a whole word or phrase, any case; the space between words may be any run of spaces.
-    static func pattern(for heard: String) -> NSRegularExpression {
+    public static func pattern(for heard: String, caseSensitive: Bool = false) -> NSRegularExpression {
         let words = heard.split(whereSeparator: \.isWhitespace).map { NSRegularExpression.escapedPattern(for: String($0)) }
         let body = words.joined(separator: "\\s+")
         // A fixed pattern from escaped words compiles.
         // Marks count as part of a word, so "Jose" doesn't match the start of a decomposed "José".
-        return (try? NSRegularExpression(pattern: "(?<![\\p{L}\\p{N}\\p{M}])\(body)(?![\\p{L}\\p{N}\\p{M}])", options: [.caseInsensitive]))
+        return (try? NSRegularExpression(pattern: "(?<![\\p{L}\\p{N}\\p{M}])\(body)(?![\\p{L}\\p{N}\\p{M}])", options: caseSensitive ? [] : [.caseInsensitive]))
             ?? NSRegularExpression()
     }
 
@@ -108,7 +108,9 @@ public enum MeetingNotesFixer {
                 if forms.contains(next) || next.count > max(200, entry.fix.meant.count * 4) { break }
                 forms.append(next)
             }
-            let kept = forms.sorted { $0.count > $1.count }.map(pattern(for:))
+            // A fix of the capitals alone ("goblin" → "Goblin") only counts the exact spelling as already right.
+            let caseOnly = entry.fix.heard.caseInsensitiveCompare(entry.fix.meant) == .orderedSame
+            let kept = forms.sorted { $0.count > $1.count }.map { pattern(for: $0, caseSensitive: caseOnly) }
             return Compiled(fix: entry.fix, regex: entry.regex, kept: kept,
                             oneWord: !entry.fix.heard.contains(where: \.isWhitespace) && !entry.fix.meant.contains(where: \.isWhitespace))
         }
@@ -116,14 +118,22 @@ public enum MeetingNotesFixer {
 
     /// `text` with every fix applied, pass after pass until nothing changes, so a chain of fixes lands on its last
     /// spelling at once and applying them again is a no-op. Bounded by the number of fixes.
-    static func settle(_ text: String, _ compiled: [Compiled]) -> String {
+    static func settle(_ text: String, _ compiled: [Compiled]) -> String { settleTracking(text, compiled).text }
+
+    /// `settle`, also saying which fixes changed the text on any pass, a fix acting on another's replacement included.
+    static func settleTracking(_ text: String, _ compiled: [Compiled]) -> (text: String, changed: [MeetingNotes.SpellingFix]) {
         var current = text
+        var changed: [MeetingNotes.SpellingFix] = []
         for _ in 0...compiled.count {
-            let next = compiled.reduce(current) { replace($0, $1) }
-            if next == current { break }
-            current = next
+            let start = current
+            for fix in compiled {
+                let next = replace(current, fix)
+                if next != current, !changed.contains(fix.fix) { changed.append(fix.fix) }
+                current = next
+            }
+            if current == start { break }
         }
-        return current
+        return (current, changed)
     }
 
     /// `text` with one fix applied. Where the right spelling is already there ("Alex Kim" for the fix "Alex" → "Alex
@@ -180,13 +190,22 @@ public enum MeetingNotesFixer {
         return notes
     }
 
+    /// How many of `texts` the active fixes change, as transcript lines are respelled; the fixes compile once.
+    public static func changedCount(_ texts: [String], with fixes: [MeetingNotes.SpellingFix]) -> Int {
+        let compiled = compile(fixes)
+        guard !compiled.isEmpty else { return 0 }
+        return texts.filter { settle($0, compiled) != $0 }.count
+    }
+
     /// The turns with every active fix applied to their text, and to the words of one-word fixes.
     public static func apply(_ fixes: [MeetingNotes.SpellingFix], to turns: [TranscriptTurn]) -> [TranscriptTurn] {
         let compiled = compile(fixes)
         guard !compiled.isEmpty else { return turns }
         return turns.map { turn in
             var turn = turn
-            turn.text = settle(turn.text, compiled)
+            let settled = settleTracking(turn.text, compiled)
+            turn.text = settled.text
+            if !settled.changed.isEmpty { turn.respelled = settled.changed.map { TranscriptTurn.Respelling(heard: $0.heard, meant: $0.meant) } }
             // Word timings change only for one word swapped for one word; "Alex" → "Alex Kim" would put two words in
             // one timed slot (or double a "Kim" already timed beside it), so longer fixes stay in the text.
             let wordFixes = compiled.filter(\.oneWord)
@@ -198,14 +217,140 @@ public enum MeetingNotesFixer {
     }
 }
 
+/// corrections.json: spellings the person fixed by hand in the transcript. They're kept apart from the notes, so they
+/// hold with or without notes and through writing the notes again.
+public enum MeetingCorrections {
+    public static let file = "corrections.json"
+    /// Longest heard or meant text a correction takes: a name or a short phrase, not a sentence.
+    public static let maximumLength = 80
+
+    public static func read(_ directory: URL) -> [MeetingNotes.SpellingFix] {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(file)) else { return [] }
+        return (try? JSONDecoder.meeting.decode([MeetingNotes.SpellingFix].self, from: data)) ?? []
+    }
+
+    static func write(_ fixes: [MeetingNotes.SpellingFix], to directory: URL) throws {
+        let url = directory.appendingPathComponent(file)
+        if fixes.isEmpty {
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            return
+        }
+        try JSONEncoder.pretty.encode(fixes).write(to: url, options: .atomic)
+    }
+
+    /// Words as a person typed them: quotes and angle brackets dropped, runs of spaces made one, trimmed. Nil when
+    /// nothing is left or it's too long to be a name or a phrase.
+    public static func normalized(_ text: String) -> String? {
+        // Double quotes and brackets go; single quotes only around the words, so “O’Connor” keeps its apostrophe.
+        let cleaned = text.replacingOccurrences(of: "[<>\"“”]", with: "", options: .regularExpression)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "'‘’"))
+            // Spaces just inside the quotes, so normalizing again gives the same words.
+            .trimmingCharacters(in: .whitespaces)
+        return cleaned.isEmpty || cleaned.count > maximumLength ? nil : cleaned
+    }
+
+    /// Adds or replaces the correction of `heard`. Throws when either side is empty, too long, or the two are the same.
+    static func set(heard: String, meant: String, in directory: URL) throws {
+        guard let heard = normalized(heard), let meant = normalized(meant), heard != meant else {
+            throw MeetingStoreError.invalidCorrection
+        }
+        var fixes = read(directory).filter { $0.heard.caseInsensitiveCompare(heard) != .orderedSame }
+        fixes.append(MeetingNotes.SpellingFix(heard: heard, meant: meant, count: 0, kind: .applied))
+        try write(fixes, to: directory)
+    }
+
+    static func remove(heard: String, in directory: URL) throws {
+        try replace(heard: heard, with: nil, in: directory)
+    }
+
+    /// The entry for `heard` replaced by `entry`, or removed when it's nil: how Undo puts back what was there.
+    static func replace(heard: String, with entry: MeetingNotes.SpellingFix?, in directory: URL) throws {
+        var fixes = read(directory).filter { $0.heard.caseInsensitiveCompare(heard) != .orderedSame }
+        if let entry { fixes.append(entry) }
+        try write(fixes, to: directory)
+    }
+
+    /// The entry for `heard`, as kept.
+    static func entry(heard: String, in directory: URL) -> MeetingNotes.SpellingFix? {
+        read(directory).first { $0.heard.caseInsensitiveCompare(heard) == .orderedSame }
+    }
+}
+
+/// notes-history/: earlier versions of notes.json, oldest first, so writing the notes again can be undone.
+public enum MeetingNotesHistory {
+    static let folder = "notes-history"
+    /// Earlier versions kept; the oldest goes first.
+    public static let limit = 5
+
+    /// The kept versions, oldest first.
+    static func files(_ directory: URL) -> [URL] {
+        let url = directory.appendingPathComponent(folder, isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+        return names.filter { $0.hasSuffix(".json") }.sorted().map { url.appendingPathComponent($0) }
+    }
+
+    /// One kept version: its stable id (the file's name) and the notes as written (fixes not applied).
+    public struct Version: Sendable, Equatable {
+        public var id: String
+        public var notes: MeetingNotes
+    }
+
+    /// The kept versions, newest first.
+    public static func read(_ directory: URL) -> [Version] {
+        files(directory).reversed().compactMap { url in
+            (try? JSONDecoder.meeting.decode(MeetingNotes.self, from: Data(contentsOf: url))).map { Version(id: url.lastPathComponent, notes: $0) }
+        }
+    }
+
+    static func url(of id: String, in directory: URL) -> URL? {
+        guard !id.contains("/"), !id.hasPrefix("."), id.hasSuffix(".json") else { return nil }
+        let url = directory.appendingPathComponent(folder, isDirectory: true).appendingPathComponent(id)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Before new notes replace notes.json: the current ones join the history. Throws when they can't be kept, so
+    /// nothing replaces notes that weren't saved.
+    static func keep(_ directory: URL) throws {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(MeetingNotesFile.notesFile)) else { return }
+        let url = directory.appendingPathComponent(folder, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        // Sortable by name: milliseconds, zero-padded, then a counter for two writes in the same millisecond.
+        let stamp = String(format: "%015.0f", Date().timeIntervalSince1970 * 1000)
+        var name = stamp + ".json", counter = 1
+        while FileManager.default.fileExists(atPath: url.appendingPathComponent(name).path) { name = "\(stamp)-\(counter).json"; counter += 1 }
+        try data.write(to: url.appendingPathComponent(name), options: .atomic)
+    }
+
+    /// After new notes are saved: the oldest versions beyond `limit` go.
+    static func prune(_ directory: URL) {
+        for old in files(directory).dropLast(limit) { try? FileManager.default.removeItem(at: old) }
+    }
+
+    static func delete(_ directory: URL) throws {
+        let url = directory.appendingPathComponent(folder, isDirectory: true)
+        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+    }
+}
+
 /// notes.json and notes.md in a meeting folder.
 public enum MeetingNotesFile {
     public static let notesFile = "notes.json"
     public static let markdownFile = "notes.md"
 
-    /// The notes as shown: the model's text with the active fixes applied.
+    /// The notes as shown: the model's text with the active fixes, and the person's own corrections, applied.
     public static func read(_ directory: URL) -> MeetingNotes? {
-        stored(directory)?.corrected
+        stored(directory).map { MeetingNotesFixer.apply(allFixes(directory), to: $0) }
+    }
+
+    /// Every spelling change the transcript takes: the notes' active fixes, then the person's corrections, which win
+    /// over a fix of the same words.
+    public static func allFixes(_ directory: URL) -> [MeetingNotes.SpellingFix] {
+        let corrections = MeetingCorrections.read(directory)
+        let notes = (stored(directory)?.fixes ?? []).filter { fix in
+            !corrections.contains { $0.heard.caseInsensitiveCompare(fix.heard) == .orderedSame }
+        }
+        return notes + corrections
     }
 
     /// notes.json as kept: the model's text as written, plus the fixes. Fixes are applied whenever the notes are read,
@@ -254,13 +399,12 @@ public enum MeetingNotesFile {
     /// Called when the transcript is rendered: the notes' fixes go into the turns, and notes.md picks up renamed
     /// voices. Without notes, the turns come back as they were.
     public static func rendered(_ turns: [TranscriptTurn], directory: URL) -> [TranscriptTurn] {
-        guard let notes = stored(directory) else { return turns }
-        try? writeMarkdown(notes, directory: directory)
-        return MeetingNotesFixer.apply(notes.fixes, to: turns)
+        if let notes = stored(directory) { try? writeMarkdown(notes, directory: directory) }
+        return MeetingNotesFixer.apply(allFixes(directory), to: turns)
     }
 
     static func writeMarkdown(_ stored: MeetingNotes, directory: URL) throws {
-        let notes = stored.corrected
+        let notes = MeetingNotesFixer.apply(allFixes(directory), to: stored)
         let session = try? JSONDecoder.meeting.decode(MeetingSessionInfo.self,
                                                       from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.sessionFile)))
         let title = MeetingTitles.display(typed: MeetingMetadata.read(directory).title,
@@ -292,7 +436,7 @@ public enum MeetingNotesFile {
             for item in notes.actionItems {
                 let owner = notes.ownerName(item, names: names).map { "**\($0)**: " } ?? ""
                 let due = item.due.map { " (\(say($0)))" } ?? ""
-                lines.append("- [ ] \(owner)\(say(item.task))\(due)\(time(item.at))")
+                lines.append("- [\(item.done == true ? "x" : " ")] \(owner)\(say(item.task))\(due)\(time(item.at))")
             }
             lines.append("")
         }
