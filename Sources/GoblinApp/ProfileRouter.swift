@@ -6,6 +6,8 @@ struct ProfileRoute: Equatable {
     var profile: CleanupProfile
     var bundleIdentifier: String?
     var processID: pid_t?
+    /// The app's own placement chose it, not a guess.
+    var placed = false
     /// Asked once the text lands, only if it lands in this app.
     var question: ProfileQuestion?
 }
@@ -49,10 +51,13 @@ final class ProfileRouter {
         let profiles = profiles
         if let placed = profiles.placedProfile(for: route.bundleIdentifier) {
             route.profile = placed
+            route.placed = true
             route.question = nil
-        } else if route.profile.isEverywhere || !profiles.sortsApps {
+        } else if route.placed || route.profile.isEverywhere || !profiles.sortsApps {
+            // A placement taken away mid-take leaves the app in Everywhere, like any unplaced app's take.
             route.profile = profiles.everywhere
-            if !profiles.sortsApps { route.question = nil }
+            if route.placed || !profiles.sortsApps { route.question = nil }
+            route.placed = false
         } else if let profile = profiles.profile(route.profile.id) {
             route.profile = profile
         } else {
@@ -79,14 +84,14 @@ final class ProfileRouter {
     func route(_ app: NSRunningApplication?) -> Task<ProfileRoute, Never> {
         let profiles = profiles
         let pid = app?.processIdentifier, bundleID = app?.bundleIdentifier
-        func routed(_ profile: CleanupProfile, question: ProfileQuestion? = nil) -> ProfileRoute {
-            ProfileRoute(profile: profile, bundleIdentifier: bundleID, processID: pid, question: question)
+        func routed(_ profile: CleanupProfile, placed: Bool = false, question: ProfileQuestion? = nil) -> ProfileRoute {
+            ProfileRoute(profile: profile, bundleIdentifier: bundleID, processID: pid, placed: placed, question: question)
         }
         guard let app, let bundle = app.bundleIdentifier, app.processIdentifier != getpid() else {
             return Task { ProfileRoute(profile: profiles.everywhere) }
         }
         // A placement is your own choice, password manager or not, so it applies from key-down to the end of the take.
-        if let placed = profiles.placedProfile(for: bundle) { return Task { routed(placed) } }
+        if let placed = profiles.placedProfile(for: bundle) { return Task { routed(placed, placed: true) } }
         // A password manager's name is all a decision model would get, and it isn't sent.
         if AppInsertionQuirks.forBundle(bundle, at: app.bundleURL).credentialManager { return Task { routed(profiles.everywhere) } }
         let name = app.localizedName ?? DictionaryApps.name(bundle)
@@ -98,11 +103,16 @@ final class ProfileRouter {
             return Task { [weak self] in
                 let title = await Task.detached { pid.flatMap(FocusedText.windowTitle(pid:)) }.value
                 guard let self, let title else { return routed(profiles.everywhere) }
+                // Reading the title takes a moment: the title goes out only if tab sorting is still on, to the sorter
+                // chosen now.
+                let now = self.profiles
+                if let placed = now.placedProfile(for: bundle) { return routed(placed, placed: true) }
+                guard now.sortsApps, now.sortsBrowserTabs, let (sorter, key) = self.sorter(now) else { return routed(now.everywhere) }
                 let guess = await self.guess(bundle + "\n" + title, application: name, bundle: bundle, title: title,
-                                             profiles: profiles, sorter: sorter, key: key)
+                                             profiles: now, sorter: sorter, key: key)
                 // Placed by hand, or sorting turned off, while the model thought: that wins.
                 let current = self.profiles
-                if let placed = current.placedProfile(for: bundle) { return routed(placed) }
+                if let placed = current.placedProfile(for: bundle) { return routed(placed, placed: true) }
                 // A tab is never saved or asked about: the next one may be a different kind of page.
                 guard current.sortsApps, current.sortsBrowserTabs, let guess, guess.certainty != .lost,
                       let profile = current.profile(guess.profile) else { return routed(current.everywhere) }
@@ -114,7 +124,7 @@ final class ProfileRouter {
             let guess = await self.guess(bundle, application: name, bundle: bundle, title: nil, profiles: profiles, sorter: sorter, key: key)
             // Placed by hand, or sorting turned off, while the model thought: that wins.
             let current = self.profiles
-            if let placed = current.placedProfile(for: bundle) { return routed(placed) }
+            if let placed = current.placedProfile(for: bundle) { return routed(placed, placed: true) }
             guard current.sortsApps else { return routed(current.everywhere) }
             let choices = current.profiles.map { ProfileQuestion.Choice(id: $0.id, name: $0.name) }
             let ask = !self.asked.contains(bundle)
