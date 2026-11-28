@@ -35,6 +35,18 @@ public struct TranscriptTurn: Codable, Sendable, Identifiable, Hashable {
     public var words: [TranscriptWord]
     /// Seconds of talking in the turn, when it joins lines with pauses between them; nil means `end - start`.
     public var spoken: Double? = nil
+    /// The spelling fixes that changed this turn, as heard and meant, so the page can mark the words it respelled.
+    public var respelled: [Respelling]? = nil
+
+    public struct Respelling: Codable, Sendable, Hashable {
+        public var heard: String
+        public var meant: String
+
+        public init(heard: String, meant: String) {
+            self.heard = heard
+            self.meant = meant
+        }
+    }
 
     public init(id: UUID = UUID(), speaker: String, label: String? = nil, track: MeetingTrack, start: Double, end: Double,
                 text: String, words: [TranscriptWord] = [], spoken: Double? = nil) {

@@ -14,6 +14,8 @@ enum GoblinBrand {
     static let mossText = Color(nsColor: .dynamic(light: 0x2B7D4F, dark: 0x62C78A))
     static let neon = Color(nsColor: NSColor(hex: 0x57E68F))
     static let candle = Color(nsColor: .dynamic(light: 0xB26B0F, dark: 0xF2A93B))
+    /// Candle for small text: a step darker in light mode, so an 11 pt label still reads at 5.8:1 on the plate.
+    static let candleText = Color(nsColor: .dynamic(light: 0x8F5409, dark: 0xF2A93B))
     /// Window background for Settings and History.
     static let caseBackground = Color(nsColor: .dynamic(light: 0xEDECE9, dark: 0x1E1F21))
     static let plate = Color(nsColor: .dynamic(light: 0xFBFAF8, dark: 0x2A2B2E))
@@ -290,7 +292,9 @@ struct VoiceColors {
     /// `speakers` in the order they first spoke; repeats are fine.
     init(_ speakers: [String], you: Set<String> = ["You"]) {
         self.you = you
-        for speaker in speakers where !you.contains(speaker) && !MeetingsController.isUnnamedVoice(speaker) && assigned[speaker] == nil {
+        // Unnamed voices get a colour too, so a room of "Speaker N" reads apart; naming one keeps its colour, since
+        // colours follow the order voices first spoke, not their names.
+        for speaker in speakers where !you.contains(speaker) && assigned[speaker] == nil {
             assigned[speaker] = Self.palette[assigned.count % Self.palette.count]
         }
     }
@@ -298,7 +302,6 @@ struct VoiceColors {
     /// Nil for a voice it wasn't given, such as Them on a call without live names.
     func callAsFunction(_ speaker: String) -> Color? {
         if you.contains(speaker) { return GoblinBrand.mossText }
-        if MeetingsController.isUnnamedVoice(speaker) { return GoblinBrand.candle }
         return assigned[speaker]
     }
 }

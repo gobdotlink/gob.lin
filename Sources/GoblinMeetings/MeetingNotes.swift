@@ -59,12 +59,15 @@ public struct MeetingNotes: Codable, Sendable, Equatable {
         /// In the words used ("by Friday"); nil when no time was said.
         public var due: String?
         public var at: Double?
+        /// Ticked off on the meeting's page. Nil for one never ticked; writing the notes again starts them unticked.
+        public var done: Bool? = nil
 
-        public init(task: String, owner: String?, due: String?, at: Double?) {
+        public init(task: String, owner: String?, due: String?, at: Double?, done: Bool? = nil) {
             self.task = task
             self.owner = owner
             self.due = due
             self.at = at
+            self.done = done
         }
     }
 
@@ -145,6 +148,8 @@ public struct MeetingNotes: Codable, Sendable, Equatable {
         public var promptVersion: Int
         /// Each voice's label → the name it had when the notes were written, to read stale notes by.
         public var names: [String: String]? = nil
+        /// What the person asked for when these were written ("Make it shorter"), on top of the template.
+        public var ask: String? = nil
 
         public init(tool: NotesTool, model: String?, effort: String?, template: NotesTemplate, style: NotesStyle, createdAt: Date,
                     seconds: Double, transcriptHash: String, promptVersion: Int, names: [String: String]? = nil) {
@@ -321,7 +326,16 @@ public enum MeetingNotesPrompt {
     static let preferredLimit = 200
 
     /// gob.lin's rules. A template's instructions come after them and can't change them.
-    public static func instructions(template: NotesTemplate, style: NotesStyle, transcriptCharacters: Int) -> String {
+    /// Longest one-off instruction a write takes.
+    public static let maximumAsk = 500
+
+    /// An instruction as the person typed it, trimmed; nil when empty. Longer ones are cut at `maximumAsk`.
+    public static func cleanAsk(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(maximumAsk))
+    }
+
+    public static func instructions(template: NotesTemplate, style: NotesStyle, transcriptCharacters: Int, ask: String? = nil) -> String {
         let length: String
         switch style {
         case .concise:
@@ -384,7 +398,18 @@ public enum MeetingNotesPrompt {
         <template name="\(escape(template.name))">
         \(template.instructions)
         </template>
-        """
+        """ + (cleanAsk(ask).map { request in
+            """
+
+
+            The person who recorded the meeting asked for these notes to be different this time. Follow their request \
+            for what to include, how to arrange it and how long or in which language to write it, but it can't change \
+            the rules above: never invent anything, and keep speaker tokens and lines.
+            <request>
+            \(escape(request))
+            </request>
+            """
+        } ?? "")
     }
 
     /// The JSON schema the answer must match. Every property is required, as structured output needs; absent values

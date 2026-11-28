@@ -42,9 +42,45 @@ extension MeetingStore {
         try MeetingNotesWriter.suggestFixes(heard, directory: try directory(for: id))
     }
 
+    /// Earlier versions of the notes, newest first.
+    public func earlierNotes(_ id: String) throws -> [MeetingNotes] {
+        MeetingNotesHistory.read(try directory(for: id))
+    }
+
+    /// Back to an earlier version of the notes (0 is the one before these); the current ones are kept in its place.
+    public func restoreNotes(_ id: String, version index: Int) throws {
+        try MeetingNotesWriter.restore(index, directory: try directory(for: id))
+    }
+
+    public func setActionItemDone(_ id: String, item index: Int, done: Bool) throws {
+        try MeetingNotesWriter.setDone(done, item: index, directory: try directory(for: id))
+    }
+
+    /// The person's own fix of a misheard word: every place it was heard takes the new spelling, notes included.
+    public func correctSpelling(_ id: String, heard: String, meant: String) throws {
+        let directory = try directory(for: id)
+        guard !processing.contains(id) else { throw MeetingStoreError.busy(id) }
+        try MeetingCorrections.set(heard: heard, meant: meant, in: directory)
+        try MeetingPostProcessor.render(directory: directory)
+    }
+
+    /// Puts a word the person corrected back as it was heard.
+    public func removeCorrection(_ id: String, heard: String) throws {
+        let directory = try directory(for: id)
+        guard !processing.contains(id) else { throw MeetingStoreError.busy(id) }
+        try MeetingCorrections.remove(heard: heard, in: directory)
+        try MeetingPostProcessor.render(directory: directory)
+    }
+
+    /// The person's corrections, as kept.
+    public func corrections(_ id: String) throws -> [MeetingNotes.SpellingFix] {
+        MeetingCorrections.read(try directory(for: id))
+    }
+
     public func deleteNotes(_ id: String) throws {
         let directory = try directory(for: id)
         try MeetingNotesFile.delete(in: directory)
+        MeetingNotesHistory.delete(directory)
         if FileManager.default.fileExists(atPath: directory.appendingPathComponent(MeetingStorage.transcriptFile).path) {
             try MeetingPostProcessor.render(directory: directory)
         }

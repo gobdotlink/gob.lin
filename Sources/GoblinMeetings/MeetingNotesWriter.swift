@@ -9,13 +9,17 @@ public struct NotesSettings: Codable, Sendable, Equatable {
     public var effort: String?
     public var template: NotesTemplate
     public var style: NotesStyle
+    /// A one-off instruction for this write only ("Make it shorter"), followed on top of the template.
+    public var ask: String? = nil
 
-    public init(tool: NotesTool, model: String? = nil, effort: String? = nil, template: NotesTemplate = .auto, style: NotesStyle = .concise) {
+    public init(tool: NotesTool, model: String? = nil, effort: String? = nil, template: NotesTemplate = .auto, style: NotesStyle = .concise,
+                ask: String? = nil) {
         self.tool = tool
         self.model = model
         self.effort = effort
         self.template = template
         self.style = style
+        self.ask = ask
     }
 }
 
@@ -81,9 +85,10 @@ public enum MeetingNotesWriter {
     @discardableResult
     public static func commit(_ draft: MeetingNotes, directory: URL) throws -> MeetingNotes {
         let notes = withSavedDecisions(draft, directory: directory)
+        MeetingNotesHistory.keep(directory)
         try MeetingNotesFile.write(notes, to: directory)
         try MeetingPostProcessor.render(directory: directory)
-        return notes.corrected
+        return MeetingNotesFixer.apply(MeetingNotesFile.allFixes(directory), to: notes)
     }
 
     /// A draft with the meeting's saved spelling decisions carried in (a word put back stays put back), for showing
@@ -104,10 +109,11 @@ public enum MeetingNotesWriter {
         log("writing notes with \(settings.tool.title) \(settings.model ?? "default") \(settings.effort ?? "") (\(request.input.characters) characters)")
         let answer = try await runner(request.model)
         let seconds = Date().timeIntervalSince(started)
-        let provenance = MeetingNotes.Provenance(tool: settings.tool, model: settings.model, effort: settings.effort,
+        var provenance = MeetingNotes.Provenance(tool: settings.tool, model: settings.model, effort: settings.effort,
                                                  template: settings.template, style: settings.style, createdAt: Date(), seconds: seconds,
                                                  transcriptHash: request.sourceHash, promptVersion: MeetingNotesPrompt.version,
                                                  names: request.names)
+        provenance.ask = settings.ask
         let notes = try MeetingNotesPrompt.notes(from: answer, input: request.input, known: request.known, provenance: provenance)
         log("notes in \(Int(seconds)) s: \(notes.decisions.count) decisions, \(notes.actionItems.count) action items, "
             + "\(notes.sections.count) sections, \(notes.fixes.filter(\.isActive).count) fixes, \(notes.fixes.filter { $0.kind == .suggested }.count) suggestions")
@@ -151,7 +157,7 @@ public enum MeetingNotesWriter {
             return turn
         }
         // The current fixes, as the transcript shows them; turns join only within one voice.
-        let turns = MeetingPostProcessor.merge(MeetingNotesFixer.apply(MeetingNotesFile.read(directory)?.fixes ?? [], to: named),
+        let turns = MeetingPostProcessor.merge(MeetingNotesFixer.apply(MeetingNotesFile.allFixes(directory), to: named),
                                                by: { $0.label ?? $0.speaker })
         let session = try? JSONDecoder.meeting.decode(MeetingSessionInfo.self,
                                                       from: Data(contentsOf: directory.appendingPathComponent(MeetingStorage.sessionFile)))
@@ -166,7 +172,7 @@ public enum MeetingNotesWriter {
         let known = MeetingNotesPrompt.knownNames(vocabulary: vocabulary, participants: participants,
                                                   speakers: turns.map(\.speaker).filter { !MeetingTimeline.isUnnamed($0) }, title: title)
         let instructions = MeetingNotesPrompt.instructions(template: settings.template, style: settings.style,
-                                                           transcriptCharacters: input.characters)
+                                                           transcriptCharacters: input.characters, ask: settings.ask)
         return Prepared(model: NotesModelRequest(instructions: instructions, input: input.text, model: settings.model, effort: settings.effort),
                         input: input, known: known, sourceHash: sourceHash,
                         names: Dictionary(named.map { ($0.label ?? $0.speaker, $0.speaker) }, uniquingKeysWith: { first, _ in first }))
@@ -188,6 +194,25 @@ public enum MeetingNotesWriter {
     }
 
     // MARK: Person's changes
+
+    /// Swaps the notes for an earlier version, `index` 0 being the newest: the current notes take its place in the
+    /// history, so going back can itself be undone. Spelling decisions made since stay made.
+    @discardableResult
+    public static func restore(_ index: Int, directory: URL) throws -> MeetingNotes {
+        let files = MeetingNotesHistory.files(directory)
+        guard index >= 0, index < files.count else { throw MeetingStoreError.noEarlierNotes }
+        let url = files[files.count - 1 - index]
+        let earlier = try JSONDecoder.meeting.decode(MeetingNotes.self, from: Data(contentsOf: url))
+        try FileManager.default.removeItem(at: url)
+        return try commit(earlier, directory: directory)
+    }
+
+    /// Ticks an action item off, or back on.
+    public static func setDone(_ done: Bool, item index: Int, directory: URL) throws {
+        guard var notes = MeetingNotesFile.stored(directory), notes.actionItems.indices.contains(index) else { return }
+        notes.actionItems[index].done = done ? true : nil
+        try MeetingNotesFile.write(notes, to: directory)
+    }
 
     /// Puts a fix's heard word back, or turns a suggestion down.
     public static func dismissFix(_ heard: String, directory: URL) throws {

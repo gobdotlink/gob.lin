@@ -99,10 +99,10 @@ struct MeetingRecordingSettingsView: View {
         .disabled(!meetings.enabled)
         Section {
             LabeledContent {
-                EmptyView()
+                Button("Record Conversation") { meetings.startConversation() }.disabled(!meetings.canStart)
             } label: {
                 Text("Record a conversation")
-                Text("For people in the room with you: Record Conversation in the menu bar uses only your mic.").rowDetail()
+                Text("For people in the room with you. It uses only your mic, and it's in the menu bar too.").rowDetail()
                 Text("I split the voices afterwards and call them Speaker 1, Speaker 2 and so on, until you name them.")
             }
         } header: { CapsHeader("In the room") }
