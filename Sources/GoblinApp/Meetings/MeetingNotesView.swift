@@ -17,7 +17,7 @@ struct MeetingNotesSection: View {
     /// typed-notes.md: what the person typed in the Sidekick.
     var typedNotes: String? = nil
     /// Earlier versions, newest first, to go back to.
-    var earlier: [MeetingNotes] = []
+    var earlier: [MeetingNotesHistory.Version] = []
     /// Shown names that need a name: written as links that ask who they are.
     var unnamed: Set<String> = []
     @ObservedObject var model: MeetingNotesModel
@@ -26,7 +26,7 @@ struct MeetingNotesSection: View {
     /// A time in the notes: play from it and show it in the transcript.
     var onMoment: (Double) -> Void = { _ in }
     var onDone: (Int, Bool) -> Void = { _, _ in }
-    var onRestore: (Int) -> Void = { _ in }
+    var onRestore: (String) -> Void = { _ in }
     var onWrite: () -> Void = {}
 
     private var writing: Bool { model.writing.contains(meeting.id) }
@@ -243,8 +243,8 @@ struct MeetingNotesSection: View {
             Spacer(minLength: 8)
             if !earlier.isEmpty {
                 Menu(earlier.count == 1 ? "1 earlier version" : "\(earlier.count) earlier versions") {
-                    ForEach(Array(earlier.enumerated()), id: \.offset) { index, version in
-                        Button("Go Back to \(MeetingNotesSection.versionName(version.written))") { onRestore(index) }
+                    ForEach(earlier, id: \.id) { version in
+                        Button("Go Back to \(MeetingNotesSection.versionName(version.notes.written))") { onRestore(version.id) }
                     }
                 }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.visible).fixedSize()
@@ -276,6 +276,8 @@ struct MeetingNotesSection: View {
     /// The text with each voice that needs a name made a moss link that asks who they are; links carry their own underline.
     private func linked(_ text: String) -> AttributedString {
         var result = AttributedString(text)
+        // Stale notes keep the numbers voices had then; a link would name whoever has that number now.
+        guard !stale else { return result }
         for name in unnamed {
             guard let url = URL(string: "\(Self.voiceScheme)://\(name.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? name)") else { continue }
             var start = result.startIndex

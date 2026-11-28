@@ -185,7 +185,7 @@ struct SettingsCapture {
                     let meetingsSize = NSSize(width: 1180, height: 860)
                     for (name, id, transcript) in [("meetings", sampleMeetings.weekly, false), ("meetings-transcript", sampleMeetings.weekly, true),
                                                    ("meetings-in-person", sampleMeetings.inPerson, true), ("meetings-stopped", sampleMeetings.stopped, false)] {
-                        for dark in [false, true] where name == "meetings" || name == "meetings-transcript" || !dark {
+                        for dark in [false, true] {
                             defaults.set(transcript, forKey: MeetingsView.showsTranscriptKey)
                             model.settingsSelection = .meetings
                             model.meetings.focusedMeetingID = id
@@ -758,11 +758,11 @@ private enum SampleMeetings {
             ("Speaker 2", 0.62, "All good."),
             ("Speaker 1", 4.03, "Export first. Is it still on for this sprint?"),
             ("You", 4.15, "It's close. The CSV path works, but the PDF one still drops page breaks."),
-            ("Speaker 2", 4.4, "I'd ship CSV on its own and move PDF to next sprint."),
+            ("Speaker 2", 4.4, "I'd ship CSV on its own, Pria, and move PDF to next sprint."),
             ("Speaker 3", 4.52, "I can pick up the page-break fix. I'm next to Sam today, same laptop."),
             ("Speaker 1", 7.3, "Good. Then the release notes say CSV now, PDF in two weeks, and nobody is surprised."),
             ("Speaker 2", 9.1, "I'll write the changelog entry and link the tracking issue so support can point people at it."),
-            ("Speaker 1", 11.67, "Great, let's do that. Sam, how's the API timeline looking?"),
+            ("Speaker 1", 11.67, "Great, let's do that. Sam Okafur, how's the API timeline looking?"),
             ("Speaker 2", 11.8, "Fine, as long as we freeze the schema by Thursday."),
             ("You", 12.07, "Thursday works. I'll send the field list tonight."),
             ("Speaker 2", 15.4, "The one open question is pagination. Cursor or page numbers, I don't mind, but we pick one."),

@@ -75,10 +75,12 @@ struct MeetingPlayerStrip: View {
             }
             .frame(width: width, height: stripHeight, alignment: .topLeading)
             .contentShape(Rectangle())
-            // Clicking plays from that moment, on the track of whoever was talking there.
+            // Clicking plays from that moment: on the clicked lane's own track when it was talking there, else both.
             .gesture(SpatialTapGesture().onEnded { tap in
                 let seconds = max(0, min(length, Double(tap.location.x / max(width, 1)) * length))
-                let stretch = lanes.flatMap(\.stretches).first { $0.start <= seconds && seconds <= $0.end }
+                let row = Int(((tap.location.y - 4) / (Self.laneHeight + Self.laneGap)).rounded(.down))
+                let lane = lanes.indices.contains(row) ? lanes[row] : nil
+                let stretch = lane?.stretches.first { $0.start <= seconds && seconds <= $0.end }
                 player.play(seconds...(stretch?.end ?? seconds + 30), track: stretch?.track)
             })
         }

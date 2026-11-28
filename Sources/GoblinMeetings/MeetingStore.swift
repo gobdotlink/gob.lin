@@ -210,7 +210,11 @@ public actor MeetingStore {
     /// The notes alone as Markdown, with what was typed during the call; nil without notes.
     public func notesMarkdown(_ id: String) throws -> String? {
         let directory = try directory(for: id)
-        guard let notes = MeetingNotesFile.read(directory) else { return nil }
+        guard let notes = MeetingNotesFile.read(directory) else {
+            // Only what was typed during the call: that's the notes there are, as Copy All has them.
+            guard let typed = MeetingTypedNotes.read(from: directory)?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty else { return nil }
+            return "## Your notes\n\n" + typed + "\n"
+        }
         return MeetingNotesFile.markdown(notes, title: try detail(id).summary.title, names: MeetingNotesFile.names(for: notes, directory: directory),
                                          typedNotes: MeetingTypedNotes.read(from: directory))
     }
@@ -313,7 +317,8 @@ public actor MeetingStore {
         let directory = try directory(for: id)
         guard var voices = MeetingVoices.read(directory) else { return }
         let names = MeetingPostProcessor.speakerNames(directory)
-        let guessed = voices.matches.filter { label, match in match.named && names[label] == name }.map(\.key)
+        // Only the guesses of this very name: a voice merged in under another guess keeps its own.
+        let guessed = voices.matches.filter { label, match in match.named && match.name == name && names[label] == name }.map(\.key)
         guard !guessed.isEmpty else { return }
         for label in guessed { voices.matches[label] = nil }
         try voices.write(directory)

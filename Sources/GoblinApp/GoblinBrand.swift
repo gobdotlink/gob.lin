@@ -294,7 +294,8 @@ struct VoiceColors {
         self.you = you
         // Unnamed voices get a colour too, so a room of "Speaker N" reads apart; naming one keeps its colour, since
         // colours follow the order voices first spoke, not their names.
-        for speaker in speakers where !you.contains(speaker) && assigned[speaker] == nil {
+        // You take a slot too, though you're drawn in moss, so naming a room voice You leaves everyone else's colour.
+        for speaker in speakers where assigned[speaker] == nil {
             assigned[speaker] = Self.palette[assigned.count % Self.palette.count]
         }
     }

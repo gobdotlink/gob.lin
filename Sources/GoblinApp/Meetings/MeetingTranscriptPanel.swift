@@ -17,6 +17,8 @@ struct MeetingTranscriptPanel: View {
     let unnamed: Set<String>
     /// Shown names that mean this Mac's person.
     let you: Set<String>
+    /// Processing is done: no lines means nobody said anything, not that they're still coming.
+    var finished = false
     @ObservedObject var player: MeetingPlayer
     /// How many lines and how long the audio is kept.
     let summary: String?
@@ -31,6 +33,7 @@ struct MeetingTranscriptPanel: View {
 
     @State private var search = ""
     @State private var correcting: UUID?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum Row: Identifiable {
         case turn(TranscriptTurn, showsName: Bool, showsTime: Bool)
@@ -75,13 +78,16 @@ struct MeetingTranscriptPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Once per redraw: playback redraws the panel, and the rows only change with the lines, marks and search.
+        let rows = self.rows
+        return VStack(spacing: 0) {
             header
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if turns.isEmpty {
-                            Text("The transcript comes once I've sorted out who said what.").font(.status).foregroundStyle(.secondary)
+                            Text(finished ? "Nobody said anything I could make out." : "The transcript comes once I've sorted out who said what.")
+                                .font(.status).foregroundStyle(.secondary)
                                 .padding(12)
                         } else if rows.isEmpty {
                             Text("No lines with “\(search)”.").font(.status).foregroundStyle(.secondary).padding(12)
@@ -98,11 +104,14 @@ struct MeetingTranscriptPanel: View {
                 .scrollEdgeEffectStyle(.hard, for: .top)
                 .onChange(of: focus, initial: true) { _, moment in
                     guard let moment else { return }
-                    // The line that was being said at that moment, or the next one.
-                    if let row = rows.last(where: { $0.start <= moment + 0.5 }) ?? rows.first {
-                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(row.id, anchor: .center) }
-                    }
                     focus = nil
+                    // The line being said at that moment, found in the whole transcript; a search that would hide it is
+                    // cleared first, and the scroll waits for the row to be there.
+                    guard let turn = turns.last(where: { $0.start <= moment + 0.01 }) ?? turns.first else { return }
+                    if !search.isEmpty { search = "" }
+                    DispatchQueue.main.async {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(turn.id.uuidString, anchor: .center) }
+                    }
                 }
             }
         }
@@ -133,11 +142,9 @@ struct MeetingTranscriptPanel: View {
         let playing = player.playing && player.time >= turn.start - 0.1 && player.time <= turn.end + 0.1
         let unnamedVoice = unnamed.contains(turn.speaker)
         let respelled = turn.respelled ?? []
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(showsTime ? MeetingTimeline.clock(turn.start) : "").font(.meta).foregroundStyle(.secondary).monospacedDigit()
-                .frame(width: 38, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                if showsName {
+        return VStack(alignment: .leading, spacing: 2) {
+            if showsName {
+                Group {
                     if unnamedVoice {
                         Button { onName(turn.speaker) } label: { speakerName(turn.speaker, unnamed: true) }
                             .buttonStyle(.plain)
@@ -147,18 +154,30 @@ struct MeetingTranscriptPanel: View {
                         speakerName(turn.speaker, unnamed: false)
                     }
                 }
-                Text(Self.marked(turn.text, respelled: respelled)).font(.row).lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                .padding(.leading, 46)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The line itself is a button: a click, Space or VoiceOver plays exactly this line.
+            Button { if player.hasAudio { player.play(turn.start...turn.end, track: turn.track) } } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(showsTime ? MeetingTimeline.clock(turn.start) : "").font(.meta).foregroundStyle(.secondary).monospacedDigit()
+                        .frame(width: 38, alignment: .leading)
+                    Text(Self.marked(turn.text, respelled: respelled)).font(.row).lineSpacing(2).foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(turn.speaker) at \(MeetingTimeline.clock(turn.start)): \(turn.text)")
+            .accessibilityHint(player.hasAudio ? "Plays this line" : "")
+            .accessibilityAction(named: "Correct Spelling") { correcting = turn.id }
         }
         .padding(.horizontal, 6).padding(.vertical, showsName ? 6 : 3)
         .background(playing ? AnyShapeStyle(GoblinBrand.selection) : AnyShapeStyle(.clear), in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
-        .contentShape(Rectangle())
-        .onTapGesture { if player.hasAudio { player.play(turn.start...turn.end, track: turn.track) } }
         .help(respelled.isEmpty ? "" : respelled.map { "I respelled “\($0.heard)” as \($0.meant)." }.joined(separator: " "))
         .contextMenu {
             if player.hasAudio { Button("Play From Here") { player.play(turn.start...(turn.start + 3_600), track: turn.track) } }
+            if unnamedVoice { Button("Who's This?…") { onName(turn.speaker) } }
             Button("Correct Spelling…") { correcting = turn.id }
             if !respelled.isEmpty {
                 Section("Respelled") {
@@ -174,10 +193,6 @@ struct MeetingTranscriptPanel: View {
         .popover(isPresented: Binding(get: { correcting == turn.id }, set: { if !$0 { correcting = nil } }), arrowEdge: .leading) {
             CorrectSpellingView(turn: turn, turns: turns, onCorrect: onCorrect) { correcting = nil }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(turn.speaker) at \(MeetingTimeline.clock(turn.start)): \(turn.text)")
-        .accessibilityHint(player.hasAudio ? "Plays this line" : "")
-        .accessibilityAction(named: "Correct Spelling") { correcting = turn.id }
     }
 
     private func speakerName(_ name: String, unnamed: Bool) -> some View {
@@ -186,16 +201,19 @@ struct MeetingTranscriptPanel: View {
     }
 
     private func markRow(_ mark: MeetingMark) -> some View {
-        HStack(spacing: 8) {
-            Text(MeetingTimeline.clock(mark.t)).font(.meta).monospacedDigit().frame(width: 38, alignment: .leading)
-            Label(mark.label ?? "Marked", systemImage: "flag.fill").font(.status.weight(.medium))
+        Button { player.seek(mark.t) } label: {
+            HStack(spacing: 8) {
+                Text(MeetingTimeline.clock(mark.t)).font(.meta).monospacedDigit().frame(width: 38, alignment: .leading)
+                Label(mark.label ?? "Marked", systemImage: "flag.fill").font(.status.weight(.medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(GoblinBrand.candleText)
+            .padding(.horizontal, 6).padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
-        .foregroundStyle(GoblinBrand.candleText)
-        .padding(.horizontal, 6).padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture { player.seek(mark.t) }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
         .accessibilityLabel("Mark at \(MeetingTimeline.clock(mark.t)): \(mark.label ?? "no label")")
+        .accessibilityHint("Moves the playhead here")
     }
 
     /// The words, with each respelled one given a dotted underline.
@@ -233,9 +251,20 @@ struct CorrectSpellingView: View {
     private var cleanMeant: String? { MeetingCorrections.normalized(meant) }
     /// Lines the correction would change, across the whole meeting.
     private var lines: Int {
+        guard let cleanHeard, let cleanMeant else { return 0 }
+        return Self.changedLines(heard: cleanHeard, meant: cleanMeant, in: turns)
+    }
+    private var heardLines: Int {
         guard let cleanHeard else { return 0 }
         let regex = MeetingNotesFixer.pattern(for: cleanHeard)
         return turns.filter { regex.firstMatch(in: $0.text, range: NSRange($0.text.startIndex..., in: $0.text)) != nil }.count
+    }
+
+    /// Lines a correction really changes, by the same rules the transcript is respelled with: a line that already has
+    /// the right spelling doesn't count.
+    static func changedLines(heard: String, meant: String, in turns: [TranscriptTurn]) -> Int {
+        let fix = MeetingNotes.SpellingFix(heard: heard, meant: meant, count: 0, kind: .applied)
+        return zip(turns, MeetingNotesFixer.apply([fix], to: turns)).filter { $0.text != $1.text }.count
     }
     private var canSave: Bool { cleanHeard != nil && cleanMeant != nil && cleanHeard != cleanMeant && lines > 0 && !saving }
 
@@ -256,7 +285,9 @@ struct CorrectSpellingView: View {
                 }
             }
             Text(cleanHeard == nil ? "Type the word as it appears in the line."
-                 : lines == 0 ? "“\(cleanHeard ?? "")” isn't in this meeting's transcript."
+                 : heardLines == 0 ? "“\(cleanHeard ?? "")” isn't in this meeting's transcript."
+                 : cleanMeant == nil ? "Now type how it should be spelled."
+                 : lines == 0 ? "Every line already spells it that way."
                  : lines == 1 ? "Changes 1 line." : "Changes \(lines) lines, everywhere it was heard.")
                 .font(.meta).foregroundStyle(.secondary)
             Toggle("Add to the Dictionary, so dictation and later meetings spell it right", isOn: $addToDictionary)

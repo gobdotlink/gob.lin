@@ -115,6 +115,8 @@ struct WhoIsThisView: View {
             if renaming || choices.isEmpty { fieldFocused = true }
         }
         .onChange(of: lane.id) { _, _ in
+            // On to the next voice: the last one's clip stops, so it isn't heard over this one.
+            player.stop()
             typed = renaming ? lane.name : ""
             sharedLaptop = false
         }

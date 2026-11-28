@@ -19,6 +19,8 @@ struct MeetingsView: View {
     @State private var revision = 0
     @State private var copied = false
     @State private var deleting: Deletion?
+    /// Why the last delete didn't go through, until it's dismissed.
+    @State private var editFailure: String?
     /// The transcript beside the selected meeting, remembered like an inspector.
     @AppStorage(MeetingsView.showsTranscriptKey) private var showsTranscript = false
     static let showsTranscriptKey = "meetings.showsTranscript"
@@ -68,14 +70,15 @@ struct MeetingsView: View {
                             .help(showsTranscript ? "Hide Transcript (⌥⌘T)" : "Show Transcript (⌥⌘T)")
                         Menu(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
                             Button("Copy Notes") { copy(meeting, .notes) }
-                            Button("Copy Transcript") { copy(meeting, .transcript) }
+                            Button("Copy Transcript") { copy(meeting, .transcript) }.disabled(meeting.speakers.isEmpty)
                             Button("Copy All as Markdown") { copy(meeting, .all) }
                         }
                         .menuIndicator(.hidden)
                         .disabled(meeting.state != .ready && meeting.state != .failed)
                         .help("Copy the notes, the transcript, or both as Markdown")
                         Menu("Delete", systemImage: "trash") {
-                            Button("Delete Notes…") { deleting = .notes(meeting) }
+                            // A rewrite still running would write the notes again once it lands.
+                            Button("Delete Notes…") { deleting = .notes(meeting) }.disabled(meetings.notes.writing.contains(meeting.id))
                             Button("Delete Audio Only…") { deleting = .audio(meeting) }.disabled(!meeting.hasAudio)
                             Button("Delete Meeting…", role: .destructive) { deleting = .meeting(meeting) }
                         }
@@ -103,11 +106,19 @@ struct MeetingsView: View {
             .onChange(of: list.map(\.id)) { _, ids in
                 if selectedID.map({ ids.contains($0) }) != true { selectedID = shown.first?.id }
             }
+            .alert("I couldn't delete that", isPresented: Binding(get: { editFailure != nil }, set: { if !$0 { editFailure = nil } })) {
+                Button("OK") { editFailure = nil }
+            } message: {
+                Text(editFailure ?? "")
+            }
             .alert(deletionTitle, isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { deletion in
                 switch deletion {
                 case .audio(let meeting): Button("Delete Audio", role: .destructive) { edit { try await store.deleteAudio(meeting.id) } }
                 case .meeting(let meeting): Button("Delete Meeting", role: .destructive) { edit { try await store.delete(meeting.id) } }
-                case .notes(let meeting): Button("Delete Notes", role: .destructive) { edit { try await meetings.notes.deleteNotes(meeting.id) } }
+                case .notes(let meeting): Button("Delete Notes", role: .destructive) {
+                    guard !meetings.notes.writing.contains(meeting.id) else { deleting = nil; return }
+                    edit { try await meetings.notes.deleteNotes(meeting.id) }
+                }
                 }
                 Button("Cancel", role: .cancel) { deleting = nil }
             } message: { deletion in
@@ -281,18 +292,20 @@ struct MeetingsView: View {
     /// Says what happened: added, already there, or why it couldn't be.
     private func addToDictionary(_ spellings: [String]) -> String? {
         let dictionary = model.dictionary
-        var added: [String] = [], known: [String] = []
+        var added: [String] = [], known: [String] = [], refused: [String] = []
+        var reason: String?
         for spelling in spellings {
             guard let clean = MeetingCorrections.normalized(spelling) else { continue }
             if dictionary.entries.contains(where: { $0.spelling.caseInsensitiveCompare(clean) == .orderedSame }) { known.append(clean); continue }
-            guard dictionary.put(DictionaryEntry(spelling: clean)) else { return dictionary.error ?? "I couldn't add that to the Dictionary." }
-            added.append(clean)
+            // One that clashes with another entry doesn't stop the rest.
+            if dictionary.put(DictionaryEntry(spelling: clean)) { added.append(clean) } else { refused.append(clean); reason = dictionary.error }
         }
         let joined = { (names: [String]) in ListFormatter.localizedString(byJoining: names) }
-        if !added.isEmpty, !known.isEmpty { return "Added \(joined(added)) to the Dictionary; \(joined(known)) was already there." }
-        if !added.isEmpty { return "Added \(joined(added)) to the Dictionary." }
-        if !known.isEmpty { return "\(joined(known)) \(known.count == 1 ? "is" : "are") already in the Dictionary." }
-        return nil
+        var sentences: [String] = []
+        if !added.isEmpty { sentences.append("Added \(joined(added)) to the Dictionary.") }
+        if !known.isEmpty { sentences.append("\(joined(known)) \(known.count == 1 ? "was" : "were") already there.") }
+        if !refused.isEmpty { sentences.append("I couldn't add \(joined(refused))" + (reason.map { ": \($0)" } ?? ".")) }
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
     }
 
     private func reload() async {
@@ -306,7 +319,7 @@ struct MeetingsView: View {
     private func edit(_ change: @escaping () async throws -> Void) {
         deleting = nil
         Task {
-            try? await change()
+            do { try await change() } catch { editFailure = error.localizedDescription }
             revision += 1
             meetings.refreshList()
             NotificationCenter.default.post(name: .meetingsEdited, object: nil)

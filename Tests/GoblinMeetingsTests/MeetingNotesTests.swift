@@ -636,18 +636,27 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     #expect(fixed[0].respelled == [TranscriptTurn.Respelling(heard: "Kestral", meant: "Kestrel")])
     // A line the correction didn't touch isn't marked.
     #expect(fixed[2].respelled == nil)
-    // It holds through notes written afterwards, and wins over the model's own fix of the same word.
+    // It holds through notes written afterwards: the model reads the corrected transcript, so its own fix of the
+    // heard word is dropped, and the title the model wrote reads with the correction.
     var answer = try JSONSerialization.jsonObject(with: planningAnswer()) as! [String: Any]
     answer["fixes"] = [["heard": "Kestral", "meant": "Kestril"]]
     let notes = try await store.writeNotes(id, settings: settings, vocabulary: ["Kestril"], runner: runner(try JSONSerialization.data(withJSONObject: answer)))
     #expect(notes.title == "Kestrel Friday release plan")
     #expect(try transcript(directory)[0].text.contains("Kestrel release"))
-    // Put back, the word reads as heard again. The model read the corrected transcript, so its own fix of a word it
-    // couldn't find there was dropped, and nothing respells it.
-    try await store.removeCorrection(id, heard: "Kestral")
-    #expect(try await store.corrections(id).isEmpty)
+    // Put Back reads the word as heard again; the correction stays, turned down, so nothing else respells it.
+    try await store.putBackCorrection(id, heard: "Kestral")
+    #expect(try await store.corrections(id).first?.dismissed == true)
     #expect(try transcript(directory)[0].text.contains("Kestral release"))
     #expect(try transcript(directory)[0].respelled == nil)
+    // Undo of a correction made over an earlier one puts that one back; of a first one, removes it.
+    let previous = try await store.correctSpelling(id, heard: "Kestral", meant: "Kestrel")
+    #expect(previous?.dismissed == true)
+    try await store.restoreCorrection(id, heard: "Kestral", to: nil)
+    #expect(try await store.corrections(id).isEmpty)
+    // Capitals alone can be corrected, and a name keeps its apostrophe.
+    try await store.correctSpelling(id, heard: "priya", meant: "PRIYA")
+    #expect(try transcript(directory).contains { $0.text.contains("with PRIYA before") })
+    #expect(MeetingCorrections.normalized(" ‘O’Connor’ ") == "O’Connor")
     // Nothing on one side, or the same words on both, is refused.
     await #expect(throws: MeetingStoreError.invalidCorrection) { try await store.correctSpelling(id, heard: "Kestral", meant: "  ") }
     await #expect(throws: MeetingStoreError.invalidCorrection) { try await store.correctSpelling(id, heard: "Priya", meant: "Priya") }
@@ -666,16 +675,22 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     let rewritten = try await store.writeNotes(id, settings: shorter, vocabulary: ["Kestrel"],
                                                runner: runner(try JSONSerialization.data(withJSONObject: answer)))
     #expect(rewritten.written.ask == "Make it shorter")
+    let first = try #require(try await store.earlierNotes(id).first)
     #expect(try await store.earlierNotes(id).count == 1)
     // A word put back after the rewrite stays put back when going back to the first notes.
     try await store.dismissFix(id, heard: "Kestral")
-    try await store.restoreNotes(id, version: 0)
+    try await store.restoreNotes(id, version: first.id)
     let restored = try #require(MeetingNotesFile.read(directory))
     #expect(restored.summary.contains("agreed to ship on Friday"))
     #expect(restored.fixes.first?.dismissed == true)
-    // The rewrite took its place, so going back again returns to it.
-    #expect(try await store.earlierNotes(id).first?.written.ask == "Make it shorter")
-    // Only the latest few are kept, and deleting the notes deletes them too.
+    // The rewrite took its place, so going back again returns to it; the restored copy left the history.
+    #expect(try await store.earlierNotes(id).map(\.notes.written.ask) == ["Make it shorter"])
+    // A word asked about again stays asked about when going back: the restore keeps every decision as it is now.
+    try await store.applyFix(id, heard: "Kestral")
+    try await store.suggestFixes(id, heard: ["Kestral"])
+    try await store.restoreNotes(id, version: try #require(try await store.earlierNotes(id).first).id)
+    #expect(MeetingNotesFile.read(directory)?.fixes.first { $0.heard == "Kestral" }?.kind == .suggested)
+    // The number kept is capped, and deleting the notes deletes the kept versions too.
     for _ in 0..<(MeetingNotesHistory.limit + 2) {
         try await store.writeNotes(id, settings: settings, vocabulary: ["Kestrel"], runner: runner(planningAnswer()))
     }
@@ -684,7 +699,7 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     #expect(try await store.earlierNotes(id).isEmpty)
 }
 
-@Test func anAskReachesTheModelAfterTheRulesAndCantCloseItsBlock() async throws {
+@Test func runnerInstructionsIncludeAnEscapedRequestBlockOnlyWhenAsked() async throws {
     let root = try Fixtures.temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let (store, id, _) = try await planningMeeting(in: root)
@@ -706,10 +721,16 @@ private let settings = NotesSettings(tool: .codex, model: "gpt-6.2-sol", effort:
     defer { try? FileManager.default.removeItem(at: root) }
     let (store, id, directory) = try await planningMeeting(in: root)
     try await store.writeNotes(id, settings: settings, vocabulary: [], runner: runner(planningAnswer()))
-    try await store.setActionItemDone(id, item: 0, done: true)
+    let task = try #require(MeetingNotesFile.read(directory)?.actionItems.first?.task)
+    try await store.setActionItemDone(id, item: 0, task: task, done: true)
     #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == true)
     let markdown = try String(contentsOf: directory.appendingPathComponent(MeetingNotesFile.markdownFile), encoding: .utf8)
     #expect(markdown.contains("- [x] **"))
-    try await store.setActionItemDone(id, item: 0, done: false)
+    try await store.setActionItemDone(id, item: 0, task: task, done: false)
     #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == nil)
+    // A tick that names a task the notes no longer have at that place finds it by its text, or changes nothing.
+    try await store.setActionItemDone(id, item: 2, task: task, done: true)
+    #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == true)
+    try await store.setActionItemDone(id, item: 0, task: "Something nobody said", done: false)
+    #expect(MeetingNotesFile.read(directory)?.actionItems.first?.done == true)
 }

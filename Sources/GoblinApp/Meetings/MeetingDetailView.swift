@@ -36,7 +36,11 @@ struct MeetingDetailView: View {
     @State private var failure: String?
     @State private var reloads = 0
     @State private var savedNotes: MeetingNotes?
-    @State private var earlierNotes: [MeetingNotes] = []
+    @State private var earlierNotes: [MeetingNotesHistory.Version] = []
+    /// The last template or ask a write was asked for, so Try Again after a failure asks for the same.
+    @State private var lastRequest: (template: NotesTemplate?, ask: String?)?
+    /// The title when the field got the keyboard: leaving it unchanged saves nothing.
+    @State private var titleAtFocus: String?
     @State private var corrections: [MeetingNotes.SpellingFix] = []
     @State private var notesStale = false
     @State private var title = ""
@@ -66,7 +70,8 @@ struct MeetingDetailView: View {
         var warning: String? = nil
         var action: String? = nil
         var onAction: (() -> Void)? = nil
-        let revert: () -> Void
+        /// Nil for a line that only says what happened.
+        var revert: (() -> Void)?
     }
 
     private var turns: [TranscriptTurn] { detail?.turns ?? [] }
@@ -84,13 +89,16 @@ struct MeetingDetailView: View {
         return GeometryReader { geometry in
             // Beside the page while the notes keep a readable width; on a narrower window it floats over the page's edge.
             let beside = geometry.size.width - MeetingTranscriptPanel.width >= 380
+            // One panel, always in the same place, so resizing across the two layouts keeps its search and scroll.
             HStack(spacing: 0) {
                 document(colors)
-                if showsTranscript, beside { transcriptPanel(colors).transition(.opacity) }
+                if showsTranscript, beside { Color.clear.frame(width: MeetingTranscriptPanel.width) }
             }
             .overlay(alignment: .trailing) {
-                if showsTranscript, !beside {
-                    transcriptPanel(colors).shadow(color: .black.opacity(0.18), radius: 16, x: -4).transition(.opacity)
+                if showsTranscript {
+                    transcriptPanel(colors)
+                        .shadow(color: .black.opacity(beside ? 0 : 0.18), radius: 16, x: -4)
+                        .transition(.opacity)
                 }
             }
         }
@@ -142,7 +150,8 @@ struct MeetingDetailView: View {
 
     private func transcriptPanel(_ colors: VoiceColors) -> some View {
         MeetingTranscriptPanel(turns: turns, marks: detail?.marks ?? [], colors: colors, unnamed: Set(lanes.filter(\.needsName).map(\.name)),
-                               you: you, player: player, summary: transcriptLine, focus: $transcriptFocus,
+                               you: you, finished: detail != nil && meeting.state == .ready,
+                               player: player, summary: transcriptLine, focus: $transcriptFocus,
                                onName: { who($0) }, onCorrect: correct, onPutBack: putBack,
                                onCopy: { try? await store.markdown(meeting.id) }, onClose: { showsTranscript = false })
     }
@@ -165,8 +174,12 @@ struct MeetingDetailView: View {
                 MeetingNotesSection(meeting: meeting, notes: savedNotes, stale: notesStale, names: detail?.speakerNames ?? [:],
                                     typedNotes: detail?.typedNotes, earlier: earlierNotes, unnamed: Set(lanes.filter(\.needsName).map(\.name)),
                                     model: notesModel, player: player,
-                                    onName: { who($0) }, onMoment: showMoment, onDone: tick, onRestore: restoreNotes,
-                                    onWrite: { write(template: nil, ask: nil) })
+                                    onName: { who($0) }, onMoment: { showMoment($0) }, onDone: tick, onRestore: restoreNotes,
+                                    onWrite: {
+                                        // After a failure, Try Again asks for what failed; otherwise it's a plain write.
+                                        let retry = notesModel.failures[meeting.id] != nil ? lastRequest : nil
+                                        write(template: retry?.template ?? nil, ask: retry?.ask ?? nil)
+                                    })
                     .padding(.top, 26)
             }
         }
@@ -178,7 +191,9 @@ struct MeetingDetailView: View {
                 .textFieldStyle(.plain).font(.hero).lineLimit(1...3)
                 .focused($titleFocused)
                 .onSubmit { titleFocused = false }
-                .onChange(of: titleFocused) { _, focused in if !focused { saveTitle() } }
+                .onChange(of: titleFocused) { _, focused in
+                    if focused { titleAtFocus = title } else { saveTitle() }
+                }
                 .accessibilityLabel("Meeting title")
                 .help("Click to rename the meeting")
             Text(subtitle).font(.status).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
@@ -229,7 +244,7 @@ struct MeetingDetailView: View {
                           player: player,
                           onName: { name in named(lane, name) },
                           onSkip: { advance(after: lane.name) },
-                          onShowInTranscript: showMoment,
+                          onShowInTranscript: { showMoment($0, play: false) },
                           onClose: { self.naming = nil })
         }
     }
@@ -310,10 +325,11 @@ struct MeetingDetailView: View {
         notesStale = stale
         earlierNotes = earlier
         corrections = fixes
-        // A meeting that can't get notes opens on its transcript, the one thing to read.
-        if first, notes == nil, meeting.state == .ready, notesModel.settings == nil, !next.turns.isEmpty { showsTranscript = true }
-        // Named meanwhile (learning voices in the background): Who's This? for a voice that's gone would name nothing.
-        if let asking = naming, !lanes.contains(where: { $0.name == asking.lane }) { naming = nil }
+        // A meeting that can't get notes opens on its transcript, the one thing to read, unless the person has chosen.
+        if first, notes == nil, meeting.state == .ready, notesModel.settings == nil, !next.turns.isEmpty,
+           UserDefaults.standard.object(forKey: MeetingsView.showsTranscriptKey) == nil { showsTranscript = true }
+        // Named meanwhile (learning voices in the background): move on to the next voice still waiting, if any.
+        if let asking = naming, !lanes.contains(where: { $0.name == asking.lane }) { advance(after: asking.lane) }
     }
 
     // MARK: Names
@@ -397,11 +413,12 @@ struct MeetingDetailView: View {
             do {
                 let before = try await store.speakerNames(meeting.id)
                 _ = try await edit()
+                // Every save goes on the Edit menu's stack, in the order they were saved; only the latest gets the line.
+                registerUndo(action) { restoreNames(before) }
                 if number == edits {
                     undo = Undo(message: message, warning: warning, action: offer?.0, onAction: offer.map { offer in { offer.1(before) } }) {
                         restoreNames(before)
                     }
-                    registerUndo(action) { restoreNames(before) }
                 }
                 failure = nil
             } catch { failure = error.localizedDescription }
@@ -456,6 +473,8 @@ struct MeetingDetailView: View {
 
     private func saveTitle() {
         let typed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Left as it was: nothing to save, and a title written meanwhile (by the notes) shows.
+        guard typed != titleAtFocus?.trimmingCharacters(in: .whitespacesAndNewlines) else { title = meeting.title; return }
         guard typed != meeting.title else { return }
         Task {
             do { try await store.rename(meeting.id, title: typed) } catch { failure = error.localizedDescription }
@@ -471,16 +490,22 @@ struct MeetingDetailView: View {
         guard var settings = notesModel.settings else { return }
         settings.template = template ?? savedNotes?.written.template ?? notesModel.template
         settings.ask = ask
+        lastRequest = (template, ask)
         let rewriting = savedNotes != nil
         let id = meeting.id
-        notesModel.write(id, override: settings) {
+        notesModel.write(id, override: settings) { wrote in
             reloads += 1
             onEdited()
-            guard rewriting, notesModel.failures[id] == nil else { return }
-            let message = ask.map { "Rewrote the notes: “\($0)”." } ?? "Rewrote the notes with the \(settings.template.name) template."
-            undo = Undo(message: message, action: ask == nil ? nil : "Save as Template…",
-                        onAction: ask.map { asked in { saveTemplate(asked, from: settings.template) } }) { restoreNotes(0) }
-            registerUndo("Rewrite Notes") { restoreNotes(0) }
+            // Only a write that saved notes says so and can be undone: one skipped or cancelled changed nothing.
+            guard wrote, rewriting else { return }
+            Task {
+                // The notes these replaced are now the newest kept version.
+                guard let previous = try? await store.earlierNotes(id).first?.id else { return }
+                let message = ask.map { "Rewrote the notes: “\($0)”." } ?? "Rewrote the notes with the \(settings.template.name) template."
+                undo = Undo(message: message, action: ask == nil ? nil : "Save as Template…",
+                            onAction: ask.map { asked in { saveTemplate(asked, from: settings.template) } }) { restoreNotes(previous) }
+                registerUndo("Rewrite Notes") { restoreNotes(previous) }
+            }
         }
     }
 
@@ -489,48 +514,52 @@ struct MeetingDetailView: View {
         let name = ask.count > 32 ? String(ask.prefix(32)).trimmingCharacters(in: .whitespaces) + "…" : ask
         notesModel.saveTemplate(NotesTemplate(name: name, detail: "From \(meeting.title): “\(ask)”",
                                               instructions: base.instructions + "\n\nAlso: " + ask))
-        undo = Undo(message: "Saved “\(name)” as a template. It's in the template menu now.") { }
+        undo = Undo(message: "Saved “\(name)” as a template. It's in the template menu now.", revert: nil)
     }
 
-    private func restoreNotes(_ index: Int) {
+    private func restoreNotes(_ version: String) {
+        // A rewrite still running would land on top of whatever is restored.
+        guard !notesModel.writing.contains(meeting.id) else { return }
         undo = nil
         Task {
-            do { try await store.restoreNotes(meeting.id, version: index) } catch { failure = error.localizedDescription }
+            do { try await store.restoreNotes(meeting.id, version: version) } catch { failure = error.localizedDescription }
             reloads += 1
             onEdited()
         }
     }
 
     private func tick(_ index: Int, _ done: Bool) {
-        // At once on the page; the save follows.
+        guard let task = savedNotes?.actionItems[index].task else { return }
+        // At once on the page; the save follows, then the notes as saved.
         savedNotes?.actionItems[index].done = done ? true : nil
         Task {
-            do { try await store.setActionItemDone(meeting.id, item: index, done: done) } catch { failure = error.localizedDescription }
+            do { try await store.setActionItemDone(meeting.id, item: index, task: task, done: done) } catch { failure = error.localizedDescription }
+            reloads += 1
         }
     }
 
     /// A time in the notes or a clip: play from it and show it in the transcript.
-    private func showMoment(_ at: Double) {
+    /// Both sides of the call play, so a reply on the other track is heard too.
+    private func showMoment(_ at: Double, play: Bool = true) {
         showsTranscript = true
         transcriptFocus = at
-        if player.hasAudio {
-            let turn = turns.last { $0.start <= at + 0.5 }
-            player.play(max(0, at - 1)...(at + 30), track: turn?.track)
-        }
+        if play, player.hasAudio { player.play(max(0, at - 1)...(at + 30)) }
     }
 
     // MARK: Spelling
 
     private func correct(_ heard: String, _ meant: String, _ toDictionary: Bool) async -> Bool {
-        let lines = turns.filter { MeetingNotesFixer.pattern(for: heard).firstMatch(in: $0.text, range: NSRange($0.text.startIndex..., in: $0.text)) != nil }.count
+        let lines = CorrectSpellingView.changedLines(heard: heard, meant: meant, in: turns)
+        let previous: MeetingNotes.SpellingFix?
         do {
-            try await store.correctSpelling(meeting.id, heard: heard, meant: meant)
+            previous = try await store.correctSpelling(meeting.id, heard: heard, meant: meant)
         } catch {
             failure = error.localizedDescription
             return false
         }
         let dictionary = toDictionary ? addToDictionary([meant]) : nil
-        let revert = { putBack(TranscriptTurn.Respelling(heard: heard, meant: meant)) }
+        // Undo puts back exactly what was there: an earlier correction of the same words, or nothing.
+        let revert = { restoreCorrection(heard, to: previous) }
         undo = Undo(message: "Corrected “\(heard)” to \(meant) in \(lines == 1 ? "1 line" : "\(lines) lines").", warning: dictionary, revert: revert)
         registerUndo("Correct “\(heard)”", revert)
         reloads += 1
@@ -538,23 +567,39 @@ struct MeetingDetailView: View {
         return true
     }
 
-    /// A respelled word back as heard: the person's own correction is removed, the notes' fix is put back.
+    private func restoreCorrection(_ heard: String, to previous: MeetingNotes.SpellingFix?) {
+        undo = nil
+        Task {
+            do { try await store.restoreCorrection(meeting.id, heard: heard, to: previous) } catch { failure = error.localizedDescription }
+            reloads += 1
+            onEdited()
+        }
+    }
+
+    /// A respelled word back as heard: the person's own correction is turned down (so nothing respells it again), the
+    /// notes' fix is put back. Undo, on the page and in the Edit menu, makes it again.
     private func putBack(_ fix: TranscriptTurn.Respelling) {
-        let own = corrections.contains { $0.heard.caseInsensitiveCompare(fix.heard) == .orderedSame }
+        let own = corrections.contains { $0.isActive && $0.heard.caseInsensitiveCompare(fix.heard) == .orderedSame }
         Task {
             do {
-                if own { try await store.removeCorrection(meeting.id, heard: fix.heard) }
+                if own { try await store.putBackCorrection(meeting.id, heard: fix.heard) }
                 else { try await notesModel.dismissFix(meeting.id, heard: fix.heard) }
-            } catch { failure = error.localizedDescription }
-            undo = Undo(message: "Put back “\(fix.heard)” as heard.") {
+            } catch {
+                failure = error.localizedDescription
+                return
+            }
+            let again = {
                 Task {
-                    if own { try? await store.correctSpelling(meeting.id, heard: fix.heard, meant: fix.meant) }
+                    if own { _ = try? await store.correctSpelling(meeting.id, heard: fix.heard, meant: fix.meant) }
                     else { try? await notesModel.applyFix(meeting.id, heard: fix.heard) }
                     undo = nil
                     reloads += 1
                     onEdited()
                 }
+                return
             }
+            undo = Undo(message: "Put back “\(fix.heard)” as heard.", revert: again)
+            registerUndo("Put Back “\(fix.heard)”", again)
             reloads += 1
             onEdited()
         }
